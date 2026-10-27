@@ -1,0 +1,153 @@
+# FortiGate SIEM — private-network deployment.
+# Usage: cp .env.example .env && ./scripts/gen-secrets.sh && ./scripts/gen-selfsigned-cert.sh && docker compose up -d --build
+name: fortisiem
+
+x-backend: &backend
+  build: ./backend
+  image: fortisiem-backend:1.0.0
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB}
+  restart: unless-stopped
+  stop_grace_period: 30s
+  # app runs as uid 10001 on unprivileged ports: no Linux capabilities or privilege escalation needed
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging: &logging
+    driver: json-file
+    options: { max-size: "50m", max-file: "5" }
+  volumes:
+    - ./deploy/certs/fortigate-ca:/certs:ro   # optional CA bundle(s) used to verify FortiGate HTTPS certificates
+    - ./deploy/geoip:/geoip:ro                # optional GeoLite2 / DB-IP .mmdb files (country, city, ASN)
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "2", memory: 2g } } }
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.11.5
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    volumes:
+      - chdata:/var/lib/clickhouse
+      - ./deploy/clickhouse/siem.xml:/etc/clickhouse-server/config.d/siem.xml:ro
+      - ./backups/clickhouse:/backups
+    ulimits: { nofile: { soft: 262144, hard: 262144 } }
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "${CLICKHOUSE_CPUS:-4}", memory: "${CLICKHOUSE_MEMORY:-8g}" } } }
+
+  migrate:
+    <<: *backend
+    command: ["python", "-m", "app.migrate"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { cpus: "2", memory: 1g } } }
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.heartbeat')<120 else 1)"]
+      interval: 30s
+      start_period: 30s
+    deploy: { resources: { limits: { cpus: "2", memory: 1g } } }
+
+  # Owns the syslog port and is never rebuilt by code deploys (its own tiny image). Buffers to disk while the syslog
+  # service below restarts, so deploys lose no logs, and UDP senders keep a valid connection-tracking entry.
+  ingress:
+    build: ./deploy/ingress
+    image: fortisiem-ingress:1.0.0
+    ports:
+      # loopback unless an interface address is set: publish on the management/log interface only, never 0.0.0.0
+      - "${SYSLOG_BIND_IP:-127.0.0.1}:514:5514/udp"
+      - "${SYSLOG_BIND_IP:-127.0.0.1}:514:5514/tcp"
+    volumes: [ingress_spool:/var/spool/rsyslog]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 $$(cat /tmp/rsyslogd.pid)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "1", memory: 1g } } }
+
+  syslog:
+    <<: *backend
+    command: ["python", "-m", "app.syslog_server"]
+    # no published ports: logs arrive from the ingress relay on 5515 (direct 5514 stays available inside the network)
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/syslog.heartbeat')<30 else 1)"]
+      interval: 15s
+      start_period: 20s
+    # receiver + parser processes (SYSLOG_WORKERS, default CPUs-1, max 4): ~3.5k events/s per parser core.
+    # On a bigger VM raise SYSLOG_CPUS to parsers + 1 (e.g. 5 on 8 cores) in .env.
+    deploy: { resources: { limits: { cpus: "${SYSLOG_CPUS:-3}", memory: "${SYSLOG_MEMORY:-2g}" } } }
+
+  web:
+    build: ./frontend
+    image: fortisiem-web:1.0.0
+    ports:
+      - "${WEB_BIND_IP:-127.0.0.1}:443:443"
+      - "${WEB_BIND_IP:-127.0.0.1}:80:80"
+    volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/api/health | grep -q ok"]
+      interval: 15s
+    restart: unless-stopped
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "1", memory: 256m } } }
+
+volumes:
+  pgdata:
+  chdata:
+  ingress_spool:

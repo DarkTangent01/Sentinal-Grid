@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- Design tokens (RGB triplets so Tailwind opacity modifiers work) ----
+   Zomato theme: white/neutral surfaces, #1C1C1C ink, Zomato red (#E23744 brand, #CB202D for text and buttons so
+   small text keeps >= 4.5:1). Night is the same system on charcoal, not an inverted copy. */
+:root {
+  --bg: 18 18 18;
+  --surface: 28 28 28;
+  --surface-2: 23 23 23;
+  --border: 46 46 46;
+  --text: 240 240 240;
+  --text-muted: 163 163 163;   /* 7.4:1 on surface */
+  --accent: 239 79 95;          /* #EF4F5F, 4.9:1 on surface */
+  --ok: 74 222 128;
+  --warn: 251 191 36;
+  --bad: 248 113 113;
+  --sev-critical: 239 68 68;
+  --sev-high: 249 115 22;
+  --sev-medium: 245 158 11;
+  --sev-low: 56 189 248;
+  --sev-info: 163 163 163;
+  --space-card: 0.75rem;
+  --sidebar-w: 13rem;
+  /* chart theme (read by components/Chart.tsx) */
+  --chart-text: 163 163 163;
+  --chart-strong: 240 240 240;
+  --chart-axis: 64 64 64;
+  --chart-split: 38 38 38;
+  --chart-tooltip: 28 28 28;
+  color-scheme: dark;
+}
+
+/* Day theme (default): semantic tokens. Tailwind hue palettes are mirrored in tailwind.config.js. */
+:root.light {
+  --bg: 248 248 248;            /* #F8F8F8 */
+  --surface: 255 255 255;
+  --surface-2: 250 250 250;
+  --border: 232 232 232;        /* #E8E8E8 */
+  --text: 28 28 28;             /* #1C1C1C */
+  --text-muted: 105 105 105;    /* #696969, 5.5:1 on white */
+  --accent: 203 32 45;          /* #CB202D, 5.6:1 on white */
+  --ok: 26 127 52;              /* Zomato green, darkened to 5.2:1 */
+  --warn: 180 83 9;
+  --bad: 203 32 45;
+  --sev-critical: 203 32 45;
+  --sev-high: 234 88 12;
+  --sev-medium: 202 138 4;
+  --sev-low: 2 132 199;
+  --sev-info: 105 105 105;
+  --chart-text: 105 105 105;
+  --chart-strong: 28 28 28;
+  --chart-axis: 214 214 214;
+  --chart-split: 240 240 240;
+  --chart-tooltip: 255 255 255;
+  color-scheme: light;
+}
+
+@layer base {
+  body { @apply bg-bg text-slate-200 antialiased font-sans; font-size: 14px; line-height: 1.45; transition: background-color .15s ease; }
+  ::selection { background: rgb(226 55 68 / 0.22); }
+  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+}
+
+@layer components {
+  /* Cards are grid/flex children: min-w-0 stops wide content (tables, canvases) from stretching the track. */
+  .card { @apply bg-panel border border-line rounded-card min-w-0 flex flex-col; }
+  :root.light .card { @apply shadow-card border-[#eeeeee]; }
+  .card-h { @apply px-4 py-2.5 border-b border-line text-[0.9rem] font-semibold text-slate-200 flex flex-wrap items-center justify-between gap-2 min-w-0; }
+  .card-b { @apply p-4 min-w-0 flex-1; }
+  /* items-start: a card keeps its own content height instead of stretching to the tallest card in the row
+     (a long table used to stretch neighbouring chart cards into tall empty panels). */
+  .grid-cards { @apply grid gap-4 min-w-0 items-start; }
+  .grid-cards > * { min-width: 0; }
+  /* KPI rows: responsive column count instead of fixed counts that clip the last card. */
+  .kpi-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); }
+  .btn { @apply inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium border border-line bg-panel hover:bg-slate-800 disabled:opacity-50 whitespace-nowrap transition-colors; }
+  /* Zomato red in both themes; white on #CB202D = 5.6:1 (the lighter #E23744 would fall below 4.5:1 for button text) */
+  .btn-primary { @apply bg-[#cb202d] border-[#cb202d] text-[#ffffff] hover:bg-[#a81a25] hover:border-[#a81a25] shadow-sm; }
+  .btn-danger { @apply bg-red-700/40 border-red-700 text-red-200 hover:bg-red-700/60; }
+  .input { @apply bg-panel border border-line rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 placeholder:text-slate-500 min-w-0 max-w-full transition-shadow; }
+  .label { @apply block text-xs text-muted mb-1; }
+  /* Tables scroll inside their own wrapper; the page never scrolls sideways. */
+  .tbl-wrap { @apply w-full overflow-x-auto; }
+  .tbl { @apply w-full text-sm border-collapse; }
+  .tbl th { @apply text-left text-2xs font-medium text-muted uppercase tracking-wide px-2.5 py-2 border-b border-line whitespace-nowrap align-bottom; }
+  .tbl td { @apply px-2.5 py-1.5 border-b border-line/60 align-top; }
+  .tbl td.num, .tbl th.num { @apply text-right tabular-nums whitespace-nowrap; }
+  .tbl td.nowrap { @apply whitespace-nowrap; }
+  .tbl tbody tr:hover { @apply bg-brand-500/[0.04]; }
+  .tbl tbody tr[tabindex] { @apply cursor-pointer; }
+  /* wrap long tokens only where needed (never break-all, which splits ordinary words mid-character) */
+  .cell-wrap { @apply [overflow-wrap:anywhere]; }
+  .cell-trunc { @apply block truncate; }
+  .link { @apply text-brand-400 hover:underline cursor-pointer bg-transparent p-0 border-0 text-left; }
+  .pill { @apply inline-block rounded-md px-1.5 py-0.5 text-2xs font-medium whitespace-nowrap; }
+  .sev-critical { @apply bg-sev-critical/25 text-red-200 ring-1 ring-sev-critical/40; }
+  .sev-high { @apply bg-sev-high/25 text-orange-200 ring-1 ring-sev-high/40; }
+  .sev-medium { @apply bg-sev-medium/20 text-amber-200 ring-1 ring-sev-medium/40; }
+  .sev-low { @apply bg-sev-low/20 text-sky-200 ring-1 ring-sev-low/40; }
+  .sev-informational { @apply bg-sev-info/20 text-slate-200 ring-1 ring-sev-info/30; }
+}
+html, body, #root { height: 100%; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }

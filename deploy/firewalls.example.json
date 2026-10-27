@@ -1,0 +1,31 @@
+{
+  "_comment": "SAMPLE ONLY - placeholders. Tokens are never stored in this file: each entry names an environment variable that holds the token.",
+  "firewalls": [
+    {
+      "name": "HQ-FW01",
+      "host": "fw-hq01.mgmt.example.internal",
+      "https_port": 443,
+      "fortios_version": "7.4.4",
+      "vdom": "root",
+      "site": "Headquarters",
+      "tags": ["core", "hq"],
+      "poll_interval_seconds": 60,
+      "token_env": "FGT_TOKEN_HQ_FW01",
+      "syslog_source_ips": ["10.0.0.1"],
+      "ca_bundle_path": "/certs/internal-ca.pem",
+      "api_log_pull": false
+    },
+    {
+      "name": "WH-EAST-FW01",
+      "host": "10.20.0.1",
+      "https_port": 8443,
+      "fortios_version": "7.2.8",
+      "vdom": "root",
+      "site": "Warehouse East",
+      "tags": ["warehouse"],
+      "poll_interval_seconds": 120,
+      "token_env": "FGT_TOKEN_WH_EAST_FW01",
+      "syslog_source_ips": ["10.20.0.1"]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+.env
+.venv/
+node_modules/
+frontend/dist/
+backups/
+deploy/certs/*.key
+deploy/certs/*.crt
+__pycache__/
+.pytest_cache/
+*.db
+.dev/
+deploy/geoip/*.mmdb
+
+# never commit key material or local state
+*.pem
+*.p12
+*.pfx
+*.key
+deploy/certs/fortigate-ca/*
+!deploy/certs/fortigate-ca/.gitkeep
+.ruff_cache/
+.DS_Store
+frontend/tsconfig.tsbuildinfo
+.claude/settings.local.json
+*.log
+# internal findings about this deployment (not excluded from the server copy's own docs)
+docs/SECURITY_AUDIT_REPORT.md

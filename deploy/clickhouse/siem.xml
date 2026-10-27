@@ -1,0 +1,11 @@
+<clickhouse>
+    <logger><level>warning</level><console>1</console></logger>
+    <!-- keep the HTTP interface private to the compose network -->
+    <listen_host>0.0.0.0</listen_host>
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <merge_tree>
+        <parts_to_throw_insert>600</parts_to_throw_insert>
+    </merge_tree>
+    <!-- allow BACKUP/RESTORE to File('/backups/...') used by scripts/backup.sh -->
+    <backups><allowed_path>/backups/</allowed_path></backups>
+</clickhouse>
