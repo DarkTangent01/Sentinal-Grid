@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from ..analytics.filters import EventFilter
 from ..analytics.pipeline import run_pipeline, watchlist_names

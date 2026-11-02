@@ -20,7 +20,7 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "msg": redact(record.getMessage()),
         }
-        for key in ("firewall_id", "component", "count", "duration_ms"):
+        for key in ("request_id", "firewall_id", "component", "count", "duration_ms", "status"):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)
         if record.exc_info:
@@ -29,8 +29,10 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO") -> None:
+    from .observability import RequestIdFilter
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(RequestIdFilter())  # API requests: every line carries the request id
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)

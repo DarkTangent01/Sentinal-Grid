@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..config import get_settings
 
-RANGES = {"5m": timedelta(minutes=5), "15m": timedelta(minutes=15), "1h": timedelta(hours=1),
+RANGES = {"5m": timedelta(minutes=5), "15m": timedelta(minutes=15), "1h": timedelta(hours=1), "6h": timedelta(hours=6),
           "24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
 CATEGORIES = ("traffic", "dns", "web", "security", "system")
 ALLOWED = ("accept", "close", "timeout", "reset", "allow", "monitor")

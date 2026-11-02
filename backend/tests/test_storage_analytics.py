@@ -239,7 +239,7 @@ async def test_rollup_backfill_migration():
         ch.insert("events", evs, old_cols)
         ch.command("CREATE TABLE schema_migrations (version UInt32, name String, applied_at DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY version")
         ch.command("INSERT INTO schema_migrations (version, name) VALUES (1,'a'),(2,'b'),(3,'c')")
-        assert run(ch) == [4, 5, 6, 7, 8]
+        assert run(ch) == [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 7  # backfilled exactly once
         ch.insert("events", [normalize(traffic(100), source="syslog", firewall=FW)], EVENT_COLUMNS)
         assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 8  # new inserts flow through the view

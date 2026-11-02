@@ -1,0 +1,57 @@
+# Lint, type-check, test, audit and build on every push and pull request. Uses only GitHub's own actions (pin them to
+# commit SHAs if your policy requires it). Nothing is deployed or pushed from CI.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements*.txt }
+      - run: pip install -r requirements-dev.txt pip-audit
+      - name: lint
+        run: ruff check app tests migrations
+      - name: tests
+        run: python -m pytest -q -m "not live" -p no:cacheprovider
+      - name: dependency audit (installed environment)
+        run: pip-audit -l --progress-spinner off --skip-editable
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.12.0", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci --no-fund
+      - name: type check
+        run: npm run typecheck
+      - name: tests
+        run: npm test
+      - name: production build
+        run: npm run build
+      - name: runtime dependency audit (build-time tooling is reviewed separately, see docs/SECURITY_REVIEW.md)
+        run: npm audit --omit=dev --audit-level=high
+
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose file is valid
+        run: cp .env.example .env && docker compose config -q
+      - name: build images (no push)
+        run: docker compose build --pull

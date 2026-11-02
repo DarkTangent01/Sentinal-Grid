@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app import icmp
 from app.alerts.engine import ensure_default_rules, run_rules
-from app.db.models import Alert, AlertRule, IcmpEvent, IcmpTarget
+from app.db.models import Alert, AlertRule, IcmpEvent, IcmpTarget, WanOutage
 from app.icmp import ProbeResult, evaluate, run_due
 
 from .test_api import api, login  # noqa: F401
@@ -16,7 +16,8 @@ T0 = datetime(2026, 10, 27, 10, 0, tzinfo=timezone.utc)
 
 def target(**kw):
     return IcmpTarget(id=1, name="Airtel WAN", address="203.0.113.10", state="unknown", fail_streak=0, ok_streak=0, probes=3,
-                      timeout_ms=1000, interval_seconds=30, down_after=3, up_after=2, rtt_warn_ms=150, loss_warn_pct=20, **kw)
+                      timeout_ms=1000, interval_seconds=30, down_after=3, up_after=2, rtt_warn_ms=150, loss_warn_pct=20,
+                      degrade_after=1, clear_after=1, poor_streak=0, healthy_streak=0, **kw)
 
 
 def ok(rtt=5.0, received=3):
@@ -71,7 +72,11 @@ async def test_run_due_overview_and_alert(clean_ch, db):
         [("unknown", "up"), ("up", "down"), ("down", "up")]
     o = await icmp.overview(db, clean_ch, now - timedelta(minutes=1), now + timedelta(minutes=10))
     r = o["targets"][0]
-    assert r["outages"] == 1 and 85 <= r["downtime_s"] <= 95 and r["checks"] == 9 and r["loss_pct"] == pytest.approx(100 * 12 / 27, 0.01)
+    # downtime convention (docs/WAN.md): first failed check (+60 s) → first good check of the recovery streak (+180 s)
+    assert r["outages"] == 1 and r["downtime_s"] == 120 and r["checks"] == 9 and r["loss_pct"] == pytest.approx(100 * 12 / 27, 0.01)
+    o_ = (await db.execute(select(WanOutage))).scalars().one()
+    assert (o_.started_at.replace(tzinfo=timezone.utc) - now).total_seconds() == 60 and o_.duration_s == 120
+    assert (o_.detected_at.replace(tzinfo=timezone.utc) - now).total_seconds() == 120 and o_.last_ok_at is not None
     assert r["availability"] < 100 and o["events"][0]["to"] == "up"
 
 

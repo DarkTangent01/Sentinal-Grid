@@ -38,8 +38,10 @@ def inc_out(i: Incident) -> dict:
 @router.get("/incidents")
 async def list_incidents(status: list[str] = Query(default=[]), severity: list[str] = Query(default=[]), assignee: str | None = None,
                          q: str | None = Query(None, max_length=128), page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200),
+                         category: str = Query("security", pattern=r"^(security|wan|all)$"),
                          _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    qy = select(Incident)
+    """category: security cases by default; ISP / WAN incidents live under /api/wan/incidents (category "wan")."""
+    qy = select(Incident) if category == "all" else select(Incident).where(Incident.category == category)
     if status:
         qy = qy.where(Incident.status.in_(status))
     if severity:
@@ -50,14 +52,15 @@ async def list_incidents(status: list[str] = Query(default=[]), severity: list[s
         qy = qy.where(Incident.title.ilike(f"%{q}%") | Incident.entity.ilike(f"%{q}%"))
     total = (await s.execute(select(func.count()).select_from(qy.subquery()))).scalar_one()
     rows = (await s.execute(qy.order_by(Incident.status.in_(OPEN).desc(), Incident.last_seen.desc()).offset((page - 1) * size).limit(size))).scalars()
-    counts = dict((await s.execute(select(Incident.status, func.count()).group_by(Incident.status))).all())
+    cq = select(Incident.status, func.count()).group_by(Incident.status)
+    counts = dict((await s.execute(cq if category == "all" else cq.where(Incident.category == category))).all())
     return {"items": [inc_out(i) for i in rows], "total": total, "status_counts": counts}
 
 
 @router.get("/incidents/stats")
 async def incident_stats(days: int = Query(30, ge=1, le=365), _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    incs = (await s.execute(select(Incident).where(Incident.created_at >= since))).scalars().all()
+    incs = (await s.execute(select(Incident).where(Incident.created_at >= since, Incident.category == "security"))).scalars().all()
     closed = [i for i in incs if i.resolved_at]
 
     def hours(a, b):

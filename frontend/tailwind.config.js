@@ -7,11 +7,11 @@ import twColors from "tailwindcss/colors";
 // red, amber, orange, white) are also variables: the day theme mirrors each scale (shifted one step darker) so classes
 // written for a dark UI (light text, dark hover surfaces) become dark text on light surfaces with the same contrast.
 const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
-const HUES = ["slate", "sky", "emerald", "red", "amber", "orange", "brand"];
+const HUES = ["slate", "sky", "emerald", "red", "amber", "orange", "teal", "brand"];  // teal: Sentinel NMS accent
 // Zomato theme: "brand" is the Zomato red scale (500 = #E23744, 600 = #CB202D); "slate" maps to neutral greys so the
 // UI reads warm-neutral like Zomato's surfaces instead of blue-grey. Class names stay unchanged across components.
 const SCALES = {
-  sky: twColors.sky, emerald: twColors.emerald, red: twColors.red, amber: twColors.amber, orange: twColors.orange,
+  sky: twColors.sky, emerald: twColors.emerald, red: twColors.red, amber: twColors.amber, orange: twColors.orange, teal: twColors.teal,
   slate: twColors.neutral,
   brand: { 50: "#fff0f1", 100: "#ffdfe2", 200: "#ffc2c8", 300: "#ff96a0", 400: "#ef4f5f", 500: "#e23744",
            600: "#cb202d", 700: "#a81a25", 800: "#8b1821", 900: "#741820", 950: "#400a0e" },

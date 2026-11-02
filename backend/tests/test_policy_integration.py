@@ -114,7 +114,7 @@ PW = "correct-horse-battery-staple"
 async def api(db, fw):
     get_settings.cache_clear()
     db.add_all([User(username="admin1", password_hash=hash_password(PW), role="admin"),
-                User(username="analyst1", password_hash=hash_password(PW), role="analyst")])
+                User(username="analyst1", password_hash=hash_password(PW), role="analyst", products=["grid", "nms"])])
     await db.commit()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app()), base_url="http://test") as c:
         yield c

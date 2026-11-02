@@ -22,6 +22,9 @@ export function TimeChart({ data, series, stack, bytes, height = 240, area, load
   stack?: boolean; bytes?: boolean; height?: number; area?: boolean; loading?: boolean;
 }) {
   const { theme } = useTheme();
+  // callers pass `series` inline (a new array each render): key the memo on its content so a parent re-render
+  // doesn't rebuild the option and redraw the chart
+  const seriesKey = JSON.stringify(series);
   const option = useMemo(() => {
     const pts = data?.points || [];
     const b = data?.bucket_seconds || 60;
@@ -51,7 +54,7 @@ export function TimeChart({ data, series, stack, bytes, height = 240, area, load
           data: [[{ name: "not collected", xAxis: first }, { xAxis: startMs }]] } : undefined,
       })),
     };
-  }, [data, series, stack, bytes, area, theme]);
+  }, [data, seriesKey, stack, bytes, area, theme]);
 
   const total = data ? series.reduce((a, s) => a + sumKey(data.points, s.key), 0) : 0;
   if (loading && !data) return <div style={{ height }} className="animate-pulse bg-slate-800/30 rounded" />;

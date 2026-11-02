@@ -30,7 +30,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
               <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M8 12h2l1.5-3 2 6 1.5-3h1" />
             </svg>
           </div>
-          <span className="text-lg font-extrabold tracking-tight">Sentinel Grid</span>
+          <span className="text-lg font-extrabold tracking-tight">Sentinel <span className="font-semibold opacity-80">Grid · NMS</span></span>
         </div>
         <div className="relative space-y-6">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight">Network security,<br />served fresh.</h1>
@@ -47,9 +47,9 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         <ThemeToggle className="absolute top-4 right-4" />
         <form onSubmit={submit} className="card shadow-card p-8 w-full max-w-sm space-y-5">
           <div className="space-y-1">
-            <div className="lg:hidden text-brand-400 font-extrabold tracking-tight text-lg">Sentinel Grid</div>
+            <div className="lg:hidden text-brand-400 font-extrabold tracking-tight text-lg">Sentinel</div>
             <h2 className="text-2xl font-bold text-slate-100">Sign in</h2>
-            <div className="text-sm text-muted">Use your SIEM account. <span className="lg:hidden">Activity is audited.</span></div>
+            <div className="text-sm text-muted">One account for Sentinel Grid and Sentinel NMS. <span className="lg:hidden">Activity is audited.</span></div>
           </div>
           <div><label className="label" htmlFor="login-user">Username</label>
             <input id="login-user" className="input w-full py-2.5" value={u} onChange={(e) => setU(e.target.value)} autoFocus autoComplete="username" /></div>

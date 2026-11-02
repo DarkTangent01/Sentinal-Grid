@@ -85,35 +85,61 @@ class Framer:
 
     def __init__(self):
         self.buf = bytearray()
+        self.skip = 0           # bytes of an oversized octet-counted frame still to discard
+        self.discarding = False  # inside an oversized newline-framed message: drop up to the next newline
+        self.oversized = 0      # frames dropped for exceeding MAX_MSG (the session stays open)
 
     def feed(self, data: bytes) -> list[bytes]:
+        """Never raises on bad input: one device's oversized or odd frame must not close the session, which behind the
+        ingress relay carries every device's logs."""
         b = self.buf
         b += data
         out, i, n = [], 0, len(b)
         while i < n:
-            if 48 <= b[i] <= 57:  # digit: octet-counted frame
-                sp = b.find(b" ", i, i + 8)
-                if sp < 0:
-                    if n - i >= 8:
-                        raise ValueError("bad octet count")
+            if self.skip:
+                take = min(self.skip, n - i)
+                self.skip -= take
+                i += take
+                continue
+            if self.discarding:
+                nl = b.find(b"\n", i)
+                if nl < 0:
+                    i = n
                     break
+                self.discarding = False
+                i = nl + 1
+                continue
+            sp = b.find(b" ", i, i + 8) if 48 <= b[i] <= 57 else -1
+            if sp > i and b[i:sp].isdigit():  # RFC 6587 octet counting: "<len> <msg>"
                 size = int(b[i:sp])
                 if size > MAX_MSG:
-                    raise ValueError("frame too large")
+                    self.oversized += 1
+                    log.warning("tcp syslog frame of %d bytes dropped (max %d)", size, MAX_MSG)
+                    self.skip = size
+                    i = sp + 1
+                    continue
                 end = sp + 1 + size
                 if end > n:
                     break
                 out.append(bytes(b[sp + 1:end]))
                 i = end
-            else:
-                nl = b.find(b"\n", i)
-                if nl < 0:
-                    if n - i > MAX_MSG:
-                        raise ValueError("frame too large")
-                    break
-                if nl - i > 1 or b[i] not in b"\r\n":  # skip blank keep-alive lines
-                    out.append(bytes(b[i:nl + 1]))
-                i = nl + 1
+                continue
+            if 48 <= b[i] <= 57 and sp < 0 and n - i < 8 and b[i:n].isdigit():
+                break  # a length prefix may still be arriving
+            nl = b.find(b"\n", i)  # newline framing (also a line that merely starts with a digit, e.g. a date)
+            if nl < 0:
+                if n - i > MAX_MSG:
+                    self.oversized += 1
+                    log.warning("tcp syslog line over %d bytes dropped", MAX_MSG)
+                    self.discarding = True
+                    i = n
+                break
+            if nl - i > MAX_MSG:
+                self.oversized += 1
+                log.warning("tcp syslog line over %d bytes dropped", MAX_MSG)
+            elif nl - i > 1 or b[i] not in b"\r\n":  # skip blank keep-alive lines
+                out.append(bytes(b[i:nl + 1]))
+            i = nl + 1
         del b[:i]
         return out
 
@@ -135,6 +161,9 @@ class InlineSink:
 
     async def pressure(self) -> None:
         if self.sink.should_flush():
+            await self.sink.flush()
+        while self.sink.saturated:  # ClickHouse not keeping up: stop reading this TCP session so TCP pushes back
+            await asyncio.sleep(1)
             await self.sink.flush()
 
 
@@ -283,6 +312,8 @@ def worker_main(idx: int, q, stats_q) -> None:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     s = get_settings()
     setup_logging(s.log_level)
+    from .db.pg import init_engine
+    init_engine(pool_size=1, max_overflow=1)  # parsers only refresh the device registry and TI lists, one query at a time
     asyncio.run(_worker(idx, q, stats_q))
 
 
@@ -301,6 +332,10 @@ async def _worker(idx: int, q, stats_q) -> None:
     inline = InlineSink(sink)
     last_flush = last_refresh = time.monotonic()
     while True:
+        if sink.saturated:  # buffer at its cap (ClickHouse down/slow): leave chunks in the queue so pressure builds upstream
+            await asyncio.sleep(1)
+            await sink.flush()
+            continue
         try:
             chunk = await asyncio.to_thread(q.get, True, 0.5)
         except queue.Empty:
@@ -310,7 +345,7 @@ async def _worker(idx: int, q, stats_q) -> None:
         for msg, peer in chunk:
             inline.submit(msg, peer)
         now = time.monotonic()
-        if sink.should_flush() or (sink.buffer and now - last_flush >= s.syslog_worker_flush_seconds):
+        if sink.should_flush() or (sink.pending and now - last_flush >= s.syslog_worker_flush_seconds):
             await sink.flush()
             last_flush = now
         if now - last_refresh > 30:

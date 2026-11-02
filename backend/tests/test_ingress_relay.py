@@ -59,11 +59,22 @@ def test_framer_mixed_and_split_frames():
     assert not f.buf
 
 
-def test_framer_rejects_oversized():
-    import pytest
+def test_framer_skips_oversized_frames_and_keeps_the_session():
+    """One device's oversized frame used to raise and close the TCP session, which behind the relay carries every
+    device; it is now dropped and counted, and the frames after it still arrive (across arbitrary segmentation)."""
     from app.syslog_server import MAX_MSG, Framer
-    with pytest.raises(ValueError):
-        Framer().feed(str(MAX_MSG + 1).encode() + b" x")
+    big = b"x" * (MAX_MSG + 1)
+    stream = (str(len(big)).encode() + b" " + big + b"7 <189>ok" + b"y" * (MAX_MSG + 5) + b"\n" + b"<190>after\n")
+    f, got = Framer(), []
+    for i in range(0, len(stream), 4096):
+        got += f.feed(stream[i:i + 4096])
+    assert got == [b"<189>ok", b"<190>after\n"] and f.oversized == 2 and not f.buf
+
+
+def test_framer_newline_line_starting_with_digit():
+    from app.syslog_server import Framer
+    f = Framer()  # "2026-11-02 ..." is not an octet count; it used to raise ValueError and close the session
+    assert f.feed(b"2026-11-02 10:00:00 host app: hello\n12 <189>abcdefg") == [b"2026-11-02 10:00:00 host app: hello\n", b"<189>abcdefg"]
 
 
 def test_merge_stats():

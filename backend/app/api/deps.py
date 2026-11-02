@@ -11,6 +11,7 @@ from ..config import get_settings
 from ..db.ch import ClickHouse, get_ch
 from ..db.models import AuditLog, User
 from ..db.pg import get_session
+from ..products import PRODUCT_LABEL, products_of, required_product
 from ..security import decode_session_token
 
 SESSION_COOKIE = "siem_session"
@@ -68,6 +69,13 @@ async def current_user(request: Request, s: AsyncSession = Depends(get_session))
     if not limiter.check(f"api:{user.id}", get_settings().api_rate_limit_per_minute):
         raise HTTPException(429, "rate limit exceeded")
     request.state.user = user
+    need = required_product(request.url.path, request.method)
+    if need and need not in products_of(user):
+        # product boundary (app/products.py): audited, like other refused operations
+        s.add(AuditLog(username=user.username, action="product_access_denied", target=request.url.path[:255],
+                       detail={"product": need, "method": request.method}, client_ip=client_ip(request), success=False))
+        await s.commit()
+        raise HTTPException(403, f"your account has no access to {PRODUCT_LABEL[need]}")
     return user
 
 

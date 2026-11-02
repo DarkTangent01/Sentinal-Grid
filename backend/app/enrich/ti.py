@@ -69,6 +69,34 @@ class Hit:
     category: str
 
 
+def _flatten(nets: list[tuple[int, int, "Hit"]]) -> list[tuple[int, int, "Hit"]]:
+    """CIDR blocks are nested or disjoint, so they flatten into non-overlapping [start, end] segments in which the most
+    specific block wins. A lookup is then one binary search. Scanning back from the nearest start (the old way) cost
+    O(blocks starting inside the widest block) per lookup: one /8 in a feed meant thousands of steps for every event."""
+    out: list[tuple[int, int, Hit]] = []
+    stack: list[tuple[int, int, Hit]] = []
+    cursor = 0
+
+    def emit(a: int, b: int, h: Hit) -> None:
+        if a <= b:
+            out.append((a, b, h))
+
+    for a, b, h in sorted(nets, key=lambda n: (n[0], -n[1])):  # parents before the blocks nested inside them
+        while stack and stack[-1][1] < a:
+            sa, sb, sh = stack.pop()
+            emit(max(cursor, sa), sb, sh)
+            cursor = sb + 1
+        if stack:
+            emit(cursor, a - 1, stack[-1][2])                   # enclosing block covers the gap before this one
+        cursor = a
+        stack.append((a, b, h))
+    while stack:
+        sa, sb, sh = stack.pop()
+        emit(max(cursor, sa), sb, sh)
+        cursor = sb + 1
+    return out
+
+
 class IndicatorSet:
     def __init__(self, rows: list[tuple[str, str, str, str]] = ()):
         """rows: (indicator, type, source, category)"""
@@ -90,10 +118,9 @@ class IndicatorSet:
                     continue
                 if n.version == 4:
                     nets.append((int(n.network_address), int(n.broadcast_address), h))
-        nets.sort(key=lambda x: x[0])
         self._nets = nets
-        self._starts = [n[0] for n in nets]
-        self._maxspan = max((b - a for a, b, _ in nets), default=0)
+        self._segs = _flatten(nets)
+        self._starts = [a for a, _, _ in self._segs]
 
     def __len__(self):
         return len(self.ips) + len(self.domains) + len(self._nets)
@@ -108,12 +135,8 @@ class IndicatorSet:
         if v is None:
             return None
         i = bisect.bisect_right(self._starts, v) - 1
-        # scan back over networks that could still contain v (bounded by the widest network)
-        while i >= 0 and self._nets[i][0] >= v - self._maxspan:
-            a, b, hit = self._nets[i]
-            if a <= v <= b:
-                return hit
-            i -= 1
+        if i >= 0 and v <= self._segs[i][1]:
+            return self._segs[i][2]
         return None
 
     def match_domain(self, name: str) -> Hit | None:

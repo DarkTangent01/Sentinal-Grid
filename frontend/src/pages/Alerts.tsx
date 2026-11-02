@@ -21,7 +21,9 @@ export function Alerts() {
   const close = () => { setSel(null); if (linkId) { sp.delete("id"); setSp(sp, { replace: true }); } };
   const rule = sp.get("rule") || undefined;  // /alerts?rule=<key> from Detections
   const statuses = status === "open" ? ["new", "investigating"] : status === "all" ? [] : [status];
-  const q = useQuery({ queryKey: ["alerts", status, rule], queryFn: () => api<any>("/alerts", { params: { status: statuses, size: 200, rule_key: rule } }), refetchInterval: 30_000 });
+  const product = sp.get("product") || undefined;  // /alerts?product=grid|nms from the product sidebars
+  const rulePrefix = sp.get("rule_prefix") || undefined;  // /alerts?rule_prefix=wireless_ from module pages
+  const q = useQuery({ queryKey: ["alerts", status, rule, product, rulePrefix], queryFn: () => api<any>("/alerts", { params: { status: statuses, size: 200, rule_key: rule, product, rule_prefix: rulePrefix } }), refetchInterval: 30_000 });
   const c = q.data?.status_counts || {};
   return (
     <div className="space-y-3">

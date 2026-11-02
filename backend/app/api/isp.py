@@ -20,7 +20,7 @@ from ..db.pg import get_session
 from .deps import audit, ch_dep, csv_safe, current_user, require_admin
 
 router = APIRouter(prefix="/api/isp", tags=["isp"])
-RANGE = r"^(1h|24h|7d|30d)$"
+RANGE = r"^(1h|6h|24h|7d|30d)$"
 
 
 def _window(range_: str | None, start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
@@ -128,6 +128,10 @@ class IcmpTargetIn(BaseModel):
     up_after: int = Field(2, ge=1, le=20)
     rtt_warn_ms: float = Field(150.0, ge=1, le=10000)
     loss_warn_pct: float = Field(20.0, ge=1, le=100)
+    jitter_warn_ms: float | None = Field(None, ge=1, le=10000)
+    retries: int = Field(0, ge=0, le=3)
+    degrade_after: int = Field(3, ge=1, le=20)
+    clear_after: int = Field(2, ge=1, le=20)
 
 
 async def _icmp_body(s: AsyncSession, body: IcmpTargetIn) -> dict:
@@ -162,6 +166,8 @@ async def icmp_create(body: IcmpTargetIn, request: Request, user: User = Depends
     if (await s.execute(select(IcmpTarget.id).where(IcmpTarget.address == data["address"]))).first():
         raise HTTPException(409, "this address is already monitored")
     t = IcmpTarget(**data, created_by=user.username)
+    if not t.enabled:
+        t.state = "paused"
     s.add(t)
     await s.commit()
     await audit(s, request, user.username, "icmp_target_create", t.address, {"name": t.name})
@@ -174,10 +180,14 @@ async def icmp_update(tid: int, body: IcmpTargetIn, request: Request, user: User
     if not t:
         raise HTTPException(404, "not found")
     data = await _icmp_body(s, body)
+    enabled = data.pop("enabled")
     if data["address"] != t.address:  # a different host: start its history fresh
-        t.state, t.state_since, t.fail_streak, t.ok_streak = "unknown", None, 0, 0
+        t.state, t.state_since, t.fail_streak, t.ok_streak, t.fail_since, t.ok_since = "unknown", None, 0, 0, None, None
+        t.poor_streak, t.healthy_streak, t.poor_since, t.healthy_since = 0, 0, None, None
     for k, v in data.items():
         setattr(t, k, v)
+    if enabled != t.enabled:  # pause / resume through the state machine: paused time is not downtime
+        await icmp.set_paused(s, t, not enabled, f"disabled by {user.username}")
     await s.commit()
     await audit(s, request, user.username, "icmp_target_update", t.address, {"name": t.name})
     return {"ok": True}
@@ -200,8 +210,9 @@ async def icmp_probe_now(tid: int, _: User = Depends(require_admin), s: AsyncSes
     t = await s.get(IcmpTarget, tid)
     if not t:
         raise HTTPException(404, "not found")
-    r = await icmp.ping(t.address, t.probes, t.timeout_ms)
-    return {"sent": r.sent, "received": r.received, "rtts": r.rtts, "loss_pct": r.loss_pct, "rtt_avg": r.rtt_avg, "error": r.error}
+    r = await icmp.probe(t)
+    return {"sent": r.sent, "received": r.received, "rtts": r.rtts, "loss_pct": r.loss_pct, "rtt_avg": r.rtt_avg, "error": r.error,
+            "error_class": r.error_class}
 
 
 @router.get("/icmp/suggestions")

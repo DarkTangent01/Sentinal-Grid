@@ -24,7 +24,8 @@ from .security import TokenCipher
 log = logging.getLogger("notify")
 SEV = ["informational", "low", "medium", "high", "critical"]
 COLOR = {"critical": "#dc2626", "high": "#ea580c", "medium": "#ca8a04", "low": "#0284c7", "informational": "#64748b"}
-EVENT_TYPES = ("alert.created", "incident.created", "incident.escalated", "report.ready", "search.threshold")
+EVENT_TYPES = ("alert.created", "alert.resolved", "incident.created", "incident.escalated", "report.ready", "search.threshold",
+               "wan.outage", "wan.recovered")
 BACKOFF = [60, 300, 900, 3600]
 
 
@@ -102,6 +103,14 @@ async def alert_created(s: AsyncSession, a: Alert) -> None:
         "fields": {"Source": a.src_ip or "—", "Sites": ", ".join(a.sites or []) or "—",
                    "MITRE": f"{(a.mitre or {}).get('tactic_name', '')} {' '.join((a.mitre or {}).get('techniques', []))}".strip() or "—"},
         "url": _link(f"/alerts?id={a.id}")}, severity=a.severity, dedupe_key=f"alert:{a.rule_key}:{a.group_key}", rule_key=a.rule_key)
+
+
+async def alert_resolved(s: AsyncSession, a: Alert) -> None:
+    """Recovery notification for alerts that resolve themselves (switch monitoring); rules opt in to 'alert.resolved'."""
+    await enqueue(s, "alert.resolved", {
+        "title": f"[RESOLVED] {a.name}", "text": f"Condition cleared. {a.explanation}",
+        "fields": {"Sites": ", ".join(a.sites or []) or "—", "First seen": str(a.first_seen), "Last seen": str(a.last_seen)},
+        "url": _link(f"/alerts?id={a.id}")}, severity=a.severity, dedupe_key=f"resolved:{a.rule_key}:{a.group_key}:{a.open_seq}", rule_key=a.rule_key)
 
 
 async def incident_event(s: AsyncSession, inc: Incident, kind: str) -> None:

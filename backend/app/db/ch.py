@@ -6,8 +6,11 @@ Queries use ClickHouse `{name:Type}` placeholders in both modes.
 """
 import asyncio
 import json
+import queue
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -56,6 +59,14 @@ class ClickHouse:
         self.database = s.clickhouse_database
         self._lock = threading.Lock()
         if self.mode == "embedded":
+            import os
+            # chdb probes stdin on every INSERT, even with inline data: with stdin left open as a pipe (process
+            # supervisors, IDE launchers) the insert blocks forever while holding the session lock. Embedded mode never
+            # reads stdin, so detach it.
+            if not os.isatty(0):
+                fd = os.open(os.devnull, os.O_RDONLY)
+                os.dup2(fd, 0)
+                os.close(fd)
             from chdb import session as chs
 
             self._sess = chs.Session(embedded_path or s.clickhouse_embedded_path or None)
@@ -67,12 +78,32 @@ class ClickHouse:
         else:
             import clickhouse_connect
 
-            self._client = clickhouse_connect.get_client(
-                host=s.clickhouse_host, port=s.clickhouse_port, username=s.clickhouse_user,
-                password=s.clickhouse_password, database=s.clickhouse_database,
-                settings={"max_execution_time": 60}, connect_timeout=10, send_receive_timeout=120,
-            )
-            self._client_lock = threading.Lock()
+            def new_client():
+                return clickhouse_connect.get_client(
+                    host=s.clickhouse_host, port=s.clickhouse_port, username=s.clickhouse_user,
+                    password=s.clickhouse_password, database=s.clickhouse_database,
+                    settings={"max_execution_time": 60}, connect_timeout=10, send_receive_timeout=120,
+                )
+            size = max(1, s.clickhouse_pool_size)
+            self._new_client = new_client
+            self._idle: queue.LifoQueue = queue.LifoQueue()
+            self._idle.put(new_client())  # connect once up front so a bad host/credential fails at startup, as before
+            self._slots = threading.BoundedSemaphore(size)
+            # own threads: blocking ClickHouse calls must not occupy the default executor other code relies on
+            self._executor = ThreadPoolExecutor(max_workers=size, thread_name_prefix="clickhouse")
+
+    @contextmanager
+    def _client(self):
+        """One client per concurrent request (a clickhouse-connect client is not safe for concurrent use)."""
+        with self._slots:
+            try:
+                c = self._idle.get_nowait()
+            except queue.Empty:
+                c = self._new_client()
+            try:
+                yield c
+            finally:
+                self._idle.put(c)
 
     # --- sync API -------------------------------------------------------
     def query(self, sql: str, params: dict | None = None) -> list[dict]:
@@ -81,8 +112,8 @@ class ClickHouse:
                 res = self._sess.query(render_params(sql, params), "JSONEachRow")
             text = res.bytes().decode() if hasattr(res, "bytes") else str(res)
             return [json.loads(line) for line in text.splitlines() if line.strip()]
-        with self._client_lock:
-            r = self._client.query(sql, parameters=params or {})
+        with self._client() as c:
+            r = c.query(sql, parameters=params or {})
         return [dict(zip(r.column_names, row)) for row in r.result_rows]
 
     def command(self, sql: str, params: dict | None = None) -> None:
@@ -90,8 +121,8 @@ class ClickHouse:
             with self._lock:
                 self._sess.query(render_params(sql, params))
             return
-        with self._client_lock:
-            self._client.command(sql, parameters=params or {})
+        with self._client() as c:
+            c.command(sql, parameters=params or {})
 
     def insert(self, table: str, rows: list[dict], columns: list[str]) -> None:
         if not rows:
@@ -106,18 +137,23 @@ class ClickHouse:
                 self._sess.query(f"INSERT INTO {table} ({','.join(columns)}) FORMAT JSONEachRow\n{body}")
             return
         data = [[r.get(c) for c in columns] for r in rows]
-        with self._client_lock:
-            self._client.insert(table, data, column_names=columns)
+        with self._client() as c:
+            c.insert(table, data, column_names=columns)
 
     # --- async wrappers -------------------------------------------------
+    async def _run(self, fn, *args):
+        if self.mode == "embedded":
+            return await asyncio.to_thread(fn, *args)
+        return await asyncio.get_running_loop().run_in_executor(self._executor, fn, *args)
+
     async def aquery(self, sql: str, params: dict | None = None) -> list[dict]:
-        return await asyncio.to_thread(self.query, sql, params)
+        return await self._run(self.query, sql, params)
 
     async def acommand(self, sql: str, params: dict | None = None) -> None:
-        await asyncio.to_thread(self.command, sql, params)
+        await self._run(self.command, sql, params)
 
     async def ainsert(self, table: str, rows: list[dict], columns: list[str]) -> None:
-        await asyncio.to_thread(self.insert, table, rows, columns)
+        await self._run(self.insert, table, rows, columns)
 
 
 _ch: ClickHouse | None = None

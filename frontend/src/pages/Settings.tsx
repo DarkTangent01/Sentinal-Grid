@@ -27,6 +27,7 @@ export function Settings({ onMeChange }: { onMeChange: () => void }) {
 function Prefs({ onMeChange }: { onMeChange: () => void }) {
   const me = useMe();
   const [tz, setTz] = useState(me.timezone);
+  const [start, setStart] = useState<string>(me.default_product || "none");
   const [cur, setCur] = useState("");
   const [nw, setNw] = useState("");
   const [msg, setMsg] = useState("");
@@ -36,6 +37,10 @@ function Prefs({ onMeChange }: { onMeChange: () => void }) {
       <Card title="Display timezone"><div className="flex gap-2"><select className="input" value={tz} onChange={(e) => setTz(e.target.value)}>{["UTC", ...zones].map((z) => <option key={z}>{z}</option>)}</select>
         <button className="btn btn-primary" onClick={async () => { await api("/auth/me/preferences", { method: "PUT", body: { timezone: tz } }); onMeChange(); setMsg("Timezone saved."); }}>Save</button></div>
         <p className="text-xs text-muted mt-2">All timestamps are stored in UTC and displayed in this timezone.</p></Card>
+      {me.products.length > 1 && <Card title="Start in"><div className="flex gap-2"><select aria-label="Start product" className="input" value={start} onChange={(e) => setStart(e.target.value)}>
+        <option value="none">Ask me every time (product selector)</option>{me.products.map((p) => <option key={p} value={p}>{p === "grid" ? "Sentinel Grid" : "Sentinel NMS"}</option>)}</select>
+        <button className="btn btn-primary" onClick={async () => { try { await api("/auth/me/preferences", { method: "PUT", body: { default_product: start } }); onMeChange(); setMsg("Start product saved."); } catch (e) { setMsg((e as Error).message); } }}>Save</button></div>
+        <p className="text-xs text-muted mt-2">Which product opens after you sign in. Deep links always open the page you asked for.</p></Card>}
       <Card title="Change password"><div className="space-y-2">
         <input className="input w-full" type="password" placeholder="Current password" value={cur} onChange={(e) => setCur(e.target.value)} />
         <input className="input w-full" type="password" placeholder="New password (min 12 chars)" value={nw} onChange={(e) => setNw(e.target.value)} />
@@ -128,21 +133,40 @@ function Storage() {
 function Users() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["users"], queryFn: () => api<any[]>("/users") });
-  const [n, setN] = useState({ username: "", password: "", role: "analyst" });
+  const blank = { username: "", password: "", role: "analyst", products: [] as string[] };
+  const [n, setN] = useState(blank);
   const [err, setErr] = useState("");
-  const create = useMutation({ mutationFn: () => api("/users", { method: "POST", body: n }), onSuccess: () => { setN({ username: "", password: "", role: "analyst" }); setErr(""); qc.invalidateQueries({ queryKey: ["users"] }); }, onError: (e) => setErr((e as Error).message) });
+  const create = useMutation({ mutationFn: () => api("/users", { method: "POST", body: n }), onSuccess: () => { setN(blank); setErr(""); qc.invalidateQueries({ queryKey: ["users"] }); }, onError: (e) => setErr((e as Error).message) });
+  const flip = (list: string[], p: string) => (list.includes(p) ? list.filter((x) => x !== p) : [...list, p]).sort();
+  const PRODS: [string, string][] = [["grid", "Sentinel Grid"], ["nms", "Sentinel NMS"]];
   const patch = useMutation({ mutationFn: ({ id, body }: any) => api(`/users/${id}`, { method: "PATCH", body }), onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }), onError: (e) => setErr((e as Error).message) });
   return (
     <div className="space-y-4">
-      <Card title="Users"><div className="tbl-wrap"><table className="tbl"><thead><tr><th>User</th><th>Role</th><th>Active</th><th>Last login</th><th></th></tr></thead>
-        <tbody>{(q.data || []).map((u) => <tr key={u.id}><td>{u.username}</td><td>{u.role}</td><td>{u.is_active ? "yes" : "no"}</td><td className="text-xs">{fmtTime(u.last_login)}</td>
+      <Card title="Users"><p className="text-xs text-muted mb-2">Product access decides which product an account can open and which APIs it may call; administrators can use
+        every product. An account with no product can sign in but sees only a "no access" page. NMS sites limit which devices an analyst sees in Sentinel NMS
+        (device, SNMP and trap pages); leave empty for every site.</p>
+        <div className="tbl-wrap"><table className="tbl"><thead><tr><th>User</th><th>Role</th><th>Product access</th><th>NMS sites</th><th>Active</th><th>Last login</th><th></th></tr></thead>
+        <tbody>{(q.data || []).map((u) => <tr key={u.id}><td>{u.username}</td><td>{u.role}</td>
+          <td className="whitespace-nowrap">{u.role === "admin" ? <span className="text-xs text-muted">all products (admin)</span> : PRODS.map(([k, l]) =>
+            <label key={k} className="inline-flex items-center gap-1 mr-3 text-xs"><input type="checkbox" checked={(u.assigned_products || []).includes(k)}
+              onChange={() => patch.mutate({ id: u.id, body: { products: flip(u.assigned_products || [], k) } })} />{l}</label>)}
+            {u.role !== "admin" && !(u.assigned_products || []).length && <span className="pill bg-amber-500/15 text-amber-300">no access</span>}</td>
+          <td>{u.role === "admin" ? <span className="text-xs text-muted">all sites (admin)</span> :
+            <input className="input py-1 text-xs w-44" defaultValue={(u.sites || []).join(", ")} placeholder="all sites" aria-label={`NMS sites of ${u.username}`}
+              title="Comma-separated sites this account may see in Sentinel NMS; empty = every site"
+              onBlur={(e) => { const v = e.target.value.split(",").map((x) => x.trim()).filter(Boolean);
+                if (v.join(",") !== (u.sites || []).join(",")) patch.mutate({ id: u.id, body: { sites: v } }); }} />}</td>
+          <td>{u.is_active ? "yes" : "no"}</td><td className="text-xs">{fmtTime(u.last_login)}</td>
           <td className="flex gap-1"><button className="btn" onClick={() => patch.mutate({ id: u.id, body: { role: u.role === "admin" ? "analyst" : "admin" } })}>Make {u.role === "admin" ? "analyst" : "admin"}</button>
             <button className="btn" onClick={() => patch.mutate({ id: u.id, body: { is_active: !u.is_active } })}>{u.is_active ? "Disable" : "Enable"}</button></td></tr>)}</tbody></table></div></Card>
       <Card title="Create user"><div className="flex gap-2 flex-wrap">
         <input className="input" placeholder="username" value={n.username} onChange={(e) => setN({ ...n, username: e.target.value })} />
         <input className="input" type="password" placeholder="password (min 12)" value={n.password} onChange={(e) => setN({ ...n, password: e.target.value })} />
         <select className="input" value={n.role} onChange={(e) => setN({ ...n, role: e.target.value })}><option value="analyst">analyst (read-only)</option><option value="admin">admin</option></select>
-        <button className="btn btn-primary" onClick={() => create.mutate()}>Create</button></div>{err && <div className="text-red-400 text-xs mt-1">{err}</div>}</Card>
+        {n.role !== "admin" && PRODS.map(([k, l]) => <label key={k} className="inline-flex items-center gap-1 text-sm"><input type="checkbox" checked={n.products.includes(k)}
+          onChange={() => setN({ ...n, products: flip(n.products, k) })} />{l}</label>)}
+        <button className="btn btn-primary" onClick={() => create.mutate()}>Create</button></div>
+        {n.role !== "admin" && !n.products.length && <div className="text-xs text-amber-300 mt-1">No product selected: the account will be able to sign in but not use either product.</div>}{err && <div className="text-red-400 text-xs mt-1">{err}</div>}</Card>
     </div>
   );
 }

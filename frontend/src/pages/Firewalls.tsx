@@ -101,7 +101,7 @@ function FirewallForm({ fw, onClose }: { fw: any; onClose: () => void }) {
   };
   const save = useMutation({
     mutationFn: () => !fw.id ? api("/firewalls", { method: "POST", body: body() }) : api(`/firewalls/${fw.id}`, { method: "PUT", body: body() }),
-    onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ["firewalls"] }); qc.invalidateQueries({ queryKey: ["firewalls-lite"] }); if (!fw.id) fw.id = r.id; setErr(""); },
+    onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ["firewalls"] }); if (!fw.id) fw.id = r.id; setErr(""); },
     onError: (e) => setErr((e as Error).message),
   });
   const test = useMutation({

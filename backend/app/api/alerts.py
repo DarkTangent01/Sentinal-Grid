@@ -2,12 +2,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import false, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..alerts.rules import DEFAULT_RULES
 from ..db.models import Alert, AlertRule, Suppression, User
 from ..db.pg import get_session
+from ..products import alert_product, nms_rule_clause, products_of
 from .deps import iso, audit, current_user, require_admin
 
 router = APIRouter(prefix="/api", tags=["alerts"])
@@ -27,29 +28,48 @@ def alert_out(a: Alert) -> dict:
 
 @router.get("/alerts")
 async def list_alerts(status: list[str] = Query(default=[]), severity: list[str] = Query(default=[]), rule_key: str | None = None,
-                      src_ip: str | None = None, page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200),
-                      _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    q = select(Alert)
+                      rule_prefix: str | None = Query(None, pattern=r"^[a-z0-9_]{1,32}$"), src_ip: str | None = None, page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200),
+                      product: str | None = Query(None, pattern=r"^(grid|nms)$"),
+                      user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """product: Sentinel Grid (security detections) or Sentinel NMS (network operations) alerts; an account only ever
+    sees alerts of the products it may use."""
+    q = _product_scope(select(Alert), user, product)
     if status:
         q = q.where(Alert.status.in_(status))
     if severity:
         q = q.where(Alert.severity.in_(severity))
     if rule_key:
         q = q.where(Alert.rule_key == rule_key)
+    if rule_prefix:
+        q = q.where(Alert.rule_key.like(f"{rule_prefix}%"))
     if src_ip:
         q = q.where(Alert.src_ip == src_ip)
     total = (await s.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     rows = (await s.execute(q.order_by(Alert.last_seen.desc()).offset((page - 1) * size).limit(size))).scalars()
-    counts = dict((await s.execute(select(Alert.status, func.count()).group_by(Alert.status))).all())
+    counts = dict((await s.execute(_product_scope(select(Alert.status, func.count()), user, product).group_by(Alert.status))).all())
     return {"items": [alert_out(a) for a in rows], "total": total, "status_counts": counts}
 
 
-@router.get("/alerts/{alert_id}")
-async def get_alert(alert_id: int, _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+def _product_scope(q, user: User, product: str | None):
+    allowed = products_of(user)
+    want = [p for p in ([product] if product else allowed) if p in allowed]
+    if not want:
+        return q.where(false())
+    if len(want) == 2:
+        return q
+    return q.where(nms_rule_clause(Alert.rule_key) if want[0] == "nms" else not_(nms_rule_clause(Alert.rule_key)))
+
+
+async def _alert(s: AsyncSession, alert_id: int, user: User) -> Alert:
     a = await s.get(Alert, alert_id)
-    if not a:
+    if not a or alert_product(a.rule_key) not in products_of(user):
         raise HTTPException(404, "not found")
-    return alert_out(a)
+    return a
+
+
+@router.get("/alerts/{alert_id}")
+async def get_alert(alert_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    return alert_out(await _alert(s, alert_id, user))
 
 
 class AlertPatch(BaseModel):
@@ -62,9 +82,7 @@ class AlertPatch(BaseModel):
 async def update_alert(alert_id: int, body: AlertPatch, request: Request, user: User = Depends(current_user),
                        s: AsyncSession = Depends(get_session)):
     """Analysts may triage alerts (status/notes); this does not change any firewall."""
-    a = await s.get(Alert, alert_id)
-    if not a:
-        raise HTTPException(404, "not found")
+    a = await _alert(s, alert_id, user)
     changes = body.model_dump(exclude_unset=True)
     for k, v in changes.items():
         setattr(a, k, v)

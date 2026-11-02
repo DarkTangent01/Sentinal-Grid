@@ -12,6 +12,8 @@ x-backend: &backend
     CLICKHOUSE_USER: ${CLICKHOUSE_USER}
     CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB}
+    # event chunks ClickHouse keeps rejecting (python -m app.ingest.deadletter); a named volume on syslog/worker keeps them
+    INGEST_DEADLETTER_DIR: /var/lib/siem/deadletter
   restart: unless-stopped
   stop_grace_period: 30s
   # app runs as uid 10001 on unprivileged ports: no Linux capabilities or privilege escalation needed
@@ -74,6 +76,12 @@ services:
 
   api:
     <<: *backend
+    # TACACS+ AAA: "Check now" reads the agent's status.json (read-only; only the worker writes deploy requests)
+    group_add: ["10050"]
+    volumes:
+      - ./deploy/certs/fortigate-ca:/certs:ro
+      - ./deploy/geoip:/geoip:ro
+      - tacacs_config:/tacacs/config:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -86,6 +94,14 @@ services:
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
+    # TACACS+ AAA: the worker writes candidate configurations for the tacacs agent and reads its accounting logs
+    group_add: ["10050"]
+    volumes:
+      - ./deploy/certs/fortigate-ca:/certs:ro
+      - ./deploy/geoip:/geoip:ro
+      - tacacs_config:/tacacs/config
+      - tacacs_logs:/tacacs/logs:ro
+      - deadletter:/var/lib/siem/deadletter
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -120,6 +136,10 @@ services:
     <<: *backend
     command: ["python", "-m", "app.syslog_server"]
     # no published ports: logs arrive from the ingress relay on 5515 (direct 5514 stays available inside the network)
+    volumes:
+      - ./deploy/certs/fortigate-ca:/certs:ro
+      - ./deploy/geoip:/geoip:ro
+      - deadletter:/var/lib/siem/deadletter
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -129,6 +149,21 @@ services:
     # receiver + parser processes (SYSLOG_WORKERS, default CPUs-1, max 4): ~3.5k events/s per parser core.
     # On a bigger VM raise SYSLOG_CPUS to parsers + 1 (e.g. 5 on 8 cores) in .env.
     deploy: { resources: { limits: { cpus: "${SYSLOG_CPUS:-3}", memory: "${SYSLOG_MEMORY:-2g}" } } }
+
+  traps:
+    <<: *backend
+    command: ["python", "-m", "app.snmp_traps"]
+    # SNMP traps / informs (docs/SNMP.md). Bound to loopback until TRAP_BIND_IP is set in .env (e.g. 0.0.0.0 or the
+    # management interface address). Only inventory devices authenticating with their own credential profile are accepted.
+    ports:
+      - "${TRAP_BIND_IP:-127.0.0.1}:162:1162/udp"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/traps.heartbeat')<180 else 1)"]
+      interval: 30s
+      start_period: 90s
+    deploy: { resources: { limits: { cpus: "0.5", memory: "512m" } } }
 
   web:
     build: ./frontend
@@ -147,7 +182,27 @@ services:
     logging: *logging
     deploy: { resources: { limits: { cpus: "1", memory: 256m } } }
 
+  # TACACS+ server (tac_plus-ng + deploy agent). Opt-in: COMPOSE_PROFILES=tacacs. Restrict TCP/49 to the network device
+  # management subnets in the host firewall; see docs/TACACS.md.
+  tacacs:
+    build: ./deploy/tacacs
+    image: fortisiem-tacacs:1.0.0
+    profiles: ["tacacs"]
+    restart: unless-stopped
+    ports: ["${TACACS_BIND:-0.0.0.0}:49:49/tcp"]
+    volumes:
+      - tacacs_config:/tacacs/config
+      - tacacs_logs:/tacacs/logs
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, NET_BIND_SERVICE, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:false"]
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "1", memory: 512m } } }
+
 volumes:
   pgdata:
   chdata:
   ingress_spool:
+  tacacs_config:
+  tacacs_logs:
+  deadletter:

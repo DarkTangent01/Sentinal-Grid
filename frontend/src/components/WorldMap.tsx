@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import * as echarts from "echarts";
+import { echarts } from "../lib/echarts";
 import { feature } from "topojson-client";
 import world from "world-atlas/countries-110m.json";
 import { Chart, CHART_THEME, SEQUENTIAL } from "./Chart";

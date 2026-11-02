@@ -14,6 +14,7 @@ from ..db.ch_schema import EVENT_COLUMNS
 from ..db.models import Firewall, IngestStat, LogSource
 from ..netguard import resolve
 from ..db.pg import session_factory
+from . import deadletter
 from .normalize import normalize
 from .panos import PARSER_VERSION as PANOS_PARSER, detect as panos_detect, parse as panos_parse
 from .parser import ParseError, parse_kv
@@ -104,13 +105,18 @@ class EventSink:
         self.registry = registry
         self.enricher = enricher
         self.batch_size = batch_size or s.syslog_batch_size
+        self.buffer_max = s.syslog_buffer_max_events or 10 * self.batch_size
+        self.max_attempts = max(1, s.ingest_insert_max_attempts)
+        self._retry: list[list[dict]] = []    # chunks whose insert failed, oldest first
+        self._attempts: dict[int, int] = {}   # id(chunk) -> rejected inserts while other chunks inserted fine
         self.allow_unknown = s.syslog_allow_unknown_devices
         self.buffer: list[dict] = []
         self._seen: OrderedDict[str, None] = OrderedDict()
         self._cap = dedupe_capacity
         self._lock = asyncio.Lock()
         self.stats: dict[tuple[int, str], dict] = {}
-        self.counters = {"received": 0, "parsed": 0, "duplicates": 0, "unknown_device": 0, "source_mismatch": 0, "parse_errors": 0, "inserted": 0}
+        self.counters = {"received": 0, "parsed": 0, "duplicates": 0, "unknown_device": 0, "source_mismatch": 0, "parse_errors": 0, "inserted": 0,
+                         "insert_failures": 0, "dropped_buffer_full": 0, "dead_lettered": 0}
 
     def _stat(self, fw_id: int, source: str) -> dict:
         return self.stats.setdefault((fw_id, source), {"events": 0, "errors": 0, "last_event": None, "last_error": None})
@@ -147,6 +153,9 @@ class EventSink:
         self.counters["parsed"] += 1
         if self._is_dup(ev["event_id"]):
             self.counters["duplicates"] += 1
+            return None
+        if self.pending >= self.buffer_max:  # only reachable by inline UDP: TCP and parser workers pause first
+            self.counters["dropped_buffer_full"] += 1
             return None
         self.buffer.append(ev)
         st = self._stat(ev["firewall_id"], source)
@@ -194,6 +203,9 @@ class EventSink:
         if self._is_dup(ev["event_id"]):
             self.counters["duplicates"] += 1
             return None
+        if self.pending >= self.buffer_max:  # only reachable by inline UDP: TCP and parser workers pause first
+            self.counters["dropped_buffer_full"] += 1
+            return None
         self.buffer.append(ev)
         st = self._stat(ev["firewall_id"], source)
         st["events"] += 1
@@ -204,26 +216,66 @@ class EventSink:
     def should_flush(self) -> bool:
         return len(self.buffer) >= self.batch_size
 
+    @property
+    def saturated(self) -> bool:
+        """Buffer at its cap: callers that can push back (TCP, parser workers) stop reading until a flush succeeds."""
+        return self.pending >= self.buffer_max
+
+    @property
+    def pending(self) -> int:
+        return len(self.buffer) + sum(len(c) for c in self._retry)
+
     async def flush(self) -> int:
+        """Insert buffered events in batch-sized chunks. A chunk that fails is kept, unchanged and in order, in a retry
+        list (never merged with newer events), so a ClickHouse outage costs memory up to `buffer_max`, never data.
+        A chunk that keeps failing while other chunks insert is poison (ClickHouse is up and rejects it): after
+        `max_attempts` it is written to the dead-letter spool, counted, and ingestion carries on."""
         async with self._lock:
-            batch, self.buffer = self.buffer, []
+            new, self.buffer = self.buffer, []
             stats, self.stats = self.stats, {}
-            if batch:
+            chunks = self._retry + [new[i:i + self.batch_size] for i in range(0, len(new), self.batch_size)]
+            self._retry = []
+            failed: list[list[dict]] = []
+            inserted = 0
+            for chunk in chunks:
                 try:
-                    await self.ch.ainsert("events", batch, EVENT_COLUMNS)
-                except Exception:
-                    log.exception("clickhouse insert failed; re-queueing %d events", len(batch))
-                    self.buffer = batch + self.buffer  # retry on next flush; dedupe cache prevents double counting
-                    for k, v in stats.items():
-                        self.stats.setdefault(k, v)
-                    return 0
-                self.counters["inserted"] += len(batch)
+                    await self.ch.ainsert("events", chunk, EVENT_COLUMNS)
+                except Exception as e:
+                    self.counters["insert_failures"] += 1
+                    log.warning("clickhouse insert of %d events failed (%s: %s); kept for retry",
+                                len(chunk), type(e).__name__, str(e)[:300])
+                    failed.append(chunk)
+                    continue
+                self._attempts.pop(id(chunk), None)
+                inserted += len(chunk)
+            for chunk in failed:
+                tries = self._attempts.get(id(chunk), 0) + (1 if inserted else 0)  # outage (nothing inserts): not counted
+                if tries >= self.max_attempts:
+                    try:
+                        path = await asyncio.to_thread(deadletter.write, chunk)
+                    except OSError as e:  # spool unwritable: keep the chunk buffered rather than lose it
+                        log.error("dead-letter spool %s not writable (%s); keeping %d events buffered",
+                                  deadletter.spool_dir(), e, len(chunk))
+                        self._attempts[id(chunk)] = tries
+                        self._retry.append(chunk)
+                        continue
+                    self._attempts.pop(id(chunk), None)
+                    self.counters["dead_lettered"] += len(chunk)
+                    log.error("dead-lettered %d events after %d rejected inserts: %s", len(chunk), tries, path)
+                else:
+                    self._attempts[id(chunk)] = tries
+                    self._retry.append(chunk)
+            self.counters["inserted"] += inserted
+            if not inserted and chunks:
+                for k, v in stats.items():  # nothing landed: keep the stats for the flush that succeeds
+                    self.stats.setdefault(k, v)
+                return 0
             if stats:
                 if self.stats_hook is not None:
                     self.stats_hook(stats)
                 else:
                     await persist_stats(stats)
-            return len(batch)
+            return inserted
 
 
 def merge_stats(into: dict, stats: dict) -> None:

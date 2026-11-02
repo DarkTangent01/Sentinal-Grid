@@ -54,6 +54,13 @@ def _aware(dt):
 def entity_of(a: Alert) -> tuple[str, str]:
     if a.rule_key in USER_RULES:
         return "user", a.group_key.split("|")[0]
+    if a.rule_key.startswith("tacacs_"):  # network-admin activity joins the user's incident (with VPN / identity alerts)
+        u = (a.evidence or {}).get("user")
+        return ("user", u) if u else ("tacacs", a.group_key.split(":")[0])
+    if a.rule_key.startswith(("switch_", "wireless_")):  # switch / wireless alerts join the incident of the site's firewall, else of the site
+        if a.firewall_ids:
+            return "firewall", str(a.firewall_ids[0])
+        return "site", (a.sites or [a.group_key.split(":")[0]])[0]
     if a.src_ip:
         return "ip", a.src_ip
     return "firewall", str((a.firewall_ids or [0])[0])
@@ -100,6 +107,8 @@ async def correlate_alerts(s: AsyncSession, alerts: list[Alert], now: datetime) 
     for a in alerts:
         if a.status in ("resolved", "suppressed"):
             continue
+        if a.rule_key.startswith("wan_"):  # WAN conditions: ISP incidents come from outage records (app/wan.py)
+            continue
         etype, ent = entity_of(a)
         inc = None
         if a.incident_id:
@@ -107,7 +116,7 @@ async def correlate_alerts(s: AsyncSession, alerts: list[Alert], now: datetime) 
             if inc and inc.status not in OPEN:
                 inc = None
         if inc is None:
-            inc = (await s.execute(select(Incident).where(Incident.entity_type == etype, Incident.entity == ent,
+            inc = (await s.execute(select(Incident).where(Incident.category == "security", Incident.entity_type == etype, Incident.entity == ent,
                    Incident.status.in_(OPEN), Incident.last_seen >= now - CORRELATION_WINDOW)
                    .order_by(Incident.last_seen.desc()).limit(1))).scalars().first()
         if inc is None:

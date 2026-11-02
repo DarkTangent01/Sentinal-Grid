@@ -21,13 +21,14 @@ export function qs(params?: Params): string {
   return s ? `?${s}` : "";
 }
 
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; params?: Params } = {}): Promise<T> {
+export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; params?: Params; signal?: AbortSignal } = {}): Promise<T> {
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json" };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET") headers["X-CSRF-Token"] = csrf();
   const res = await fetch(`/api${path}${qs(opts.params)}`, {
     method, headers, credentials: "same-origin", body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
   });
   if (res.status === 401 && !path.startsWith("/auth/")) {
     window.dispatchEvent(new Event("siem:unauthorized"));

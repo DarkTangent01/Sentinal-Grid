@@ -29,13 +29,13 @@ DEFAULT_RULES = [
                 "internal_cidrs": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}},
     {"key": "dns_spike", "name": "Sudden increase in DNS query volume", "severity": "medium", "mitre": M("TA0011", "T1071.004"),
      "description": "A client's DNS query rate rose sharply over its own recent baseline.",
-     "params": {"window_minutes": 10, "baseline_hours": 24, "factor": 5.0, "min_queries": 500}},
+     "params": {"window_minutes": 10, "interval_minutes": 10, "baseline_hours": 24, "factor": 5.0, "min_queries": 500}},
     {"key": "nxdomain_burst", "name": "Repeated NXDOMAIN responses", "severity": "low", "mitre": M("TA0011", "T1568.002"),
      "description": "A client received many NXDOMAIN responses (possible DGA or misconfiguration).",
      "params": {"window_minutes": 10, "min_nxdomain": 50}},
     {"key": "new_domain", "name": "Access to newly observed domain", "severity": "low", "mitre": M("TA0011", "T1071"),
      "description": "A registered domain was queried that was not seen during the baseline period.",
-     "params": {"window_minutes": 10, "baseline_days": 7, "learning_days": 3, "max_per_run": 20}},
+     "params": {"window_minutes": 10, "interval_minutes": 10, "baseline_days": 7, "learning_days": 3, "max_per_run": 20}},
     {"key": "dns_tunnel", "name": "Potential DNS tunneling indicators", "severity": "medium", "mitre": M("TA0011", "T1071.004"),
      "description": "Many long or high-entropy subdomains queried under one domain by one client.",
      "params": {"window_minutes": 30, "min_unique_names": 30, "min_qname_len": 52, "min_entropy": 3.8}},
@@ -126,6 +126,11 @@ DEFAULT_RULES += [
      "mitre": M("TA0005", "T1562.004"),
      "description": "An administrator changed firewall configuration outside business hours or on a weekend (firewall local time).",
      "params": {"interval_minutes": 5, "window_minutes": 15, "work_start_hour": 7, "work_end_hour": 22, "weekend": True}},
+    {"key": "iac_drift", "name": "Firewall configuration drifted from the approved IaC state", "severity": "high",
+     "mitre": M("TA0005", "T1562.004"),
+     "description": "A scheduled or on-demand IaC drift check found the live firewall configuration differing from the approved desired "
+                    "state (manual GUI/CLI change, unexpected policy, routing or admin-access change).",
+     "params": {"interval_minutes": 5, "window_minutes": 15, "min_severity": "medium"}},
     {"key": "bgp_peer_down", "name": "BGP neighbor down", "severity": "high", "mitre": {},
      "description": "A BGP neighbor left the Established state (from router logs or API polling) and stayed down for the configured minutes.",
      "params": {"interval_minutes": 2, "window_minutes": 60, "min_down_minutes": 2}},
@@ -168,4 +173,17 @@ DEFAULT_RULES += [
      "description": "A service was installed (7045 / 4697) — persistence or remote execution tools often do this.",
      "params": {"window_minutes": 15, "ignore_services": []}},
 ]
+from ..switches.alerts import DEFAULT_RULES as _SWITCH_RULES  # noqa: E402
+
+from ..tacacs.alerts import DEFAULT_RULES as _TACACS_RULES  # noqa: E402
+
+from ..wan_alerts import DEFAULT_RULES as _WAN_RULES  # noqa: E402
+from ..wireless.alerts import DEFAULT_RULES as _WIRELESS_RULES  # noqa: E402
+
+DEFAULT_RULES += _SWITCH_RULES
+DEFAULT_RULES += _TACACS_RULES
+DEFAULT_RULES += _WAN_RULES
+DEFAULT_RULES += _WIRELESS_RULES
+from ..nms.alerts import DEFAULT_RULES as _NMS_RULES  # noqa: E402
+DEFAULT_RULES += _NMS_RULES
 RULE_MITRE = {r["key"]: r["mitre"] for r in DEFAULT_RULES}

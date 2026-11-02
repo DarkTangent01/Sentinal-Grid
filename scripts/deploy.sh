@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 REMOTE="${DEPLOY_REMOTE:-siem@10.200.64.58}"
 DEST="${DEPLOY_PATH:-/home/siem/fortisiem}"
 EXCLUDES=(
-  --exclude='.env' --exclude='.venv/' --exclude='node_modules/' --exclude='frontend/dist/' --exclude='backups/'
+  --exclude='.env' --exclude='.env.bak*' --exclude='.env.*.bak' --exclude='.git/' --exclude='.github/' --exclude='.venv/' --exclude='node_modules/' --exclude='frontend/dist/' --exclude='backups/'
   --exclude='.dev/' --exclude='*.db' --exclude='__pycache__/' --exclude='.pytest_cache/' --exclude='.ruff_cache/'
   --exclude='.claude/' --exclude='.DS_Store' --exclude='frontend/tsconfig.tsbuildinfo'
   --exclude='deploy/certs/*.key' --exclude='deploy/certs/*.crt' --exclude='deploy/certs/fortigate-ca/*.pem'

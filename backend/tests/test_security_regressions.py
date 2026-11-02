@@ -240,7 +240,7 @@ async def test_sec07_unknown_user_still_pays_argon2(api, monkeypatch):  # noqa: 
 
 # ------------------------------------------------------------------ SEC-09 saved-search IDOR
 async def test_sec09_private_saved_search_not_runnable_by_others(api, db):  # noqa: F811
-    db.add(User(username="analyst2", password_hash=hash_password(PW), role="analyst"))
+    db.add(User(username="analyst2", password_hash=hash_password(PW), role="analyst", products=["grid", "nms"]))
     await db.commit()
     h = await login(api, "analyst1")
     sid = (await api.post("/api/searches", headers=h, json={"name": "mine", "query": "action:deny", "shared": False})).json()["id"]

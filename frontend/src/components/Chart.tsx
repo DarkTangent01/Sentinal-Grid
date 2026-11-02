@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+import { echarts } from "../lib/echarts";
 import { Theme, useTheme } from "../lib/theme";
 
 /** Categorical slots, assigned in this fixed order (never cycled past 8: fold the rest into "Other").
@@ -55,12 +55,13 @@ export function Chart({ option, height = 260, onClick, ariaLabel }: { option: ec
   const optRef = useRef(option);
   optRef.current = option;
 
-  const apply = (c: echarts.ECharts, opt: echarts.EChartsCoreOption) => c.setOption({
+  const applied = useRef<echarts.EChartsCoreOption | null>(null);
+  const apply = (c: echarts.ECharts, opt: echarts.EChartsCoreOption) => (applied.current = opt, c.setOption({
     grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
     tooltip: { trigger: "axis", confine: true },
     aria: { enabled: true },
     ...opt,
-  }, true);
+  }, true));
 
   useEffect(() => {
     if (!ref.current) return;
@@ -75,7 +76,7 @@ export function Chart({ option, height = 260, onClick, ariaLabel }: { option: ec
   }, [theme]);
 
   useEffect(() => {
-    if (inst.current) apply(inst.current, option);
+    if (inst.current && applied.current !== option) apply(inst.current, option);  // init already drew this option
   }, [option]);
 
   return <div ref={ref} role="img" aria-label={ariaLabel} style={{ height, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : "default" }} />;

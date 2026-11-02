@@ -30,7 +30,7 @@ async def main():
     registry = DeviceRegistry()
     await registry.refresh()
     from .enrich.enricher import Enricher
-    from .worker import icmp_loop, ngen_jobs
+    from .worker import icmp_loop, ngen_jobs, service_loop, switch_loop, tacacs_loop
     enricher = Enricher()
     await enricher.refresh_ti(force=True)
     sink = EventSink(get_ch(), registry, enricher=enricher)
@@ -45,7 +45,8 @@ async def main():
             await registry.refresh()
             await enricher.refresh_ti()
 
-    tasks = [flusher(), poll_loop(stop), policy_loop(stop), ngen_jobs(stop), icmp_loop(stop), periodic(stop, s.alert_interval_seconds, run_rules, "alerts"),
+    from .iac.executor import loop as iac_loop
+    tasks = [flusher(), iac_loop(stop), poll_loop(stop), policy_loop(stop), ngen_jobs(stop), icmp_loop(stop), switch_loop(stop), tacacs_loop(stop), service_loop(stop), periodic(stop, s.alert_interval_seconds, run_rules, "alerts"),
              periodic(stop, s.retention_interval_seconds, run_retention, "retention")]
     if s.demo_mode:
         from . import demo

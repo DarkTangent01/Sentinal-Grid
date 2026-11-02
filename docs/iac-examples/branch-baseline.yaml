@@ -1,0 +1,45 @@
+# Example desired state for a branch FortiGate. All addresses are fictional (RFC 1918 / RFC 5737).
+apiVersion: iac.sentinelgrid/v1
+kind: FirewallConfig
+metadata:
+  name: branch-baseline
+  description: Branch LAN egress, internal DNS, default route, admin and logging baseline
+variables:
+  lan_subnet: 10.20.0.0/16
+  wan_gateway: 203.0.113.1
+  syslog_server: 10.0.0.5
+sites:
+  Branch-North:
+    lan_subnet: 10.21.0.0/16
+devices:
+  FW-BRANCH-02:
+    wan_gateway: 198.51.100.1
+manage:
+  prune: []            # e.g. [address] to delete undeclared address objects (destructive; needs acknowledgement)
+resources:
+  addresses:
+    - {name: BRANCH-LAN, subnet: "${lan_subnet}", comment: Branch LAN}
+    - {name: DNS-SERVERS, type: iprange, start_ip: 10.20.0.53, end_ip: 10.20.0.54}
+    - {name: UPDATE-SITE, type: fqdn, fqdn: updates.example.com}
+  address_groups:
+    - {name: BRANCH-INTERNAL, members: [BRANCH-LAN, DNS-SERVERS]}
+  services:
+    - {name: APP-8443, tcp: ["8443"]}
+  service_groups:
+    - {name: WEB, members: [HTTP, HTTPS]}
+  policies:      # declared order is enforced (FortiGate matches top-down)
+    - {id: 100, name: LAN-to-DNS, srcintf: [port1], dstintf: [port2], srcaddr: [BRANCH-LAN], dstaddr: [DNS-SERVERS],
+       service: [DNS], action: accept, logtraffic: all}
+    - {id: 110, name: LAN-to-Internet, srcintf: [port1], dstintf: [wan1], srcaddr: [BRANCH-LAN], dstaddr: [all],
+       service: [WEB, APP-8443], action: accept, nat: enable, logtraffic: all}
+  static_routes:
+    - {id: 1, dst: 0.0.0.0/0, gateway: "${wan_gateway}", device: wan1}
+  system_global:
+    admintimeout: 15
+    strong-crypto: enable
+    admin-https-redirect: enable
+  syslog:
+    status: enable
+    server: "${syslog_server}"
+    port: 514
+    mode: udp

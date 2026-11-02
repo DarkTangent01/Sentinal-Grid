@@ -261,7 +261,7 @@ PW = "correct-horse-battery-staple"
 async def api(db, clean_ch):
     get_settings.cache_clear()
     db.add_all([User(username="admin1", password_hash=hash_password(PW), role="admin"),
-                User(username="analyst1", password_hash=hash_password(PW), role="analyst")])
+                User(username="analyst1", password_hash=hash_password(PW), role="analyst", products=["grid", "nms"])])
     await db.commit()
     from app.bootstrap import seed
     await seed(db)

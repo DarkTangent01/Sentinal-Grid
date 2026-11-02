@@ -287,6 +287,259 @@ MIGRATIONS: list[tuple[int, str, list]] = [
         TTL toDateTime(ts) + INTERVAL 400 DAY
         """,
     ]),
+    (9, "Switch monitoring: device metrics, interface samples, hourly rollups", [
+        # device-level gauges; component is a bounded label (CPU id, sensor / PSU / fan name, PoE unit), never a MAC or description
+        """
+        CREATE TABLE IF NOT EXISTS switch_metrics (
+            ts DateTime('UTC'),
+            switch_id UInt32,
+            metric LowCardinality(String),
+            component LowCardinality(String),
+            value Float64
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (switch_id, metric, component, ts)
+        TTL ts + INTERVAL 90 DAY
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS switch_metrics_hourly (
+            hour DateTime('UTC'),
+            switch_id UInt32,
+            metric LowCardinality(String),
+            component LowCardinality(String),
+            samples SimpleAggregateFunction(sum, UInt64),
+            total SimpleAggregateFunction(sum, Float64),
+            vmin SimpleAggregateFunction(min, Float64),
+            vmax SimpleAggregateFunction(max, Float64)
+        ) ENGINE = AggregatingMergeTree
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (switch_id, metric, component, hour)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS switch_metrics_hourly_mv TO switch_metrics_hourly AS
+        SELECT toStartOfHour(ts) AS hour, switch_id, metric, component, count() AS samples, sum(value) AS total,
+               min(value) AS vmin, max(value) AS vmax
+        FROM switch_metrics GROUP BY hour, switch_id, metric, component
+        """,
+        # per-interface rates and per-interval counter increments (nulls where no valid delta exists)
+        """
+        CREATE TABLE IF NOT EXISTS switch_if_samples (
+            ts DateTime('UTC'),
+            switch_id UInt32,
+            ifindex UInt32,
+            interval_s Float32,
+            rx_bps Nullable(Float64),
+            tx_bps Nullable(Float64),
+            rx_util Nullable(Float32),
+            tx_util Nullable(Float32),
+            rx_pps Nullable(Float64),
+            tx_pps Nullable(Float64),
+            in_errors Nullable(UInt64),
+            out_errors Nullable(UInt64),
+            in_discards Nullable(UInt64),
+            out_discards Nullable(UInt64),
+            crc Nullable(UInt64),
+            oper UInt8,
+            admin UInt8,
+            flags UInt8
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (switch_id, ifindex, ts)
+        TTL ts + INTERVAL 35 DAY
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS switch_if_hourly (
+            hour DateTime('UTC'),
+            switch_id UInt32,
+            ifindex UInt32,
+            samples SimpleAggregateFunction(sum, UInt64),
+            rated SimpleAggregateFunction(sum, UInt64),
+            rx_bps_sum SimpleAggregateFunction(sum, Float64),
+            tx_bps_sum SimpleAggregateFunction(sum, Float64),
+            rx_bps_max SimpleAggregateFunction(max, Float64),
+            tx_bps_max SimpleAggregateFunction(max, Float64),
+            rx_util_max SimpleAggregateFunction(max, Float32),
+            tx_util_max SimpleAggregateFunction(max, Float32),
+            in_errors SimpleAggregateFunction(sum, UInt64),
+            out_errors SimpleAggregateFunction(sum, UInt64),
+            in_discards SimpleAggregateFunction(sum, UInt64),
+            out_discards SimpleAggregateFunction(sum, UInt64),
+            crc SimpleAggregateFunction(sum, UInt64),
+            down_samples SimpleAggregateFunction(sum, UInt64)
+        ) ENGINE = AggregatingMergeTree
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (switch_id, ifindex, hour)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS switch_if_hourly_mv TO switch_if_hourly AS
+        SELECT toStartOfHour(ts) AS hour, switch_id, ifindex, count() AS samples, countIf(rx_bps IS NOT NULL) AS rated,
+               sum(ifNull(rx_bps, 0)) AS rx_bps_sum, sum(ifNull(tx_bps, 0)) AS tx_bps_sum,
+               max(ifNull(rx_bps, 0)) AS rx_bps_max, max(ifNull(tx_bps, 0)) AS tx_bps_max,
+               max(ifNull(rx_util, 0)) AS rx_util_max, max(ifNull(tx_util, 0)) AS tx_util_max,
+               sum(ifNull(in_errors, 0)) AS in_errors, sum(ifNull(out_errors, 0)) AS out_errors,
+               sum(ifNull(in_discards, 0)) AS in_discards, sum(ifNull(out_discards, 0)) AS out_discards,
+               sum(ifNull(crc, 0)) AS crc, countIf(oper = 0 AND admin = 1) AS down_samples
+        FROM switch_if_samples GROUP BY hour, switch_id, ifindex
+        """,
+    ]),
+    (10, "TACACS+ AAA events (authentication, authorization, accounting, connections)", [
+        """
+        CREATE TABLE IF NOT EXISTS tacacs_events (
+            ts DateTime64(3, 'UTC'),
+            server_id UInt32,
+            log LowCardinality(String),
+            msgid LowCardinality(String),
+            event_type LowCardinality(String),
+            result LowCardinality(String),
+            username String,
+            device_address String,
+            device_name LowCardinality(String),
+            client_id UInt32,
+            vendor LowCardinality(String),
+            site LowCardinality(String),
+            port String,
+            remote_addr String,
+            service LowCardinality(String),
+            priv_lvl Nullable(UInt8),
+            profile LowCardinality(String),
+            rule LowCardinality(String),
+            server_address String,
+            identity_source LowCardinality(String),
+            action String,
+            cmd String,
+            cmd_category LowCardinality(String),
+            task_id String,
+            session_id String,
+            elapsed_s Nullable(UInt32),
+            hint String,
+            raw String,
+            fingerprint String,
+            ingest_time DateTime('UTC') DEFAULT now(),
+            INDEX ix_user username TYPE bloom_filter GRANULARITY 4,
+            INDEX ix_dev device_address TYPE bloom_filter GRANULARITY 4,
+            INDEX ix_task task_id TYPE bloom_filter GRANULARITY 4
+        ) ENGINE = ReplacingMergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (server_id, ts, fingerprint)
+        TTL toDateTime(ts) + INTERVAL 400 DAY
+        """,
+    ]),
+    (11, "WAN observability: per-probe RTTs, error class, scheduling delay and ingestion time on ICMP checks", [
+        # rtts: every successful echo RTT of the check, in send order (exact percentiles and jitter from real samples)
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS rtts Array(Float32) DEFAULT []",
+        # error_class: '' (replied or network timeout) | 'local' (resolver / socket failure on the SIEM: not packet loss)
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS error_class LowCardinality(String) DEFAULT ''",
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS error String DEFAULT ''",
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS attempts UInt8 DEFAULT 1",
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS sched_delay_ms Float32 DEFAULT 0",
+        "ALTER TABLE icmp_results ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)",
+    ]),
+    (12, "Wireless (Cisco WLC): AP / radio / WLAN / controller metrics and client RF samples", [
+        """
+        CREATE TABLE IF NOT EXISTS wireless_metrics (
+            ts DateTime64(3, 'UTC'),
+            wlc_id UInt32,
+            ap_id UInt32 DEFAULT 0,
+            slot Int16 DEFAULT -1,
+            wlan_id UInt32 DEFAULT 0,
+            band LowCardinality(String) DEFAULT '',
+            metric LowCardinality(String),
+            value Float64,
+            source LowCardinality(String) DEFAULT ''
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (wlc_id, metric, ap_id, slot, ts)
+        TTL toDateTime(ts) + INTERVAL 90 DAY
+        """,
+        # client samples: high cardinality by design (one row per client per poll), short retention, never labels
+        """
+        CREATE TABLE IF NOT EXISTS wireless_client_samples (
+            ts DateTime64(3, 'UTC'),
+            wlc_id UInt32,
+            mac String,
+            ap_id UInt32 DEFAULT 0,
+            slot Int16 DEFAULT -1,
+            ssid LowCardinality(String) DEFAULT '',
+            band LowCardinality(String) DEFAULT '',
+            rssi_dbm Nullable(Float32),
+            snr_db Nullable(Float32),
+            tx_rate_mbps Nullable(Float32),
+            rx_bytes Nullable(UInt64),
+            tx_bytes Nullable(UInt64),
+            source LowCardinality(String) DEFAULT ''
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (wlc_id, mac, ts)
+        TTL toDateTime(ts) + INTERVAL 14 DAY
+        """,
+    ]),
+    (13, "RF & frequency telemetry: vendor-neutral per-radio samples with band, channel, frequency, source, status and quality", [
+        # value is NULL whenever status != 'ok' (missing / invalid / stale): missing telemetry is never stored as zero
+        """
+        CREATE TABLE IF NOT EXISTS rf_telemetry (
+            ts DateTime64(3, 'UTC'),
+            site LowCardinality(String) DEFAULT '',
+            wlc_id UInt32,
+            ap_id UInt32,
+            radio_id UInt32,
+            slot Int16,
+            vendor LowCardinality(String) DEFAULT '',
+            band LowCardinality(String) DEFAULT '',
+            channel Nullable(Int16),
+            center_mhz Nullable(Int32),
+            width_mhz Nullable(Int16),
+            metric LowCardinality(String),
+            value Nullable(Float64),
+            unit LowCardinality(String) DEFAULT '',
+            source LowCardinality(String) DEFAULT '',
+            status LowCardinality(String) DEFAULT 'ok',
+            quality LowCardinality(String) DEFAULT 'measured'
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (metric, wlc_id, ap_id, radio_id, ts)
+        TTL toDateTime(ts) + INTERVAL 30 DAY
+        """,
+    ]),
+    (14, "NMS service checks: one row per TCP / HTTP / DNS / TLS check result", [
+        # latency is NULL when the check could not measure it (connection refused, DNS failure): never stored as zero
+        """
+        CREATE TABLE IF NOT EXISTS service_results (
+            ts DateTime('UTC'),
+            service_id UInt32,
+            state LowCardinality(String),
+            latency_ms Nullable(Float32),
+            message String
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (service_id, ts)
+        TTL ts + INTERVAL 400 DAY
+        """,
+    ]),
+    (15, "SNMP traps / informs: normalised notification rows with raw varbinds", [
+        # severity / component come from the vendor trap parsers; varbinds is the raw list as JSON (OID, type, value, name)
+        """
+        CREATE TABLE IF NOT EXISTS snmp_traps (
+            ts DateTime('UTC'),
+            switch_id UInt32,
+            source_ip String,
+            version LowCardinality(String),
+            vendor LowCardinality(String),
+            trap_oid String,
+            trap_name String,
+            severity LowCardinality(String),
+            component String,
+            ifindex Nullable(UInt32),
+            summary String,
+            varbinds String,
+            repeats UInt32 DEFAULT 0
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (switch_id, ts)
+        TTL ts + INTERVAL 180 DAY
+        """,
+    ]),
 ]
 
 

@@ -11,6 +11,13 @@ with dashboards, top-N analytics, an event explorer, IP investigations and an al
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | FortiOS compatibility matrix; which source supplies each event type |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security hardening checklist |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Troubleshooting, backup/restore, scaling, **known limitations** |
+| [docs/TACACS.md](docs/TACACS.md) | TACACS+ AAA (tac_plus-ng): servers, device clients, identities, roles / command authorization, accounting, deployment, recovery |
+| [docs/PRODUCTS.md](docs/PRODUCTS.md) | Sentinel Grid (SIEM) and Sentinel NMS (network monitoring): product access, migration, module map, routing |
+| [docs/WIRELESS.md](docs/WIRELESS.md) | Wireless Analysis and RF & Frequency Monitoring (Cisco Catalyst 9800 over SNMP): MIB / OID registry, frequency tables, RF analytics, supported and unsupported metrics, alerts, setup |
+| [docs/SNMP.md](docs/SNMP.md) | Multi-vendor SNMP framework (Cisco, Fortinet, Juniper, Ruckus): engine, fingerprints, adapters, MIB / OID registry, custom OIDs, MIB import, traps, alerts, security, API, deployment, support matrix |
+| [docs/NMS.md](docs/NMS.md) | Sentinel NMS core: any-SNMP-device collection (HOST-RESOURCES / UCD / ENTITY-SENSOR), service checks, maintenance windows, device dependencies, network analytics (health, SLA, capacity forecast, 95th percentile, inventory) and the LibreNMS / Zabbix comparison |
+| [docs/WAN.md](docs/WAN.md) | ISP / WAN observability: circuits, ICMP state machine, outage timing, metric definitions, ISP incidents, correlation, alerts |
+| [docs/SWITCHES.md](docs/SWITCHES.md) | Switch monitoring (Cisco / Ruckus ICX, SNMP): metrics, MIBs, onboarding, alerts, limitations |
 
 > **Verification status.** 57 automated tests pass (parsing, normalization, API client with mocked FortiGate responses,
 > pagination, retries, rate limiting, dedupe, persistence and aggregation accuracy on embedded ClickHouse, alert rules,

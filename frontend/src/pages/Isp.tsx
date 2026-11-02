@@ -6,17 +6,38 @@ import { useTheme } from "../lib/theme";
 import { escHtml, fmtBytes, fmtDuration, fmtNum, fmtTime, getTimezone } from "../lib/format";
 import { CHART_THEME, Chart, PALETTES, SERIES_ROLE, axisStyle } from "../components/Chart";
 import { Card, Drawer, Empty, Kpi, Loading, TableWrap, Tabs, Time, rowProps } from "../components/ui";
-import { IcmpMonitor } from "./IcmpMonitor";
+import { useSearchParams } from "react-router-dom";
+import { WanOverview } from "./wan/Overview";
+import { WanLive } from "./wan/Live";
+import { WanCircuits } from "./wan/Circuits";
+import { WanIncidents } from "./wan/Incidents";
+import { WanAnalytics, WanConfig, WanEvents } from "./wan/Analytics";
 
 const TAB_KEY = "siem.isp.tab";
+export const ISP_TABS: [string, string][] = [["overview", "WAN overview"], ["live", "Live ISP monitoring"], ["circuits", "Circuit inventory"], ["incidents", "ISP incidents"],
+  ["analytics", "Analytics & reports"], ["events", "Event history"], ["config", "Monitoring configuration"], ["sdwan", "SD-WAN health checks"]];
+const LEGACY: Record<string, string> = { icmp: "live" };
 
 export function Isp() {
-  const [tab, setTabS] = useState<string>(() => { try { return localStorage.getItem(TAB_KEY) || "sdwan"; } catch { return "sdwan"; } });
-  const setTab = (t: string) => { setTabS(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ } };
+  const [sp, setSp] = useSearchParams();
+  const stored = (() => { try { return localStorage.getItem(TAB_KEY) || ""; } catch { return ""; } })();
+  const raw = sp.get("tab") || LEGACY[stored] || stored || "overview";
+  const tab = ISP_TABS.some(([k]) => k === raw) ? raw : LEGACY[raw] || "overview";
+  const setTab = (t: string) => { setSp({ tab: t }); try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ } };
   return (
     <div className="min-w-0">
-      <Tabs value={tab} onChange={setTab} tabs={[{ key: "sdwan", label: "SD-WAN health checks" }, { key: "icmp", label: "ICMP monitoring (public IPs)" }]} />
-      {tab === "sdwan" ? <IspSdwan /> : <IcmpMonitor />}
+      <Tabs value={tab} onChange={setTab} tabs={ISP_TABS.map(([key, label]) => ({ key, label }))} />
+      {/* key: re-mount on navigation so click-through filters from the URL apply */}
+      <div key={sp.toString()}>
+        {tab === "overview" && <WanOverview />}
+        {tab === "live" && <WanLive />}
+        {tab === "circuits" && <WanCircuits />}
+        {tab === "incidents" && <WanIncidents />}
+        {tab === "analytics" && <WanAnalytics />}
+        {tab === "events" && <WanEvents />}
+        {tab === "config" && <WanConfig />}
+        {tab === "sdwan" && <IspSdwan />}
+      </div>
     </div>
   );
 }

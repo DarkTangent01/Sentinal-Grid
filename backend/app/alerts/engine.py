@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.filters import table
@@ -695,6 +695,28 @@ async def rule_admin_off_hours_change(ch, now, p):
     return out
 
 
+async def rule_iac_drift(ch, now, p):
+    from ..db.models import Firewall, IacDrift
+    from ..db.pg import session_factory
+    from ..iac.diff import SEV
+    floor = SEV.index(p.get("min_severity", "medium"))
+    out = []
+    async with session_factory()() as s:
+        rows = (await s.execute(select(IacDrift, Firewall.name).join(Firewall, Firewall.id == IacDrift.firewall_id).where(
+            IacDrift.checked_at >= now - timedelta(minutes=int(p["window_minutes"])), IacDrift.status == "drift"))).all()
+    for r, name in rows:
+        hits = [f for f in r.findings if SEV.index(f["severity"]) >= floor]
+        if not hits:
+            continue
+        top = max(hits, key=lambda f: SEV.index(f["severity"]))
+        out.append(Detection(group_key=f"iac-drift:{r.firewall_id}", count=len(hits), first_seen=_dt(r.checked_at), last_seen=_dt(r.checked_at),
+                             firewall_ids=[r.firewall_id], severity="critical" if top["severity"] == "critical" else None,
+                             explanation=f"{name} differs from its approved IaC configuration in {len(hits)} place(s); most severe: {top['explanation']}",
+                             evidence={"drift_id": r.id, "counts": r.counts, "findings": hits[:20]},
+                             event_filter={"category": ["system"], "firewall_id": [r.firewall_id]}))
+    return out
+
+
 async def _bgp_report(ch, now, minutes, correlate=False):
     from ..bgp import report
     from ..db.pg import session_factory
@@ -821,10 +843,25 @@ RULES = {
     "bgp_prefix_anomaly": rule_bgp_prefix_anomaly, "bgp_route_leak": rule_bgp_route_leak, "bgp_critical_prefix": rule_bgp_critical_prefix,
     "identity_auth_failures": rule_identity_auth_failures, "identity_success_after_failures": rule_identity_success_after_failures,
     "identity_unusual_login": rule_identity_unusual_login, "admin_account_change": rule_admin_account_change,
-    "admin_off_hours_change": rule_admin_off_hours_change,
+    "admin_off_hours_change": rule_admin_off_hours_change, "iac_drift": rule_iac_drift,
     "win_bruteforce": rule_win_bruteforce, "win_password_spray": rule_win_password_spray, "win_lockout": rule_win_lockout,
     "win_priv_group": rule_win_priv_group, "win_log_cleared": rule_win_log_cleared, "win_new_service": rule_win_new_service,
 }
+from ..switches.alerts import AUTO_RESOLVE as _SWITCH_AUTO_RESOLVE, RULES as _SWITCH_RULES, resolve_cleared as _resolve_cleared  # noqa: E402
+
+from ..tacacs.alerts import AUTO_RESOLVE as _TACACS_AUTO_RESOLVE, RULES as _TACACS_RULES  # noqa: E402
+
+from ..wan_alerts import AUTO_RESOLVE as _WAN_AUTO_RESOLVE, RULES as _WAN_RULES  # noqa: E402
+from ..wireless.alerts import AUTO_RESOLVE as _WIRELESS_AUTO_RESOLVE, RULES as _WIRELESS_RULES  # noqa: E402
+
+RULES.update(_SWITCH_RULES)
+RULES.update(_TACACS_RULES)
+RULES.update(_WAN_RULES)
+from ..nms.alerts import AUTO_RESOLVE as _NMS_AUTO_RESOLVE, RULES as _NMS_RULES  # noqa: E402
+
+RULES.update(_WIRELESS_RULES)
+RULES.update(_NMS_RULES)
+_AUTO_RESOLVE = _SWITCH_AUTO_RESOLVE | _TACACS_AUTO_RESOLVE | _WAN_AUTO_RESOLVE | _WIRELESS_AUTO_RESOLVE | _NMS_AUTO_RESOLVE
 
 
 async def ensure_default_rules(s: AsyncSession) -> None:
@@ -843,24 +880,42 @@ async def ensure_default_rules(s: AsyncSession) -> None:
     await s.commit()
 
 
+async def _latest_alerts(s: AsyncSession, rule_key: str, group_keys: set[str]) -> dict[str, Alert]:
+    """Latest alert (highest open_seq) per group for one rule."""
+    if not group_keys:
+        return {}
+    top = (select(Alert.group_key, func.max(Alert.open_seq).label("seq"))
+           .where(Alert.rule_key == rule_key, Alert.group_key.in_(group_keys)).group_by(Alert.group_key).subquery())
+    rows = (await s.execute(select(Alert).join(top, and_(Alert.group_key == top.c.group_key, Alert.open_seq == top.c.seq))
+                            .where(Alert.rule_key == rule_key))).scalars().all()
+    return {a.group_key: a for a in rows}
+
+
 async def upsert_detections(s: AsyncSession, rule: AlertRule, detections: list[Detection], now: datetime,
                             touched: list | None = None) -> dict:
     """touched (optional) receives (alert, created: bool) for correlation and notifications."""
     from ..assets import asset_map, bump
     stats = {"created": 0, "updated": 0, "suppressed": 0}
     sups = (await s.execute(select(Suppression).where(Suppression.rule_key == rule.key))).scalars().all()
+    from ..products import alert_product
+    in_maintenance = None
+    if alert_product(rule.key) == "nms":  # NMS maintenance windows hold back new alerts of the devices they cover
+        from ..nms.maintenance import matcher
+        in_maintenance = await matcher(s, now)
     active_sup = {x.group_key for x in sups if x.until is None or _dt(x.until) > now}
     dets = detections[:200]
     assets = await asset_map(s, [x for d in dets for x in (d.src_ip, d.dst_ip) if x])
     order = ["low", "normal", "high", "critical"]
+    latest_by = await _latest_alerts(s, rule.key, {d.group_key for d in dets})  # one query, not one per detection
     for d in dets:
         if d.group_key in active_sup or "*" in active_sup:
             stats["suppressed"] += 1
             continue
+        if in_maintenance and in_maintenance(d):
+            stats["maintenance"] = stats.get("maintenance", 0) + 1
+            continue
         crit = max((assets[x].criticality for x in (d.src_ip, d.dst_ip) if x in assets), key=lambda c: order.index(c) if c in order else 1, default="")
-        rows = (await s.execute(select(Alert).where(Alert.rule_key == rule.key, Alert.group_key == d.group_key)
-                                .order_by(Alert.open_seq.desc()).limit(1))).scalars().all()
-        latest = rows[0] if rows else None
+        latest = latest_by.get(d.group_key)
         if latest and latest.status != "resolved":
             latest.last_seen = max(_dt(latest.last_seen), d.last_seen)
             latest.event_count = max(int(latest.event_count or 0), d.count)
@@ -885,6 +940,7 @@ async def upsert_detections(s: AsyncSession, rule: AlertRule, detections: list[D
                   evidence=json.loads(json.dumps(d.evidence, default=str)), mitre=rule.mitre or RULE_MITRE.get(rule.key, {}),
                   event_filter={**d.event_filter, "start": d.first_seen.isoformat()})
         s.add(a)
+        latest_by[d.group_key] = a  # a later detection of the same group in this run must see (and update) this alert
         stats["created"] += 1
         if touched is not None:
             touched.append((a, True))
@@ -924,6 +980,12 @@ async def run_rules(ch: ClickHouse, s: AsyncSession, now: datetime | None = None
             dets = await fn(ch, now, params)
             result[rule.key] = await upsert_detections(s, rule, dets, now, touched)
             _LAST_RUN[rule.key] = now
+            if rule.key in _AUTO_RESOLVE:  # stateful switch / TACACS+ conditions resolve themselves and notify recovery
+                from ..notify import alert_resolved
+                for a in await _resolve_cleared(s, rule.key, {d.group_key for d in dets}, now):
+                    await alert_resolved(s, a)
+                    result[rule.key]["resolved"] = result[rule.key].get("resolved", 0) + 1
+                await s.commit()
         except Exception as e:
             await s.rollback()
             log.exception("rule %s failed", rule.key)

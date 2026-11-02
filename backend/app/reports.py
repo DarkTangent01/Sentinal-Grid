@@ -52,7 +52,7 @@ async def generate(s: AsyncSession, ch: ClickHouse, name: str, start: datetime, 
         summary["alerts"] = sum(r[3] for r in rows)
         parts.append(f"<h2>Alerts ({summary['alerts']})</h2>" + _table(["Detection", "Severity", "Alerts"], [[r[1], r[2], r[3]] for r in rows]))
     if "incidents" in sections:
-        incs = (await s.execute(select(Incident).where(Incident.last_seen >= start, Incident.first_seen < end)
+        incs = (await s.execute(select(Incident).where(Incident.category == "security", Incident.last_seen >= start, Incident.first_seen < end)
                                 .order_by(Incident.score.desc()).limit(25))).scalars().all()
         closed = [i for i in incs if i.resolved_at]
         mttr = (sum(((i.resolved_at - i.created_at).total_seconds() for i in closed), 0) / len(closed) / 3600) if closed else None

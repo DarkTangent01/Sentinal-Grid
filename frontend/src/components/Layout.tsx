@@ -2,20 +2,21 @@ import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { RangeKey, useGlobal, useMe } from "../lib/context";
+import { RangeKey, useGlobal, useLastUpdated, useMe } from "../lib/context";
 import { fmtTime } from "../lib/format";
 import { ThemeToggle } from "../lib/theme";
 import { Sidebar, useSidebarCollapsed } from "./Sidebar";
+import { Product } from "../lib/products";
 
 const RANGES: [RangeKey, string][] = [["5m", "Last 5 min"], ["15m", "Last 15 min"], ["1h", "Last hour"], ["24h", "Last 24 h"], ["7d", "Last 7 days"], ["custom", "Custom…"]];
 
-export function Layout({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {
+export function Layout({ children, onLogout, product }: { children: ReactNode; onLogout: () => void; product: Product }) {
   const g = useGlobal();
   const me = useMe();
   const qc = useQueryClient();
   const [cs, setCs] = useState(g.start);
   const [ce, setCe] = useState(g.end);
-  const fws = useQuery({ queryKey: ["firewalls-lite"], queryFn: () => api<any[]>("/firewalls"), staleTime: 60_000 });
+  const fws = useQuery({ queryKey: ["firewalls"], queryFn: () => api<any[]>("/firewalls"), staleTime: 60_000 });
   const sys = useQuery({ queryKey: ["system-status"], queryFn: () => api<any>("/system/status"), refetchInterval: 60_000 });
   const demo = sys.data && (sys.data.demo_mode || sys.data.sources_24h?.some((s: any) => s.source === "demo"));
   const sites = Array.from(new Set((fws.data || []).map((f) => f.site).filter(Boolean)));
@@ -28,7 +29,7 @@ export function Layout({ children, onLogout }: { children: ReactNode; onLogout: 
   return (
     <div className="flex h-full min-w-0">
       {navOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setNavOpen(false)} aria-hidden />}
-      <Sidebar me={me} open={navOpen} collapsed={collapsed} setCollapsed={setCollapsed} onLogout={onLogout} lastIngest={lastIngest} />
+      <Sidebar me={me} product={product} open={navOpen} collapsed={collapsed} setCollapsed={setCollapsed} onLogout={onLogout} lastIngest={lastIngest} />
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {demo && (
           <div className="bg-amber-500/15 border-b border-amber-600/50 text-amber-200 text-xs px-4 py-1.5">
@@ -56,9 +57,9 @@ export function Layout({ children, onLogout }: { children: ReactNode; onLogout: 
             <option value="">All sites</option>
             {sites.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <GlobalSearch />
+          {me.products.includes("grid") && <GlobalSearch />}
           <div className="flex-1" />
-          <span className="text-xs text-muted whitespace-nowrap hidden sm:inline">Updated: {g.lastUpdated ? fmtTime(g.lastUpdated) : "—"}</span>
+          <LastUpdated />
           <select aria-label="Auto-refresh" className="input" value={g.refreshSec} onChange={(e) => g.setRefreshSec(Number(e.target.value))}>
             <option value={0}>Auto-refresh off</option><option value={15}>Every 15 s</option>
             <option value={30}>Every 30 s</option><option value={60}>Every 1 min</option><option value={300}>Every 5 min</option>
@@ -110,4 +111,10 @@ function GlobalSearch() {
         placeholder="Search IP, domain, #incident, query…  ( / )" value={v} onChange={(e) => setV(e.target.value)} />
     </form>
   );
+}
+
+/** Own component: it re-renders on every query success without re-rendering the header or the page. */
+function LastUpdated() {
+  const t = useLastUpdated();
+  return <span className="text-xs text-muted whitespace-nowrap hidden sm:inline">Updated: {t ? fmtTime(new Date(t)) : "—"}</span>;
 }

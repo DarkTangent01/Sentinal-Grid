@@ -1,5 +1,5 @@
-import { createContext, ReactNode, useContext, useMemo, useState } from "react";
-import { useQuery, UseQueryOptions } from "@tanstack/react-query";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient, UseQueryOptions } from "@tanstack/react-query";
 import { api, Params } from "./api";
 
 export type RangeKey = "5m" | "15m" | "1h" | "24h" | "7d" | "custom";
@@ -10,7 +10,6 @@ interface GlobalFilter {
   refreshSec: number; setRefreshSec: (n: number) => void;
   firewallId: string; setFirewallId: (s: string) => void;
   site: string; setSite: (s: string) => void;
-  lastUpdated: Date | null; markUpdated: () => void;
   params: Params;
 }
 
@@ -28,7 +27,6 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [refreshSec, setRefreshS] = useState<number>(load("siem.refresh", 0));
   const [firewallId, setFirewallId] = useState("");
   const [site, setSite] = useState("");
-  const [lastUpdated, setLast] = useState<Date | null>(null);
 
   const params = useMemo<Params>(() => {
     const p: Params = {};
@@ -41,13 +39,13 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     return p;
   }, [range, start, end, firewallId, site]);
 
-  const v: GlobalFilter = {
+  // memoised: a new object every render re-rendered every page and chart under the provider
+  const v = useMemo<GlobalFilter>(() => ({
     range, setRange: (r) => { setRangeS(r); save("siem.range", r); },
     start, end, setCustom: (s, e) => { setStart(s); setEnd(e); setRangeS("custom"); },
     refreshSec, setRefreshSec: (n) => { setRefreshS(n); save("siem.refresh", n); },
-    firewallId, setFirewallId, site, setSite,
-    lastUpdated, markUpdated: () => setLast(new Date()), params,
-  };
+    firewallId, setFirewallId, site, setSite, params,
+  }), [range, start, end, refreshSec, firewallId, site, params]);
   return <Ctx.Provider value={v}>{children}</Ctx.Provider>;
 }
 
@@ -63,17 +61,25 @@ export function useData<T = any>(path: string, extra?: Params, opts?: Partial<Us
   const params = { ...g.params, ...(extra || {}) };
   return useQuery<T>({
     queryKey: [path, params],
-    queryFn: async () => {
-      const r = await api<T>(path, { params });
-      g.markUpdated();
-      return r;
-    },
+    queryFn: ({ signal }) => api<T>(path, { params, signal }),  // signal: a superseded range/filter aborts the old request
     refetchInterval: g.refreshSec ? g.refreshSec * 1000 : false,
     placeholderData: (prev) => prev,
     ...(opts as object),
   });
 }
 
-export interface Me { id: number; username: string; role: "admin" | "analyst"; timezone: string }
+export interface Me { id: number; username: string; role: "admin" | "analyst"; timezone: string;
+  products: ("grid" | "nms")[]; default_product?: "grid" | "nms" | null }
 export const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
+
+/** Time of the newest successful query. Reads the query cache instead of global state, so a query finishing
+ *  re-renders only the component that shows this, not the whole app. */
+export function useLastUpdated(): number | null {
+  const qc = useQueryClient();
+  const [t, setT] = useState<number | null>(null);
+  useEffect(() => qc.getQueryCache().subscribe((e) => {
+    if (e.type === "updated" && e.action.type === "success") setT(e.query.state.dataUpdatedAt);
+  }), [qc]);
+  return t;
+}

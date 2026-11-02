@@ -87,7 +87,7 @@ PW = "correct-horse-battery-staple"
 async def api(db, clean_ch):
     get_settings.cache_clear()
     db.add_all([User(username="admin1", password_hash=hash_password(PW), role="admin"),
-                User(username="analyst1", password_hash=hash_password(PW), role="analyst"),
+                User(username="analyst1", password_hash=hash_password(PW), role="analyst", products=["grid", "nms"]),
                 Firewall(name="fw1", host="fgt.test.local", https_port=443, token_ciphertext=TokenCipher().encrypt("tok-1234567890"),
                          tags=[], syslog_source_ips=[], capabilities={}, health={}, api_log_cursor={})])
     await db.commit()
