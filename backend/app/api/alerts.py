@@ -128,7 +128,11 @@ async def update_rule(key: str, body: RuleIn, request: Request, admin: User = De
     if not r:
         raise HTTPException(404, "not found")
     if body.params is not None:
-        defaults = next(d["params"] for d in DEFAULT_RULES if d["key"] == key)
+        defaults = next((d["params"] for d in DEFAULT_RULES if d["key"] == key), None)
+        if defaults is None:
+            if not key.startswith("yml_"):
+                raise HTTPException(422, "this rule has no tunable parameters here")
+            defaults = {"threshold": 1.0, "interval_minutes": 5}   # custom YAML rules: threshold and cadence only
         unknown = set(body.params) - set(defaults)
         if unknown:
             raise HTTPException(422, f"unknown parameters: {sorted(unknown)}")

@@ -1,0 +1,35 @@
+id: NET-3003
+name: Abnormal east-west fan-out on administrative ports
+description: >
+  One internal host connected to many internal hosts on remote-administration ports (SSH, telnet, RPC, SMB, RDP,
+  WinRM) within minutes: lateral movement or worm-like spreading. Only traffic that crosses a firewall is visible.
+version: 1
+severity: high
+category: lateral_movement
+log_source: {category: traffic, product: fortigate}
+detection:
+  selection:
+    src_ip: {internal: true}
+    dst_ip: {internal: true}
+    dst_port: [22, 23, 135, 139, 445, 3389, 5985, 5986]
+  condition:
+    group_by: [src_ip]
+    distinct_count: {field: dst_ip, threshold: 25}
+    timeframe: 15m
+explanation: "{src_ip} reached {metric} internal hosts on admin ports in {timeframe} (threshold {threshold}): {samples}"
+data_sources: [FortiGate traffic logs for inter-VLAN / inter-zone traffic]
+falsepositives: [Vulnerability scanners, patch / inventory servers, jump hosts (allowlist them)]
+investigation:
+  - Identify the host and the account in use; check for new services or scheduled tasks on targets (Windows rules)
+  - Isolate the host if the activity is not an approved tool
+mitre: {tactic: TA0008, techniques: [T1021]}
+tests:
+  - name: SMB to 30 hosts
+    events: [{src_ip: 10.1.1.40, dst_ip: {ipseq: ["10.1.5.", 1, 30]}, dst_port: 445, action: accept}]
+    expect_alerts: 1
+  - name: 10 hosts is normal
+    events: [{src_ip: 10.1.1.40, dst_ip: {ipseq: ["10.1.5.", 1, 10]}, dst_port: 445, action: accept}]
+    expect_alerts: 0
+  - name: web traffic does not count
+    events: [{src_ip: 10.1.1.40, dst_ip: {ipseq: ["10.1.5.", 1, 30]}, dst_port: 443, action: accept}]
+    expect_alerts: 0

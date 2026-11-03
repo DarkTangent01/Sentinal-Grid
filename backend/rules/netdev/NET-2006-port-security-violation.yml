@@ -1,0 +1,21 @@
+id: NET-2006
+name: Unauthorized device (port-security violation)
+description: A switch port saw a MAC address that port security does not allow (unknown device or too many devices).
+version: 1
+severity: high
+category: unauthorized_device
+log_source: {category: security, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: port_security}
+  condition: {group_by: [firewall_name, src_mac], count: 1, timeframe: 10m}
+explanation: "{firewall_name}: port-security violation by {src_mac} ({events} event(s) in {timeframe})"
+data_sources: [Cisco PORT_SECURITY-2-PSECURE_VIOLATION syslog, Ruckus ICX port-security syslog]
+falsepositives: [Replacement of a desk device (new MAC), Docking stations / IP phones with a PC behind them]
+investigation:
+  - Look the MAC up (vendor prefix, asset inventory, NAC) and find the port
+  - Confirm with the site whether the device is approved before clearing the violation
+mitre: {tactic: TA0001, techniques: [T1200]}
+tests:
+  - name: violation
+    events: [{event_subtype: port_security, firewall_name: acc1, src_mac: "00:11:22:33:44:55"}]
+    expect_alerts: 1

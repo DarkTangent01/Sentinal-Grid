@@ -1,0 +1,26 @@
+id: NET-2005
+name: Spanning-tree guard blocked a port (BPDU / root / loop guard)
+description: >
+  A switch blocked or err-disabled a port because it received unexpected BPDUs (BPDU guard), a superior BPDU
+  (root guard) or stopped receiving BPDUs (loop guard): an unauthorised switch, a loop or a root-bridge takeover attempt.
+version: 1
+severity: high
+category: network_attack
+log_source: {category: security, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: [bpdu_guard, stp_guard]}
+  condition: {group_by: [firewall_name, src_intf], count: 1, timeframe: 10m}
+explanation: "{firewall_name} {src_intf}: spanning-tree guard blocked the port ({events} event(s))"
+data_sources: [Cisco SPANTREE-2-* and PM-4-ERR_DISABLE syslog, Ruckus ICX STP syslog]
+falsepositives: [A small unmanaged switch connected at a desk, Cabling changes during maintenance]
+investigation:
+  - Identify what is connected to the port (LLDP / CDP neighbour, MAC table)
+  - Re-enable the port only after the device is removed or approved
+mitre: {tactic: TA0040, techniques: [T1498]}
+tests:
+  - name: BPDU guard
+    events: [{event_subtype: bpdu_guard, firewall_name: acc1, src_intf: GigabitEthernet1/0/7}]
+    expect_alerts: 1
+  - name: root guard
+    events: [{event_subtype: stp_guard, firewall_name: acc1, src_intf: Te1/1/1}]
+    expect_alerts: 1

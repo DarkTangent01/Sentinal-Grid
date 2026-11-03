@@ -135,7 +135,7 @@ async def bgp_correlation(range: str | None = Query("7d", pattern=RANGE), start:
 
 class SourceIn(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9 ._-]+$")
-    kind: str = Field("windows", pattern=r"^(windows|cef|syslog)$")
+    kind: str = Field("windows", pattern=r"^(windows|cef|netdev|syslog)$")
     source_ips: list[str] = Field(min_length=1, max_length=20)
     site: str = Field("", max_length=64)
     enabled: bool = True

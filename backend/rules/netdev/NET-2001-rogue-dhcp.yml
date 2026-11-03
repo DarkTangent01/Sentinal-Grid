@@ -1,0 +1,29 @@
+id: NET-2001
+name: Rogue DHCP server (DHCP snooping drop)
+description: >
+  A switch dropped DHCP server messages (OFFER / ACK) received on an untrusted port: a device that is not an
+  authorised DHCP server is answering clients.
+version: 1
+severity: high
+category: network_attack
+log_source: {category: security, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: dhcp_snooping}
+  condition: {group_by: [firewall_name, src_mac], count: 1, timeframe: 5m}
+explanation: "{firewall_name}: DHCP snooping dropped server messages from {src_mac} ({events} in {timeframe})"
+data_sources: [Cisco DHCP_SNOOPING syslog, Ruckus ICX DHCP snooping syslog (log source kind netdev)]
+falsepositives:
+  - A new legitimate DHCP server or relay connected before its port was marked trusted
+  - Home routers / phones with DHCP enabled plugged into access ports (real policy violation, low risk)
+investigation:
+  - Find the port with the MAC table search (Switch Monitoring → MAC search) and shut it if unexpected
+  - Check whether clients on that VLAN received wrong gateways / DNS servers
+mitre: {tactic: TA0006, techniques: [T1557.003]}
+tests:
+  - name: one snooping drop
+    events: [{event_subtype: dhcp_snooping, firewall_name: lab-switches, src_mac: "00:aa:bb:cc:dd:ee"}]
+    expect_alerts: 1
+    expect_groups: [{src_mac: "00:aa:bb:cc:dd:ee"}]
+  - name: other security event
+    events: [{event_subtype: port_security, firewall_name: lab-switches, src_mac: "00:aa:bb:cc:dd:ee"}]
+    expect_alerts: 0

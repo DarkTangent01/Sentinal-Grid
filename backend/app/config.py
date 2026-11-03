@@ -1,4 +1,5 @@
-"""Environment-based configuration. All secrets come from the environment, never the database."""
+"""Environment-based configuration. Secrets come from files (`<NAME>_FILE`, see secret_files.py) or, for development and
+not-yet-migrated installations, from the environment; never from the database or the image."""
 from functools import lru_cache
 
 from pydantic import Field
@@ -12,7 +13,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # PostgreSQL (metadata, users, config, audit)
-    database_url: str = "postgresql+asyncpg://siem:siem@postgres:5432/siem"
+    # no password in the URL: it comes from DATABASE_PASSWORD_FILE (or is embedded only in environment-only installs)
+    database_url: str = Field(default="postgresql+asyncpg://siem@postgres:5432/siem", repr=False)
+    database_password: str = Field(default="", repr=False)
     # Connection pool per process (pool + overflow = peak connections). The long-running processes share PostgreSQL's
     # default max_connections=100, so the defaults stay small; the worker sizes its own pool from its poll concurrency
     # and syslog parser processes use 1+1 (budget: docs/DEPLOYMENT_AND_ROLLBACK_GUIDE.md).
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     clickhouse_host: str = "clickhouse"
     clickhouse_port: int = 8123
     clickhouse_user: str = "siem"
-    clickhouse_password: str = ""
+    clickhouse_password: str = Field(default="", repr=False)
     clickhouse_database: str = "siem"
     clickhouse_embedded_path: str = ""
     # Concurrent ClickHouse requests per process. One shared client behind a lock serialised every query and insert, so
@@ -37,15 +40,17 @@ class Settings(BaseSettings):
     clickhouse_query_final: bool = False
 
     # Security
-    secret_key: str = Field(default="", description="JWT signing key (>=32 chars)")
-    token_encryption_key: str = Field(default="", description="Fernet key used to encrypt FortiGate API tokens")
+    secret_key: str = Field(default="", repr=False, description="JWT signing key (>=32 chars)")
+    token_encryption_key: str = Field(default="", repr=False, description="Fernet key used to encrypt stored device credentials")
+    # comma-separated earlier Fernet keys, accepted for decryption only while `python -m app.rotate_keys` re-encrypts
+    token_encryption_key_previous: str = Field(default="", repr=False)
     session_ttl_minutes: int = 480
     cookie_secure: bool = True
     login_rate_limit_per_minute: int = 10
     api_rate_limit_per_minute: int = 600
     max_query_range_days: int = 92  # widest custom start/end window accepted by event queries
     bootstrap_admin_username: str = "admin"
-    bootstrap_admin_password: str = ""
+    bootstrap_admin_password: str = Field(default="", repr=False)
 
     # FortiGate API client
     fortigate_timeout_seconds: float = 15.0
@@ -118,7 +123,7 @@ class Settings(BaseSettings):
     geoip_dir: str = "/geoip"
     # AI assistant (Claude API). Off unless an API key is configured. Question → query sends only the question and the
     # field catalogue; summaries send incident/alert content and therefore need AI_ALLOW_DATA_SHARING=true as well.
-    anthropic_api_key: str = ""
+    anthropic_api_key: str = Field(default="", repr=False)
     ai_model: str = "claude-opus-5-5"
     ai_allow_data_sharing: bool = False
     ti_refresh_minutes: int = 60
@@ -134,4 +139,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    from .secret_files import file_overrides, inject_database_password
+    s = Settings(**file_overrides())
+    s.database_url = inject_database_password(s.database_url, s.database_password)
+    return s

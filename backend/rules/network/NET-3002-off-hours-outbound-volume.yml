@@ -1,0 +1,38 @@
+id: NET-3002
+name: Large outbound transfer outside business hours
+description: An internal host sent a large volume to the internet outside business hours (weekday nights and weekends, local time).
+version: 1
+severity: medium
+category: exfiltration
+log_source: {category: traffic, product: fortigate}
+detection:
+  selection:
+    src_ip: {internal: true}
+    dst_ip: {internal: false}
+  filter:
+    action: [deny, block, blocked, dropped]
+  outside_hours: {start: "08:00", end: "20:00", days: [mon, tue, wed, thu, fri], timezone: Asia/Kolkata}
+  condition:
+    group_by: [src_ip]
+    sum: {field: sent_bytes, threshold: 500000000}
+    timeframe: 1h
+explanation: "{src_ip} sent {metric} bytes to the internet outside business hours in {timeframe} (threshold {threshold}); destinations: {samples}"
+data_sources: [FortiGate traffic logs with sent bytes]
+falsepositives: [Scheduled off-site backups and cloud sync (allowlist the source or destination), Software updates on servers]
+investigation:
+  - Compare with the host's normal volume (volume_baseline) and the destinations' reputation
+  - Check the logged-in user and running processes on the host at that time
+mitre: {tactic: TA0010, techniques: [T1048]}
+tests:
+  - name: 600 MB at 23:30 IST on a Thursday
+    now: "2026-01-15T18:00:00Z"
+    events: [{src_ip: 10.1.1.30, dst_ip: 198.51.100.50, sent_bytes: 100000000, action: accept, repeat: 6}]
+    expect_alerts: 1
+  - name: same volume at 17:30 IST is business hours
+    now: "2026-01-15T12:00:00Z"
+    events: [{src_ip: 10.1.1.30, dst_ip: 198.51.100.50, sent_bytes: 100000000, action: accept, repeat: 6}]
+    expect_alerts: 0
+  - name: Saturday afternoon counts as outside hours
+    now: "2026-01-17T09:00:00Z"
+    events: [{src_ip: 10.1.1.30, dst_ip: 198.51.100.50, sent_bytes: 100000000, action: accept, repeat: 6}]
+    expect_alerts: 1

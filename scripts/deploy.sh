@@ -4,20 +4,21 @@
 #   ./scripts/deploy.sh --apply    backup on the server, sync, docker compose build, nginx -t, up -d
 #   SKIP_BACKUP=1 ./scripts/deploy.sh --apply    same, without the backup (only right after a completed one)
 # Override the target with DEPLOY_REMOTE=user@host DEPLOY_PATH=/path.
-# The server keeps its own .env, certificates, GeoIP files and backups: they are excluded, so --delete never touches them.
+# The server keeps its own .env, ./secrets, certificates, GeoIP files and backups: they are excluded, so --delete never
+# touches them. Secrets are never copied from here (docs/SECRET_MANAGEMENT.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REMOTE="${DEPLOY_REMOTE:-siem@10.200.64.58}"
 DEST="${DEPLOY_PATH:-/home/siem/fortisiem}"
 EXCLUDES=(
-  --exclude='.env' --exclude='.env.bak*' --exclude='.env.*.bak' --exclude='.git/' --exclude='.github/' --exclude='.venv/' --exclude='node_modules/' --exclude='frontend/dist/' --exclude='backups/'
+  --exclude='.env' --exclude='.env.bak*' --exclude='.env.*.bak' --exclude='/secrets/' --exclude='.git/' --exclude='.github/' --exclude='.venv/' --exclude='node_modules/' --exclude='frontend/dist/' --exclude='backups/'
   --exclude='.dev/' --exclude='*.db' --exclude='__pycache__/' --exclude='.pytest_cache/' --exclude='.ruff_cache/'
   --exclude='.claude/' --exclude='.DS_Store' --exclude='frontend/tsconfig.tsbuildinfo'
   --exclude='deploy/certs/*.key' --exclude='deploy/certs/*.crt' --exclude='deploy/certs/fortigate-ca/*.pem'
   --exclude='deploy/geoip/*.mmdb' --exclude='docs/SECURITY_AUDIT_REPORT.md'
 )
-SSH=(ssh -o BatchMode=yes "$REMOTE")
+SSH=(ssh -n -o BatchMode=yes "$REMOTE")   # -n: remote commands must not swallow the answers piped to the prompts
 
 sync() {  # $1: extra rsync flags
   # shellcheck disable=SC2086
@@ -58,6 +59,22 @@ fi
 
 echo "[deploy] syncing"
 sync ""
+
+# secrets live in ./secrets on the server (file-mounted, never environment variables). First deploy after that change:
+# move them out of the server's .env (scripts/migrate-secrets.sh), with consent.
+SECRET_KEYS='^(POSTGRES_PASSWORD|CLICKHOUSE_PASSWORD|SECRET_KEY|TOKEN_ENCRYPTION_KEY|BOOTSTRAP_ADMIN_PASSWORD|ANTHROPIC_API_KEY)=.'
+if ! "${SSH[@]}" "cd '$DEST' && test -s secrets/token_encryption_key && test -s secrets/db_app_password"; then
+  echo "[deploy] the server has no ./secrets yet: its secrets are still in .env (visible via docker inspect)."
+  "${SSH[@]}" "cd '$DEST' && ./scripts/migrate-secrets.sh"
+  read -r -p "[deploy] move them into ./secrets on the server now (.env is backed up, mode 600)? type yes: " ok
+  [ "$ok" = "yes" ] || { echo "[deploy] aborted before restarting anything; the old containers keep running"; exit 1; }
+  "${SSH[@]}" "cd '$DEST' && ./scripts/migrate-secrets.sh --apply"
+fi
+if "${SSH[@]}" "grep -Eq '$SECRET_KEYS' '$DEST/.env'"; then
+  echo "[deploy] the server .env still contains secrets; they would reach every container as environment variables."
+  echo "         run on the server: ./scripts/migrate-secrets.sh --apply"
+  exit 1
+fi
 echo "[deploy] building and restarting"
 # One-time cutover to the syslog ingress: the old syslog container still publishes port 514, so it must release the port
 # before the ingress can bind it. Later deploys leave the ingress running (its image does not change), which is what

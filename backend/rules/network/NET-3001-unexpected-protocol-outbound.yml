@@ -1,0 +1,47 @@
+id: NET-3001
+name: Unexpected protocol allowed to the internet
+description: >
+  An internal host made an allowed connection to an external address on a port that should not leave the network
+  (telnet, TFTP, NetBIOS / SMB, RPC, RDP, VNC, database ports).
+version: 2
+status: experimental   # seeded disabled: dry-run against your traffic, then enable
+severity: medium
+category: policy_violation
+log_source: {category: traffic, product: fortigate}
+detection:
+  selection:
+    src_ip: {internal: true}
+    dst_ip: {internal: false}
+    dst_port: [23, 69, 135, 137, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900]
+  filter:
+    action: [deny, block, blocked, dropped]
+  condition:
+    group_by: [src_ip]
+    distinct_count: {field: dst_port, threshold: 1}
+    timeframe: 15m
+explanation: "{src_ip} reached the internet on unexpected port(s) {samples} ({events} allowed session(s) in {timeframe})"
+data_sources: [FortiGate traffic logs (allowed sessions)]
+falsepositives: [Approved remote-support or database replication to a known partner (allowlist the destination)]
+investigation:
+  - Identify the process / user on the host and the destination's owner
+  - Tighten the firewall policy that allowed it (Policy Analytics shows the matching policy)
+mitre: {tactic: TA0010, techniques: [T1048]}
+tests:
+  - name: SMB to the internet
+    events: [{src_ip: 10.1.1.20, dst_ip: 198.51.100.40, dst_port: 445, action: accept}]
+    expect_alerts: 1
+    expect_groups: [{src_ip: 10.1.1.20}]
+  - name: denied is fine
+    events: [{src_ip: 10.1.1.20, dst_ip: 198.51.100.40, dst_port: 445, action: deny}]
+    expect_alerts: 0
+  - name: HTTPS is not unexpected
+    events: [{src_ip: 10.1.1.20, dst_ip: 198.51.100.40, dst_port: 443, action: accept}]
+    expect_alerts: 0
+  - name: one alert per host even with several ports
+    events:
+      - {src_ip: 10.1.1.21, dst_ip: 198.51.100.40, dst_port: 445, action: accept}
+      - {src_ip: 10.1.1.21, dst_ip: 198.51.100.41, dst_port: 3389, action: accept}
+    expect_alerts: 1
+  - name: internal SMB is not this rule
+    events: [{src_ip: 10.1.1.20, dst_ip: 10.1.2.40, dst_port: 445, action: accept}]
+    expect_alerts: 0

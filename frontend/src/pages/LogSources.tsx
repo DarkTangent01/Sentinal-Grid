@@ -6,7 +6,8 @@ import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
 import { Card, Empty, Loading, Modal, TableWrap, Time } from "../components/ui";
 
-const KIND: Record<string, string> = { windows: "Windows Security events", cef: "CEF (any vendor)", syslog: "Plain syslog" };
+const KIND: Record<string, string> = { windows: "Windows Security events", cef: "CEF (any vendor)",
+  netdev: "Network device (Cisco IOS / IOS-XE / NX-OS / C9800, Ruckus ICX)", syslog: "Plain syslog (Cisco messages auto-detected)" };
 
 const NXLOG = `<Extension json>
     Module  xm_json

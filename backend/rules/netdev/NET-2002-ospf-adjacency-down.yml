@@ -1,0 +1,25 @@
+id: NET-2002
+name: OSPF adjacency lost
+description: An OSPF neighbour left FULL (dead timer, interface down, or authentication / parameter mismatch).
+version: 1
+severity: medium
+category: network_availability
+log_source: {category: system, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: ospf_adjacency, action: down}
+  condition: {group_by: [firewall_name, dst_ip], count: 1, timeframe: 5m}
+explanation: "{firewall_name}: OSPF neighbour {dst_ip} went down ({events} change(s) in {timeframe})"
+data_sources: [Cisco OSPF-5-ADJCHG / ADJCHANGE syslog, Ruckus ICX OSPF syslog]
+falsepositives: [Planned maintenance or reboot of the neighbour, Interface flaps on lossy links]
+investigation:
+  - "show ip ospf neighbor / show ip route ospf on both ends"
+  - Check the interface (errors, flaps) and the reason in the message (Dead timer expired, Interface down)
+  - Look for a configuration change or reload on either router just before
+tests:
+  - name: neighbour down
+    events: [{event_subtype: ospf_adjacency, action: down, firewall_name: core1, dst_ip: 10.255.0.2}]
+    expect_alerts: 1
+    expect_groups: [{dst_ip: 10.255.0.2}]
+  - name: neighbour up is not an alert
+    events: [{event_subtype: ospf_adjacency, action: up, firewall_name: core1, dst_ip: 10.255.0.2}]
+    expect_alerts: 0

@@ -37,3 +37,9 @@ def setup_logging(level: str = "INFO") -> None:
     root.handlers[:] = [handler]
     root.setLevel(level)
     logging.getLogger("httpx").setLevel("WARNING")
+    try:  # once per process: secrets still passed as environment variables (names only, never values)
+        from .config import get_settings
+        from .secret_files import warn_plain_env
+        warn_plain_env(get_settings().environment)
+    except Exception:  # configuration errors surface where the settings are first used, with their own message
+        pass

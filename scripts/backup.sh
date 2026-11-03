@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Backs up PostgreSQL (pg_dump) and ClickHouse (native BACKUP to a local File disk path) into ./backups/<timestamp>.
-# TOKEN_ENCRYPTION_KEY is NOT included; store it separately (e.g. a secrets vault).
+# The secrets (./secrets, in particular token_encryption_key) are NOT included; back them up separately (a vault).
 set -euo pipefail
 umask 077  # dumps hold password hashes and encrypted API tokens: owner-only
 cd "$(dirname "$0")/.."
-source .env
+# shellcheck source=lib-env.sh
+source scripts/lib-env.sh
+POSTGRES_USER=$(envval POSTGRES_USER); POSTGRES_DB=$(envval POSTGRES_DB); CLICKHOUSE_DB=$(envval CLICKHOUSE_DB)
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="backups/$TS"; mkdir -p "$OUT" backups/clickhouse
 echo "[backup] postgres -> $OUT/postgres.dump"
@@ -13,7 +15,7 @@ echo "[backup] clickhouse -> backups/clickhouse/$TS.zip"
 # the ClickHouse server writes the archive as its own user (uid 101), not as the host user owning ./backups;
 # group = this host user so the archives stay readable here, and nobody else gets access
 docker compose exec -T clickhouse sh -c "chown clickhouse:$(id -g) /backups && chmod 2770 /backups"
-ch() { docker compose exec -T clickhouse clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"; }
+ch() { chq "$1"; }   # password stays inside the clickhouse container (lib-env.sh)
 # ASYNC: a synchronous BACKUP of a large database outlives clickhouse-client's 300 s receive timeout
 ID=$(ch "BACKUP DATABASE $CLICKHOUSE_DB TO File('/backups/$TS.zip') ASYNC" | cut -f1)
 while :; do

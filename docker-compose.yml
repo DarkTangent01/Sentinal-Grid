@@ -1,24 +1,37 @@
-# FortiGate SIEM — private-network deployment.
+# Sentinel platform — private-network deployment (docs/SECRET_MANAGEMENT.md, docs/DOCKER_HARDENING.md).
 # Usage: cp .env.example .env && ./scripts/gen-secrets.sh && ./scripts/gen-selfsigned-cert.sh && docker compose up -d --build
+#
+# Secrets are files in ./secrets (directory 0700, never committed, never copied into an image), mounted read-only at
+# /run/secrets/<name> only into the services that use them. .env holds non-secret settings only: no password, key or
+# token is passed as an environment variable, so `docker inspect`, `docker compose config` and /proc/*/environ show
+# none of them. Limit (plain Compose, not Swarm): the files are bind mounts of the host files, so anyone who can
+# `docker exec` into a service, or read ./secrets on the host, can read the secrets that service holds.
 name: fortisiem
 
 x-backend: &backend
   build: ./backend
   image: fortisiem-backend:1.0.0
-  env_file: .env
-  environment:
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  env_file: .env           # non-secret settings only (scripts/migrate-secrets.sh moves secrets out of older .env files)
+  environment: &backend-env
+    # no password in the URL: the services read it from DATABASE_PASSWORD_FILE
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-${POSTGRES_USER}}@postgres:5432/${POSTGRES_DB}
+    DATABASE_PASSWORD_FILE: /run/secrets/db_app_password
     CLICKHOUSE_HOST: clickhouse
     CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
     CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB}
     # event chunks ClickHouse keeps rejecting (python -m app.ingest.deadletter); a named volume on syslog/worker keeps them
     INGEST_DEADLETTER_DIR: /var/lib/siem/deadletter
+  secrets: [db_app_password, clickhouse_password]
+  networks: [backend]
   restart: unless-stopped
   stop_grace_period: 30s
   # app runs as uid 10001 on unprivileged ports: no Linux capabilities or privilege escalation needed
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
+  # nothing in the image is writable: heartbeats go to /tmp (tmpfs), state to named volumes
+  read_only: true
+  tmpfs: ["/tmp:size=64m,mode=1777"]
   logging: &logging
     driver: json-file
     options: { max-size: "50m", max-file: "5" }
@@ -32,7 +45,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password   # superuser; the services use db_app_password
+    secrets: [postgres_password]
+    networks: [backend]
     volumes: [pgdata:/var/lib/postgresql/data]
     security_opt: ["no-new-privileges:true"]
     healthcheck:
@@ -49,8 +64,10 @@ services:
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    secrets: [clickhouse_password]
+    networks: [backend]
     volumes:
       - chdata:/var/lib/clickhouse
       - ./deploy/clickhouse/siem.xml:/etc/clickhouse-server/config.d/siem.xml:ro
@@ -69,6 +86,10 @@ services:
   migrate:
     <<: *backend
     command: ["python", "-m", "app.migrate"]
+    environment:
+      <<: *backend-env
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/bootstrap_admin_password   # first start only: seeds the admin account
+    secrets: [db_app_password, clickhouse_password, bootstrap_admin_password]
     restart: "no"
     depends_on:
       postgres: { condition: service_healthy }
@@ -76,6 +97,14 @@ services:
 
   api:
     <<: *backend
+    environment:
+      <<: *backend-env
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+    secrets: [db_app_password, clickhouse_password, secret_key, token_encryption_key, token_encryption_key_previous, anthropic_api_key]
+    networks: [backend, frontend, egress]   # egress: FortiGate / PAN-OS test connections, AI, SNMP tests
     # TACACS+ AAA: "Check now" reads the agent's status.json (read-only; only the worker writes deploy requests)
     group_add: ["10050"]
     volumes:
@@ -94,6 +123,12 @@ services:
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+    secrets: [db_app_password, clickhouse_password, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, egress]             # egress: device polling, TI feeds, notifications, ICMP, SNMP
     # TACACS+ AAA: the worker writes candidate configurations for the tacacs agent and reads its accounting logs
     group_add: ["10050"]
     volumes:
@@ -115,6 +150,7 @@ services:
   ingress:
     build: ./deploy/ingress
     image: fortisiem-ingress:1.0.0
+    networks: [ingest, syslog_edge]         # syslog_edge only carries the published port
     ports:
       # loopback unless an interface address is set: publish on the management/log interface only, never 0.0.0.0
       - "${SYSLOG_BIND_IP:-127.0.0.1}:514:5514/udp"
@@ -135,6 +171,9 @@ services:
   syslog:
     <<: *backend
     command: ["python", "-m", "app.syslog_server"]
+    networks:                               # receives from ingress only; holds no device credentials
+      backend: {}
+      ingest: { aliases: [syslog] }         # explicit: some runtimes only register the service name on the first network
     # no published ports: logs arrive from the ingress relay on 5515 (direct 5514 stays available inside the network)
     volumes:
       - ./deploy/certs/fortigate-ca:/certs:ro
@@ -153,6 +192,12 @@ services:
   traps:
     <<: *backend
     command: ["python", "-m", "app.snmp_traps"]
+    environment:
+      <<: *backend-env
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key          # decrypts the SNMP credential profiles
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+    secrets: [db_app_password, clickhouse_password, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, egress]             # egress: the published UDP port needs a non-internal network
     # SNMP traps / informs (docs/SNMP.md). Bound to loopback until TRAP_BIND_IP is set in .env (e.g. 0.0.0.0 or the
     # management interface address). Only inventory devices authenticating with their own credential profile are accepted.
     ports:
@@ -172,7 +217,10 @@ services:
       - "${WEB_BIND_IP:-127.0.0.1}:443:443"
       - "${WEB_BIND_IP:-127.0.0.1}:80:80"
     volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
+    networks: [frontend]                    # reaches the api only; no route to the databases
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/var/cache/nginx:size=64m", "/var/run:size=1m", "/tmp:size=16m"]
     depends_on:
       api: { condition: service_healthy }
     healthcheck:
@@ -198,6 +246,27 @@ services:
     security_opt: ["no-new-privileges:false"]
     logging: *logging
     deploy: { resources: { limits: { cpus: "1", memory: 512m } } }
+
+networks:
+  backend:          # databases + services that use them; internal: no route out of the host
+    internal: true
+  frontend: {}      # web <-> api
+  egress: {}        # outbound for services that talk to devices / feeds; published UDP ports
+  ingest:           # ingress relay -> syslog; internal, so syslog (untrusted input) has no route out
+    internal: true
+  syslog_edge: {}   # the published syslog port on the ingress relay
+
+# Plain Compose bind-mounts these files read-only at /run/secrets/<name>; they are created by scripts/gen-secrets.sh
+# (new installs) or scripts/migrate-secrets.sh (existing .env), mode 0444 inside a 0700 directory.
+secrets:
+  postgres_password: { file: ./secrets/postgres_password }
+  db_app_password: { file: ./secrets/db_app_password }
+  clickhouse_password: { file: ./secrets/clickhouse_password }
+  secret_key: { file: ./secrets/secret_key }
+  token_encryption_key: { file: ./secrets/token_encryption_key }
+  token_encryption_key_previous: { file: ./secrets/token_encryption_key_previous }   # empty unless rotating
+  bootstrap_admin_password: { file: ./secrets/bootstrap_admin_password }
+  anthropic_api_key: { file: ./secrets/anthropic_api_key }                           # empty unless AI is used
 
 volumes:
   pgdata:

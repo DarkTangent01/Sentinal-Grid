@@ -45,8 +45,8 @@ React 18 + TypeScript + Vite + Tailwind + TanStack Query + ECharts · nginx · r
 
 | Area | What it does |
 |---|---|
-| **Log analytics** | Traffic, DNS-filter, web-filter, IPS, AV, app-control, VPN and system events from FortiGate (and Palo Alto). Dashboards, top sources / destinations / ports, web / URL, DNS, geography and an event explorer with a query language: `src_ip:10.0.0.0/8 AND action:deny AND dst_port:445`, OR / NOT, ranges, wildcards. |
-| **Detections** | 42 built-in security rules (port scans, deny bursts, host sweeps, beaconing, DNS tunnelling, NXDOMAIN bursts, new domains / countries / ports, outbound volume against a 7-day per-host baseline, VPN brute force, impossible travel, Windows auth rules, admin and configuration changes), plus custom rules and **Sigma** import. Every rule is mapped to MITRE ATT&CK. |
+| **Log analytics** | Traffic, DNS-filter, web-filter, IPS, AV, app-control, VPN and system events from FortiGate (and Palo Alto); Windows, CEF and network-device syslog (Cisco IOS / IOS-XE / NX-OS / Catalyst 9800, Ruckus ICX). Dashboards, top sources / destinations / ports, web / URL, DNS, geography and an event explorer with a query language: `src_ip:10.0.0.0/8 AND action:deny AND dst_port:445`, OR / NOT, ranges, wildcards. |
+| **Detections** | 42 built-in security rules plus a **YAML rule pack** (13 network detections, embedded tests, dry runs, versioned custom rules; [DETECTION_RULES.md](docs/DETECTION_RULES.md)) (port scans, deny bursts, host sweeps, beaconing, DNS tunnelling, NXDOMAIN bursts, new domains / countries / ports, outbound volume against a 7-day per-host baseline, VPN brute force, impossible travel, Windows auth rules, admin and configuration changes), plus custom rules and **Sigma** import. Every rule is mapped to MITRE ATT&CK. |
 | **Threat intelligence** | abuse.ch Feodo, Spamhaus DROP, CERT Polska, IPsum and a manual IOC list, matched at ingest on IPs, CIDRs, DNS queries and hostnames, plus retroactive **Hunt**. |
 | **Incidents and cases** | Alerts about one entity within 24 h are correlated into incidents. Severity rises with the number of tactics. Cases have assignees, SLA timers, comments, a timeline, closure verdicts, MTTA / MTTR and per-rule false-positive rates. |
 | **Investigation** | IP investigation pages, an entity graph, hunting queries, bookmarks, workbooks, watchlists and saved / scheduled searches. |
@@ -148,15 +148,17 @@ them. Every component is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 
 ```bash
 cp .env.example .env
-./scripts/gen-secrets.sh                                  # random DB passwords, SECRET_KEY, TOKEN_ENCRYPTION_KEY, admin password
+./scripts/gen-secrets.sh                                  # writes ./secrets/* (0700 dir); .env stays free of secrets
 ./scripts/gen-selfsigned-cert.sh sentinel.example.internal # temporary certificate; replace it with one from your internal CA
 docker compose up -d --build
 docker compose ps                                         # every service healthy; 'migrate' exits 0
 ```
 
-Open `https://<server>/` and sign in as `admin` with the password printed by `gen-secrets.sh`. Then:
+Optionally run `./scripts/create-app-db-role.sh && docker compose up -d` so the services stop using the PostgreSQL superuser.
 
-1. **Settings → Preferences:** set your time zone and change the password. Remove `BOOTSTRAP_ADMIN_PASSWORD` from `.env`.
+Open `https://<server>/` and sign in as `admin` with the password in `secrets/bootstrap_admin_password` (it is not printed). Then:
+
+1. **Settings → Preferences:** set your time zone and change the password, then overwrite `secrets/bootstrap_admin_password` ([SECRET_MANAGEMENT.md](docs/SECRET_MANAGEMENT.md)).
 2. **Settings → Users:** create accounts, assign **Grid** and / or **NMS**, and optionally limit NMS analysts to sites.
 3. Choose your product: **Sentinel Grid** for firewall logs and security, **Sentinel NMS** for network monitoring.
 
@@ -327,11 +329,11 @@ Plans are validated server-side, and quotes and control characters are rejected 
 
 ## Configuration reference
 
-All settings live in `.env`; [.env.example](.env.example) documents each one. The most important:
+Non-secret settings live in `.env`; [.env.example](.env.example) documents each one. Secrets live in `./secrets/` as files, mounted only into the services that need them and read through `<NAME>_FILE` ([SECRET_MANAGEMENT.md](docs/SECRET_MANAGEMENT.md)). Installations that still keep secrets in `.env`: run `./scripts/migrate-secrets.sh`. The most important:
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `SECRET_KEY`, `TOKEN_ENCRYPTION_KEY` | generated | Session signing; encryption of API tokens and SNMP secrets. **Keep `TOKEN_ENCRYPTION_KEY` stable**: changing it makes stored credentials unreadable. |
+| `secrets/secret_key`, `secrets/token_encryption_key` | generated | Session signing; encryption of API tokens and SNMP secrets. **Don't just replace `token_encryption_key`**: rotate it with `token_encryption_key_previous` and `python -m app.rotate_keys` ([CREDENTIAL_ROTATION.md](docs/CREDENTIAL_ROTATION.md)). |
 | `WEB_BIND_IP`, `SYSLOG_BIND_IP`, `TRAP_BIND_IP`, `TACACS_BIND` | `127.0.0.1` (TACACS `0.0.0.0`) | Where each listener is published |
 | `COOKIE_SECURE`, `SESSION_TTL_MINUTES`, `LOGIN_RATE_LIMIT_PER_MINUTE` | secure | Session hardening |
 | `OUTBOUND_ALLOWED_HOSTS` | | Extra destinations allowed for outbound requests (SSRF guard) |
@@ -546,7 +548,7 @@ frontend/src/
   lib/               API client, products / navigation, context, formatting, theme
   pages/             Grid pages; nms/, snmp/, switches/, wireless/, wan/, tacacs/, iac/ for NMS modules
 deploy/              ingress relay, TACACS+ image, ClickHouse config, certificates, GeoIP, sample registry
-scripts/             gen-secrets, self-signed cert, deploy, backup, restore, syslog conntrack fix
+scripts/             gen-secrets, migrate-secrets, create-app-db-role, self-signed cert, deploy, backup, restore, syslog conntrack fix
 docs/                product, module, operations, security and engineering documentation
 ```
 
@@ -569,6 +571,9 @@ docs/                product, module, operations, security and engineering docum
 | Operations | [OPERATIONS.md](docs/OPERATIONS.md): troubleshooting, backup / restore, scaling, known limitations |
 | Deployment | [DEPLOYMENT_AND_ROLLBACK_GUIDE.md](docs/DEPLOYMENT_AND_ROLLBACK_GUIDE.md) |
 | Security | [SECURITY.md](docs/SECURITY.md), [SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md), [SECURITY_AUDIT_REPORT.md](docs/SECURITY_AUDIT_REPORT.md) |
+| Secrets and containers | [DOCKER_SECRETS_SECURITY_AUDIT.md](docs/DOCKER_SECRETS_SECURITY_AUDIT.md), [SECRET_MANAGEMENT.md](docs/SECRET_MANAGEMENT.md), [DOCKER_HARDENING.md](docs/DOCKER_HARDENING.md), [CREDENTIAL_ROTATION.md](docs/CREDENTIAL_ROTATION.md), [SECURITY_INCIDENT_RESPONSE.md](docs/SECURITY_INCIDENT_RESPONSE.md) |
+| Detection rules | [DETECTION_RULES.md](docs/DETECTION_RULES.md): YAML rule format, operators, testing, dry runs, shipped pack |
+| SIEM assessment | [CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md), [EXISTING_FEATURES.md](docs/EXISTING_FEATURES.md), [SIEM_GAP_ANALYSIS.md](docs/SIEM_GAP_ANALYSIS.md), [SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md), [TECHNICAL_DEBT.md](docs/TECHNICAL_DEBT.md), [SIEM_IMPLEMENTATION_ROADMAP.md](docs/SIEM_IMPLEMENTATION_ROADMAP.md) |
 | Engineering reports | [PROJECT_ARCHITECTURE_AUDIT.md](docs/PROJECT_ARCHITECTURE_AUDIT.md), [CODE_QUALITY_REPORT.md](docs/CODE_QUALITY_REPORT.md), [FRONTEND_PERFORMANCE_REPORT.md](docs/FRONTEND_PERFORMANCE_REPORT.md), [API_PERFORMANCE_REPORT.md](docs/API_PERFORMANCE_REPORT.md), [DATABASE_PERFORMANCE_REPORT.md](docs/DATABASE_PERFORMANCE_REPORT.md), [PERFORMANCE_BENCHMARKS.md](docs/PERFORMANCE_BENCHMARKS.md), [TECHNICAL_DEBT_REGISTER.md](docs/TECHNICAL_DEBT_REGISTER.md), [IMPLEMENTATION_CHANGELOG.md](docs/IMPLEMENTATION_CHANGELOG.md), [UI_AUDIT.md](docs/UI_AUDIT.md) |
 
 ---
@@ -579,7 +584,7 @@ docs/                product, module, operations, security and engineering docum
 
 **Production deployment.** Deployed with Docker Compose to the production server. After deployment, migrations 0027 and ClickHouse 15 were applied, every service reported healthy, and switches and the Catalyst 9800 are being polled.
 
-**Validated against real devices:** FortiGate syslog and REST, Cisco Catalyst switches, Ruckus ICX switches and the Cisco Catalyst 9800 controller.
+**Validated against real devices** (production, 2026-11-02): 3 FortiGates (syslog and REST), 11 Cisco Catalyst switches and 1 Cisco Catalyst 9800 controller over SNMP. Ruckus ICX support is tested against labelled fixtures and a local simulator only; no Ruckus device is in production yet.
 
 **Fortinet and Juniper SNMP adapters.** These are implemented from the public MIBs and tested against labelled fixtures only. They show as *implemented* (not *observed*) in NMS → SNMP Monitoring → Support Matrix until a real device of that product line answers.
 

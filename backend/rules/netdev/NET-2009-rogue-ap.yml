@@ -1,0 +1,23 @@
+id: NET-2009
+name: Rogue access point detected
+description: >
+  The wireless controller reported a rogue access point (an unknown AP heard by managed APs, possibly on the wired
+  network). Catalyst 9800 message identifiers vary between releases; any controller message mentioning a rogue is used.
+version: 1
+severity: medium
+category: unauthorized_device
+log_source: {category: security, event_type: netdev, product: cisco catalyst 9800}
+detection:
+  selection: {event_subtype: rogue_ap}
+  condition: {group_by: [firewall_name], count: 1, timeframe: 15m}
+explanation: "{firewall_name}: {events} rogue-AP message(s) in {timeframe}: {samples}"
+data_sources: [Catalyst 9800 syslog (rogue / RRM messages)]
+falsepositives: [Neighbouring businesses' APs (classify them as friendly on the controller), Hotspots on phones]
+investigation:
+  - Open the rogue list on the controller (Monitoring → Wireless → Rogues) and check whether it is on the wired network
+  - Locate it with the detecting APs and RSSI; contain only after confirming it is on your network (legal implications)
+mitre: {tactic: TA0006, techniques: [T1557]}
+tests:
+  - name: rogue reported
+    events: [{event_subtype: rogue_ap, firewall_name: c9800, msg: "Rogue AP 00:11:22:aa:bb:cc detected on channel 36"}]
+    expect_alerts: 1

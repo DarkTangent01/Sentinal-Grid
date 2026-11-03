@@ -652,7 +652,7 @@ class LogSource(Base):
     __tablename__ = "log_sources"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
-    kind: Mapped[str] = mapped_column(String(16), default="windows")  # windows | cef | syslog
+    kind: Mapped[str] = mapped_column(String(16), default="windows")  # windows | cef | netdev | syslog
     source_ips: Mapped[list] = mapped_column(JSON, default=list)
     site: Mapped[str] = mapped_column(String(64), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

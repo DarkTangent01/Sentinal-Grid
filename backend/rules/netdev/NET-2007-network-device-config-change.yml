@@ -1,0 +1,25 @@
+id: NET-2007
+name: Network device configuration changed
+description: >
+  A switch, router or wireless controller reported a configuration change, with the user and source address when the
+  device logs them. FortiGate changes are covered by config_change / risky_config_change.
+version: 1
+severity: medium
+category: configuration_change
+log_source: {category: system, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: config_change}
+  condition: {group_by: [firewall_name, user], count: 1, timeframe: 10m}
+explanation: "{firewall_name}: configuration changed by {user} ({events} change event(s) in {timeframe})"
+data_sources: [Cisco SYS-5-CONFIG_I / VSHD_SYSLOG_CONFIG_I / PARSER-5-CFGLOG_LOGGEDCMD syslog, Ruckus "running-config was changed"]
+falsepositives: [Approved changes in a change window, Automation accounts (allowlist the user)]
+investigation:
+  - Match the change to an approved change ticket
+  - Compare with the TACACS+ accounting record for the same user and time (command level)
+  - Check whether the source address is a jump host
+mitre: {tactic: TA0005, techniques: [T1562]}
+tests:
+  - name: change by a user
+    events: [{event_subtype: config_change, firewall_name: acc1, user: netadmin, src_ip: 192.0.2.50}]
+    expect_alerts: 1
+    expect_groups: [{user: netadmin}]

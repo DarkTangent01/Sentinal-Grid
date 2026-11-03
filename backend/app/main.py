@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 
-from .api import admin, alerts, analytics, auth, context, firewalls, hardening, hunt, iac, identity, isp, ops, policies, soc, switches, tacacs, wan, wireless, wireless_rf, nms, snmp
+from .api import admin, alerts, analytics, auth, context, firewalls, hardening, hunt, iac, identity, isp, ops, policies, soc, switches, tacacs, wan, wireless, wireless_rf, nms, snmp, yaml_rules
 from .config import get_settings
 from .db.ch import get_ch
 from .db.pg import get_engine
@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
             request_id.reset(token)
 
     for r in (auth.router, firewalls.router, analytics.router, alerts.router, admin.router, hardening.router, policies.router, context.router, soc.router, hunt.router, isp.router, ops.router,
-              identity.router, iac.router, switches.router, tacacs.router, wan.router, wireless.router, wireless_rf.router, nms.router, snmp.router):
+              identity.router, iac.router, switches.router, tacacs.router, wan.router, wireless.router, wireless_rf.router, nms.router, snmp.router, yaml_rules.router):
         app.include_router(r)
 
     @app.get("/api/metrics", include_in_schema=False)

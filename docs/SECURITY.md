@@ -5,7 +5,7 @@
 - [x] Session JWT in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie; CSRF double-submit (`X-CSRF-Token` must match a claim inside the signed token, constant-time compare) on all state-changing requests.
 - [x] Server-side session revocation: logout, password change, and admin changes to a user (role, active flag, password reset) bump `users.session_version`, which invalidates every outstanding JWT of that user. Login runs a dummy Argon2 check for unknown usernames so response time does not reveal valid accounts.
 - [x] RBAC: `analyst` is read-only (it can triage alert status and notes); `admin` manages firewalls, rules, retention, users and suppressions.
-- [x] FortiGate API tokens encrypted with Fernet (AES-128-CBC + HMAC) using `TOKEN_ENCRYPTION_KEY` from the environment; never returned by the API; redacted from logs; sent only as an `Authorization` header (never in a URL).
+- [x] FortiGate API tokens encrypted with Fernet (AES-128-CBC + HMAC) using the `token_encryption_key` secret file (rotatable via `token_encryption_key_previous` + `app.rotate_keys`); never returned by the API; redacted from logs; sent only as an `Authorization` header (never in a URL).
 - [x] FortiGate TLS certificates always verified (system CA store or per-device or global CA bundle). The UI and API offer no "disable verification" switch.
 - [x] The client implements only HTTP GET: the SIEM cannot change firewall configuration. Hardening plans are exported as CLI text for manual, reviewed application; plan names and values are validated so they cannot inject extra CLI commands.
 - [x] Parameterized ClickHouse queries; sort columns and dimensions allow-listed; Pydantic validation of all inputs (IP/CIDR, ports, enums, lengths).
@@ -26,8 +26,10 @@
 - [ ] Deploy on a management or security network segment. Set `WEB_BIND_IP`/`SYSLOG_BIND_IP` to that interface's address (they default to 127.0.0.1), and restrict 443/tcp to SOC networks and 514 to FortiGate source addresses with the host firewall.
 - [ ] For each firewall whose syslog arrives from an address other than its management `host` (NAT, a log relay or FortiAnalyzer forwarding), list that address in `syslog_source_ips`. Otherwise its logs are counted as `source_mismatch` and dropped.
 - [ ] Replace the self-signed certificate with one from your internal CA.
-- [ ] Run `scripts/gen-secrets.sh`; keep `.env` mode 600; store `TOKEN_ENCRYPTION_KEY` in a vault, separate from backups.
-- [ ] Remove `BOOTSTRAP_ADMIN_PASSWORD` from `.env` after the first login, then change the admin password.
+- [ ] Run `scripts/gen-secrets.sh` (or `scripts/migrate-secrets.sh` on an existing install); keep `.env` free of secrets; back up `./secrets` to a vault, separate from data backups ([SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)).
+- [ ] Run `scripts/create-app-db-role.sh` so the services use a non-superuser database role.
+- [ ] After migrating secrets out of `.env`, rotate them ([CREDENTIAL_ROTATION.md](CREDENTIAL_ROTATION.md)): the old values remain in old backups and captured container metadata.
+- [ ] Change the admin password after the first login, then overwrite `secrets/bootstrap_admin_password`.
 - [ ] On every FortiGate, create a dedicated **REST API admin** with a read-only access profile and **trusted hosts** limited to the SIEM IP (see README). Never use a super_admin token.
 - [ ] Never expose the FortiGate management interface (HTTPS/SSH) to the internet; allow it only from management networks.
 - [ ] Prefer `mode reliable` (TCP) syslog. Syslog is cleartext: keep it on a trusted network, or wrap it with TLS (FortiGate `enc-algorithm` plus an stunnel/rsyslog TLS front end).
@@ -36,4 +38,4 @@
 - [ ] Egress-filter the backend containers to FortiGate management networks, the TI feed hosts and the notification endpoints. The SSRF guard checks DNS before connecting but cannot fully prevent DNS rebinding.
 - [ ] Schedule `scripts/backup.sh` and test `scripts/restore.sh` regularly.
 
-See `docs/SECURITY_AUDIT_REPORT.md` for the latest audit, its findings and the open items.
+See `docs/SECURITY_AUDIT_REPORT.md` for the latest audit, its findings and the open items, and `docs/DOCKER_SECRETS_SECURITY_AUDIT.md` for secret handling in the containers. Incident runbook: `docs/SECURITY_INCIDENT_RESPONSE.md`.

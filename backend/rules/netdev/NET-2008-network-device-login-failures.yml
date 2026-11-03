@@ -1,0 +1,25 @@
+id: NET-2008
+name: Repeated login failures on network devices
+description: One source address failed to log in to network devices (SSH / telnet / console / web) several times in a short period.
+version: 1
+severity: medium
+category: credential_access
+log_source: {category: security, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: login_failed}
+  condition: {group_by: [src_ip], count: 5, timeframe: 10m}
+explanation: "{src_ip} failed {metric} logins on network devices in {timeframe} (threshold {threshold})"
+data_sources: [Cisco SEC_LOGIN-4-LOGIN_FAILED / AUTHPRIV syslog, Ruckus ICX Security login syslog]
+falsepositives: [Monitoring or backup tools with an expired password, A user mistyping a new password]
+investigation:
+  - Check the user names tried (samples) and the device(s) targeted
+  - Look for a later successful login from the same source
+  - Block the source at the management ACL if it is not an admin workstation
+mitre: {tactic: TA0006, techniques: [T1110]}
+tests:
+  - name: six failures
+    events: [{event_subtype: login_failed, src_ip: 198.51.100.7, user: admin, repeat: 6}]
+    expect_alerts: 1
+  - name: four failures
+    events: [{event_subtype: login_failed, src_ip: 198.51.100.7, user: admin, repeat: 4}]
+    expect_alerts: 0

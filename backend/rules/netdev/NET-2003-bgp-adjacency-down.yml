@@ -1,0 +1,27 @@
+id: NET-2003
+name: BGP session lost (router syslog)
+description: >
+  A BGP neighbour went down or a NOTIFICATION was exchanged on a router / L3 switch. FortiGate BGP is covered by
+  the built-in bgp_* rules; this rule covers devices that report through syslog.
+version: 1
+severity: high
+category: network_availability
+log_source: {category: system, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: bgp_adjacency, action: down}
+  condition: {group_by: [firewall_name, dst_ip], count: 1, timeframe: 5m}
+explanation: "{firewall_name}: BGP neighbour {dst_ip} down ({events} event(s) in {timeframe})"
+data_sources: [Cisco BGP-5-ADJCHANGE / BGP-3-NOTIFICATION syslog, Ruckus ICX BGP syslog]
+falsepositives: [Planned provider maintenance, Session resets after a policy change (soft reset not used)]
+investigation:
+  - "show ip bgp summary; read the NOTIFICATION code in the message (hold timer, cease, authentication)"
+  - Check the WAN circuit health for the same time (ISP / WAN pages)
+  - Confirm received prefixes recovered after the session came back
+mitre: {tactic: TA0040, techniques: [T1498]}
+tests:
+  - name: neighbour down
+    events: [{event_subtype: bgp_adjacency, action: down, firewall_name: edge1, dst_ip: 203.0.113.1}]
+    expect_alerts: 1
+  - name: neighbour up
+    events: [{event_subtype: bgp_adjacency, action: up, firewall_name: edge1, dst_ip: 203.0.113.1}]
+    expect_alerts: 0

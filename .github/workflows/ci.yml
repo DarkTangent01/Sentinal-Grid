@@ -43,6 +43,10 @@ jobs:
         run: npm test
       - name: production build
         run: npm run build
+      - name: no secrets in the built bundle or source maps (values are never printed)
+        run: |
+          if grep -rEl '(-----BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{30,}|TOKEN_ENCRYPTION_KEY|BOOTSTRAP_ADMIN_PASSWORD|POSTGRES_PASSWORD)' dist; then
+            echo "::error::secret-like content in the frontend build (files listed above)"; exit 1; fi
       - name: runtime dependency audit (build-time tooling is reviewed separately, see docs/SECURITY_REVIEW.md)
         run: npm audit --omit=dev --audit-level=high
 
@@ -51,7 +55,52 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: compose file is valid
-        run: cp .env.example .env && docker compose config -q
+      - name: compose file is valid, with throwaway secret files
+        run: |
+          cp .env.example .env && mkdir -p secrets
+          for f in postgres_password db_app_password clickhouse_password secret_key token_encryption_key bootstrap_admin_password; do
+            openssl rand -hex 16 > "secrets/$f"; done
+          : > secrets/token_encryption_key_previous; : > secrets/anthropic_api_key
+          docker compose config -q
+      - name: no service receives a secret through its environment
+        run: |
+          docker compose config --format json > /tmp/rendered.json
+          python3 - <<'PY'
+          import json, re, sys
+          c = json.load(open("/tmp/rendered.json"))
+          bad = [(n, k) for n, s in c["services"].items() for k in (s.get("environment") or {})
+                 if re.search(r"(PASSWORD|SECRET|_KEY|TOKEN)$", k)]
+          print("plain secret env vars:", bad or "none")
+          sys.exit(1 if bad else 0)
+          PY
       - name: build images (no push)
         run: docker compose build --pull
+      - name: scan the built images (fails on fixable critical / high)
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: image, image-ref: "fortisiem-backend:1.0.0", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1", scanners: "vuln,secret" }
+      - uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: image, image-ref: "fortisiem-web:1.0.0", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1", scanners: "vuln,secret" }
+      - name: SBOM (SPDX) for the backend and web images
+        uses: anchore/sbom-action@v0.17.8
+        with: { image: "fortisiem-backend:1.0.0", format: spdx-json, output-file: sbom-backend.spdx.json }
+      - uses: anchore/sbom-action@v0.17.8
+        with: { image: "fortisiem-web:1.0.0", format: spdx-json, output-file: sbom-web.spdx.json }
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # the whole history: a secret removed later is still exposed
+      - name: secret scan (gitleaks, values redacted in the output)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2 detect --source /repo --redact --no-banner -v
+      - name: Dockerfile lint (hadolint)
+        run: |
+          for f in backend/Dockerfile frontend/Dockerfile deploy/ingress/Dockerfile deploy/tacacs/Dockerfile; do
+            docker run --rm -i hadolint/hadolint:v2.12.0 hadolint --failure-threshold error - < "$f"; done
+      - name: misconfiguration scan (trivy config)
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: config, scan-ref: ".", severity: "CRITICAL,HIGH", exit-code: "1" }
+      - name: Dockerfile / compose policy (checkov)
+        uses: bridgecrewio/checkov-action@v12.2873.0
+        with: { directory: ".", framework: dockerfile, quiet: true, soft_fail: true }

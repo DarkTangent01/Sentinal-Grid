@@ -1,0 +1,26 @@
+id: NET-2004
+name: HSRP / VRRP gateway failover
+description: >
+  A first-hop redundancy group changed state (standby to active or the reverse), so the default gateway for a VLAN moved.
+version: 1
+severity: medium
+category: network_availability
+log_source: {category: system, event_type: netdev, product: cisco / ruckus}
+detection:
+  selection: {event_subtype: fhrp_state}
+  condition: {group_by: [firewall_name, src_intf], count: 1, timeframe: 10m}
+explanation: "{firewall_name} {src_intf}: HSRP / VRRP state changed {events} time(s) in {timeframe}"
+data_sources: [Cisco HSRP-5-STATECHANGE / STANDBY / VRRP syslog, Ruckus VRRP / VRRP-E syslog]
+falsepositives: [Planned reload of the active router, Pre-emption after the primary came back]
+investigation:
+  - "show standby brief / show vrrp brief on both routers"
+  - Look for the active router's reload, uplink or tracked-object failure at the same time
+  - Repeated changes in a short time point to a flapping link between the peers
+tests:
+  - name: standby became active
+    events: [{event_subtype: fhrp_state, action: active, firewall_name: dist1, src_intf: Vlan10}]
+    expect_alerts: 1
+    expect_groups: [{src_intf: Vlan10}]
+  - name: other system event
+    events: [{event_subtype: link_state, action: down, firewall_name: dist1, src_intf: Vlan10}]
+    expect_alerts: 0

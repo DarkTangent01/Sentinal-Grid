@@ -186,4 +186,6 @@ DEFAULT_RULES += _WAN_RULES
 DEFAULT_RULES += _WIRELESS_RULES
 from ..nms.alerts import DEFAULT_RULES as _NMS_RULES  # noqa: E402
 DEFAULT_RULES += _NMS_RULES
+from ..detection.loader import default_rule_rows  # noqa: E402  (YAML rule pack, backend/rules)
+DEFAULT_RULES += default_rule_rows()
 RULE_MITRE = {r["key"]: r["mitre"] for r in DEFAULT_RULES}

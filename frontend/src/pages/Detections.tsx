@@ -5,6 +5,7 @@ import { api, qs } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
 import { Card, Empty, Loading, Modal, Sev, TableWrap, Time } from "../components/ui";
+import { YamlRules } from "./RulePack";
 
 const OPS: [string, string][] = [["gt", ">"], ["ge", "≥"], ["eq", "="], ["ne", "≠"], ["lt", "<"], ["le", "≤"]];
 const BLANK = { name: "", description: "", severity: "medium", enabled: true, query: "", lookback_minutes: 60, interval_minutes: 5,
@@ -55,6 +56,7 @@ export function Detections() {
               {me.role === "admin" && <button className="btn btn-danger ml-1" onClick={() => confirm(`Delete detection "${d.name}"? Existing alerts are kept.`) && del.mutate(d.id!)}>Delete</button>}</td>
           </tr>)}</tbody></table></TableWrap>}
       </Card>
+      <YamlRules admin={me.role === "admin"} />
       <Tuning admin={me.role === "admin"} />
       {edit && <Editor d={edit} readOnly={me.role !== "admin"} onClose={() => { setEdit(null); qc.invalidateQueries({ queryKey: ["detections"] }); }} />}
       {sigma && <SigmaImport onClose={() => setSigma(false)} onConverted={(d) => { setSigma(false); setEdit({ ...BLANK, ...d }); }} />}

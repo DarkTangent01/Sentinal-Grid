@@ -9,6 +9,7 @@ RUN pip install -r requirements.txt
 COPY alembic.ini .
 COPY migrations ./migrations
 COPY app ./app
+COPY rules ./rules
 USER siem
 EXPOSE 8000 5514/udp 5514/tcp
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--no-server-header"]

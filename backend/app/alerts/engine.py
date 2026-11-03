@@ -872,6 +872,8 @@ async def ensure_default_rules(s: AsyncSession) -> None:
         else:  # add newly introduced params without overwriting tuned ones; keep catalogue metadata current
             r = existing[d["key"]]
             merged = {**d["params"], **(r.params or {})}
+            if d["key"].startswith(YAML_PREFIX):   # catalogue metadata follows the shipped file, tuning stays
+                merged.update(rule_version=d["params"]["rule_version"], rule_sha256=d["params"]["rule_sha256"])
             if merged != r.params:
                 r.params = merged
             if r.mitre != d["mitre"]:
@@ -950,6 +952,31 @@ async def upsert_detections(s: AsyncSession, rule: AlertRule, detections: list[D
 
 _LAST_RUN: dict[str, datetime] = {}
 CUSTOM_PREFIX = "cq_"
+YAML_PREFIX = "yml_"
+
+
+def _yaml_runner(rule: AlertRule):
+    """Runner for a YAML rule (built-in pack or custom YAML stored on the row); records run statistics on the row."""
+    from ..detection.loader import RuleError, rule_for
+    from ..detection.runner import execute
+    try:
+        found = rule_for(rule.key, rule.params)
+    except RuleError as e:
+        log.error("YAML rule %s is invalid: %s", rule.key, e)
+        return None
+    if found is None:
+        return None
+    yrule, _text, origin = found
+
+    async def run(ch, now, params):
+        try:
+            dets, stats = await execute(ch, yrule, now, params, _cidrs(), origin)
+        except Exception as e:
+            rule.params = {**(rule.params or {}), "_stats": {"last_run": now.isoformat(), "error": f"{type(e).__name__}: {e}"[:300]}}
+            raise
+        rule.params = {**(rule.params or {}), "_stats": stats}
+        return dets
+    return run
 
 
 def _custom_runner(s: AsyncSession, rule: AlertRule):
@@ -969,6 +996,8 @@ async def run_rules(ch: ClickHouse, s: AsyncSession, now: datetime | None = None
         fn = RULES.get(rule.key)
         if fn is None and rule.key.startswith(CUSTOM_PREFIX):
             fn = _custom_runner(s, rule)
+        if fn is None and rule.key.startswith(YAML_PREFIX):
+            fn = _yaml_runner(rule)
         if fn is None:
             continue
         params = dict(rule.params or {})
@@ -987,9 +1016,17 @@ async def run_rules(ch: ClickHouse, s: AsyncSession, now: datetime | None = None
                     result[rule.key]["resolved"] = result[rule.key].get("resolved", 0) + 1
                 await s.commit()
         except Exception as e:
+            stats = (rule.params or {}).get("_stats") if rule.key.startswith(YAML_PREFIX) else None
             await s.rollback()
             log.exception("rule %s failed", rule.key)
             result[rule.key] = {"error": str(e)}
+            if stats:   # keep the failure visible on the rule (the rollback discarded the in-memory change)
+                try:
+                    r2 = await s.get(AlertRule, rule.id)
+                    r2.params = {**(r2.params or {}), "_stats": stats}
+                    await s.commit()
+                except Exception:
+                    await s.rollback()
     if correlate and touched:
         from ..incidents import correlate_alerts
         from ..notify import alert_created

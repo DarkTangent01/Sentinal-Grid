@@ -26,3 +26,7 @@ frontend/tsconfig.tsbuildinfo
 *.log
 # internal findings about this deployment (not excluded from the server copy's own docs)
 docs/SECURITY_AUDIT_REPORT.md
+
+# secret files (docs/SECRET_MANAGEMENT.md): never committed
+secrets/
+.env.pre-secrets.*

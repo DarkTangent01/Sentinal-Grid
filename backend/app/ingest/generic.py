@@ -9,6 +9,8 @@ Windows (event_type = "windows", event_subtype = EventID):
     user = TargetUserName (SubjectUserName when there is no target), src_ip = IpAddress, src_name = WorkstationName,
     hostname = Computer, app = the object acted on (group / service / task name), action = logon | logon-fail | …
 CEF (event_type = "cef"): the standard extension keys (src, dst, spt, dpt, act, suser, request, dhost, in, out, …).
+Network devices (event_type = "netdev", kind "netdev"): Cisco IOS / IOS-XE / NX-OS / Catalyst 9800 and Ruckus ICX syslog,
+    see netdev.py. Cisco's %FACILITY-SEV-MNEMONIC format is also recognised on "syslog" sources.
 Anything else (event_type = "syslog"): stored as a system event with the line as the message.
 """
 from __future__ import annotations
@@ -18,10 +20,11 @@ import json
 import re
 from datetime import datetime, timezone
 
+from . import netdev
 from .normalize import normalize
 
 SOURCE_ID_BASE = 1_000_000
-KINDS = ("windows", "cef", "syslog")
+KINDS = ("windows", "cef", "netdev", "syslog")
 
 WIN_EVENTS: dict[str, tuple[str, str, str]] = {  # EventID → (action, severity, description)
     "4624": ("logon", "informational", "An account was successfully logged on"),
@@ -200,4 +203,10 @@ def parse(src: dict, line: str) -> dict | None:
         return windows(src, line) or plain(src, line)
     if src["kind"] == "cef":
         return cef(src, line) or plain(src, line)
+    if src["kind"] == "netdev":
+        p = netdev.parse(line)
+        return netdev.to_event(src, line, p, _base) if p else plain(src, line)
+    p = netdev.parse_cisco(line)   # Cisco's %FAC-n-MNEMONIC is distinctive enough to recognise on any syslog source
+    if p:
+        return netdev.to_event(src, line, p, _base)
     return cef(src, line) or plain(src, line)

@@ -1,0 +1,41 @@
+id: NET-1002
+name: External port scan against internal hosts
+description: >
+  An external address contacted many distinct destination ports on internal addresses within a few minutes
+  (inbound reconnaissance). The internal-scan counterpart is the built-in port_scan rule.
+version: 1
+severity: high
+category: network_reconnaissance
+log_source: {category: traffic, product: fortigate}
+detection:
+  selection:
+    src_ip: {internal: false}
+    dst_ip: {internal: true}
+  condition:
+    group_by: [src_ip]
+    distinct_count: {field: dst_port, threshold: 50}
+    timeframe: 5m
+explanation: "{src_ip} probed {metric} distinct ports on internal hosts in {timeframe} (threshold {threshold}); ports seen: {samples}"
+data_sources: [FortiGate traffic logs (forward and local-in, allowed and denied)]
+falsepositives:
+  - Authorised external vulnerability scanning or penetration tests
+  - Monitoring services that probe many ports on a published service
+investigation:
+  - Check whether the source belongs to an authorised scanner (allowlist it here if so)
+  - Look for any accepted connection from the source to the probed hosts after the scan
+  - Review the threat-intel and geo context of the source in the IP investigation page
+mitre: {tactic: TA0043, techniques: [T1595]}
+tests:
+  - name: 60 ports probed from the internet
+    events: [{src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 60]}, action: deny}]
+    expect_alerts: 1
+    expect_groups: [{src_ip: 203.0.113.9}]
+  - name: internal scanner is not this rule
+    events: [{src_ip: 10.1.1.5, dst_ip: 10.1.1.10, dst_port: {seq: [1, 80]}, action: deny}]
+    expect_alerts: 0
+  - name: below threshold
+    events: [{src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 30]}, action: deny}]
+    expect_alerts: 0
+  - name: outside the time frame
+    events: [{src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 60]}, action: deny, at: "-20m"}]
+    expect_alerts: 0
