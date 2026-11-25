@@ -6,7 +6,7 @@ pydantic-settings==2.7.1
 email-validator==2.2.0
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
-alembic==1.14.0
+alembic==1.20.1
 httpx==0.28.1
 clickhouse-connect==0.8.11
 cryptography==50.0.0
