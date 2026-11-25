@@ -17,7 +17,7 @@ pyyaml==6.0.2
 anthropic==2.3.0
 pysnmp==7.1.21
 asyncssh==2.23.1
-weasyprint==68.1
+weasyprint==70.0
 pyasn1==0.6.5
 tacacs_plus==2.6
 six==1.16.0
