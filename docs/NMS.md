@@ -3,6 +3,9 @@
 Sentinel NMS covers the same ground as LibreNMS and Zabbix for this estate (Cisco / Ruckus switches, Cisco 9800 WLCs, FortiGate
 firewalls, ISP circuits, TACACS+). This page lists what the NMS core adds, how it works, and an honest feature comparison.
 
+Device access (browser SSH terminal, diagnostics, bulk diagnostics, approved changes, credential vault, access audit, NMS
+roles) and the full NMS assessment are in [nms/](nms/FINAL_NMS_READINESS_REPORT.md).
+
 ## What this release adds
 
 | Area | What | Where |

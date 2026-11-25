@@ -1,4 +1,4 @@
-# Sentinel platform — private-network deployment (docs/SECRET_MANAGEMENT.md, docs/DOCKER_HARDENING.md).
+# Sentinel platform — private-network deployment (security/SECRETS_MANAGEMENT.md, security/DOCKER_HARDENING.md).
 # Usage: cp .env.example .env && ./scripts/gen-secrets.sh && ./scripts/gen-selfsigned-cert.sh && docker compose up -d --build
 #
 # Secrets are files in ./secrets (directory 0700, never committed, never copied into an image), mounted read-only at
@@ -17,12 +17,13 @@ x-backend: &backend
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-${POSTGRES_USER}}@postgres:5432/${POSTGRES_DB}
     DATABASE_PASSWORD_FILE: /run/secrets/db_app_password
     CLICKHOUSE_HOST: clickhouse
-    CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-    CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
+    # the services' own ClickHouse account (scripts/create-clickhouse-app-user.sh); the admin user until it exists
+    CLICKHOUSE_USER: ${CLICKHOUSE_APP_USER:-${CLICKHOUSE_USER}}
+    CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_app_password
     CLICKHOUSE_DATABASE: ${CLICKHOUSE_DB}
     # event chunks ClickHouse keeps rejecting (python -m app.ingest.deadletter); a named volume on syslog/worker keeps them
     INGEST_DEADLETTER_DIR: /var/lib/siem/deadletter
-  secrets: [db_app_password, clickhouse_password]
+  secrets: [db_app_password, clickhouse_app_password]
   networks: [backend]
   restart: unless-stopped
   stop_grace_period: 30s
@@ -31,17 +32,19 @@ x-backend: &backend
   security_opt: ["no-new-privileges:true"]
   # nothing in the image is writable: heartbeats go to /tmp (tmpfs), state to named volumes
   read_only: true
-  tmpfs: ["/tmp:size=64m,mode=1777"]
+  tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+  init: true               # tini as PID 1: forwards SIGTERM, reaps zombies (security/CONTAINER_SECURITY_ASSESSMENT.md C3-6)
   logging: &logging
     driver: json-file
     options: { max-size: "50m", max-file: "5" }
   volumes:
-    - ./deploy/certs/fortigate-ca:/certs:ro   # optional CA bundle(s) used to verify FortiGate HTTPS certificates
-    - ./deploy/geoip:/geoip:ro                # optional GeoLite2 / DB-IP .mmdb files (country, city, ASN)
+    # ":z": shared SELinux label (several services read them); no effect until Docker runs with SELinux enabled
+    - ./deploy/certs/fortigate-ca:/certs:ro,z   # optional CA bundle(s) used to verify FortiGate HTTPS certificates
+    - ./deploy/geoip:/geoip:ro,z                # optional GeoLite2 / DB-IP .mmdb files (country, city, ASN)
 
 services:
   postgres:
-    image: postgres:16.6-alpine
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab   # same major: data-compatible
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -49,7 +52,14 @@ services:
     secrets: [postgres_password]
     networks: [backend]
     volumes: [pgdata:/var/lib/postgresql/data]
+    # runs as the image's postgres user (uid 70 owns the data directory): the entrypoint needs no root, so no capabilities
+    user: "70:70"
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # nothing outside the data volume is written: the socket directory (mode 3777, as in the image) and /tmp are tmpfs
+    read_only: true
+    tmpfs: ["/var/run/postgresql:size=8m,mode=3777,noexec,nosuid,nodev", "/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    init: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -57,23 +67,36 @@ services:
       retries: 10
     restart: unless-stopped
     logging: *logging
-    deploy: { resources: { limits: { cpus: "2", memory: 2g } } }
+    deploy: { resources: { limits: { cpus: "2", memory: 2g, pids: 512 } } }
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8.11.5
+    # 24.8 LTS is past end of support: last patch release, pinned by digest. 25.8 LTS: security/DOCKER_SECURITY_AUDIT.md DS2-1
+    image: clickhouse/clickhouse-server:24.8.14.39@sha256:1ffa82edee000a42c09313bd9f1293d94c570aee74babc1b3ca9983a35fa597b
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password   # admin: operators and backups only
+      # the admin may create users: scripts/create-clickhouse-app-user.sh gives the services a least-privilege account
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     secrets: [clickhouse_password]
     networks: [backend]
     volumes:
       - chdata:/var/lib/clickhouse
-      - ./deploy/clickhouse/siem.xml:/etc/clickhouse-server/config.d/siem.xml:ro
-      - ./backups/clickhouse:/backups
+      - ./deploy/clickhouse/siem.xml:/etc/clickhouse-server/config.d/siem.xml:ro,Z
+      - ./backups/clickhouse:/backups:Z
     ulimits: { nofile: { soft: 262144, hard: 262144 } }
+    # runs as clickhouse (uid 101, owner of the data volume) from the start: the entrypoint skips its chown / user
+    # switch, so no capabilities. Read-only image; the entrypoint's generated admin-user file goes to a tmpfs (only
+    # uid 101 runs in this container, so the tmpfs directories need no owner option, which Podman does not support).
+    user: "101:101"
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - "/etc/clickhouse-server/users.d:size=1m,mode=1777,noexec,nosuid,nodev"
+      - "/var/log/clickhouse-server:size=64m,mode=1777,noexec,nosuid,nodev"
+      - "/tmp:size=512m,mode=1777,noexec,nosuid,nodev"
+    init: true
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
       interval: 10s
@@ -81,7 +104,8 @@ services:
       retries: 12
     restart: unless-stopped
     logging: *logging
-    deploy: { resources: { limits: { cpus: "${CLICKHOUSE_CPUS:-4}", memory: "${CLICKHOUSE_MEMORY:-8g}" } } }
+    # ~780 threads in production: the process limit is a fork-bomb guard well above that
+    deploy: { resources: { limits: { cpus: "${CLICKHOUSE_CPUS:-4}", memory: "${CLICKHOUSE_MEMORY:-8g}", pids: 4096 } } }
 
   migrate:
     <<: *backend
@@ -89,7 +113,7 @@ services:
     environment:
       <<: *backend-env
       BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/bootstrap_admin_password   # first start only: seeds the admin account
-    secrets: [db_app_password, clickhouse_password, bootstrap_admin_password]
+    secrets: [db_app_password, clickhouse_app_password, bootstrap_admin_password]
     restart: "no"
     depends_on:
       postgres: { condition: service_healthy }
@@ -103,8 +127,10 @@ services:
       TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
       TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
-    secrets: [db_app_password, clickhouse_password, secret_key, token_encryption_key, token_encryption_key_previous, anthropic_api_key]
-    networks: [backend, frontend, egress]   # egress: FortiGate / PAN-OS test connections, AI, SNMP tests
+      # device access (terminal, diagnostics, approved changes) is served by the separate "access" service below
+      ACCESS_GATEWAY_INPROCESS: "false"
+    secrets: [db_app_password, clickhouse_app_password, secret_key, token_encryption_key, token_encryption_key_previous, anthropic_api_key]
+    networks: [backend, frontend, egress, aaa]   # egress: FortiGate / PAN-OS test connections, AI, SNMP tests; aaa: TACACS+ tests
     # TACACS+ AAA: "Check now" reads the agent's status.json (read-only; only the worker writes deploy requests)
     group_add: ["10050"]
     volumes:
@@ -118,17 +144,19 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-    deploy: { resources: { limits: { cpus: "2", memory: 1g } } }
+    deploy: { resources: { limits: { cpus: "2", memory: 1g, pids: 512 } } }
 
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
     environment:
       <<: *backend-env
+      # everything except SNMP polling, which has its own process (poller): docs/performance/INITIAL_AUDIT.md RC-1
+      WORKER_ROLES: core
       TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
       TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
-    secrets: [db_app_password, clickhouse_password, token_encryption_key, token_encryption_key_previous]
-    networks: [backend, egress]             # egress: device polling, TI feeds, notifications, ICMP, SNMP
+    secrets: [db_app_password, clickhouse_app_password, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, egress, aaa]        # egress: device polling, TI feeds, notifications, ICMP, SNMP; aaa: TACACS+ health
     # TACACS+ AAA: the worker writes candidate configurations for the tacacs agent and reads its accounting logs
     group_add: ["10050"]
     volumes:
@@ -143,7 +171,76 @@ services:
       test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.heartbeat')<120 else 1)"]
       interval: 30s
       start_period: 30s
-    deploy: { resources: { limits: { cpus: "2", memory: 1g } } }
+    deploy: { resources: { limits: { cpus: "2", memory: 1g, pids: 512 } } }
+
+  # Device Access Gateway (app/access, docs/nms/DEVICE_ACCESS_ARCHITECTURE.md): browser SSH terminals, connectivity
+  # tests, diagnostics, bulk diagnostics and approved configuration changes. The only service that opens interactive
+  # SSH sessions to devices, and only to inventory devices inside an authorised management network on fixed ports.
+  # One process: open terminals live in its memory; its own memory / CPU / PID limits keep sessions away from the API.
+  access:
+    <<: *backend
+    command: ["python", "-m", "app.access"]
+    environment:
+      <<: *backend-env
+      SECRET_KEY_FILE: /run/secrets/secret_key                              # validates the same session cookies as the api
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key          # decrypts the credential vault
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+    secrets: [db_app_password, clickhouse_app_password, secret_key, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, frontend, egress]   # frontend: reached by web (nginx) only; egress: SSH to the devices
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/nms/access/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { cpus: "1", memory: 512m, pids: 256 } } }
+
+  # Ansible runner (app/playbooks/runner.py): runs approved playbooks from the library, one run at a time, in a private
+  # work directory on its tmpfs that is deleted after each run. Its own image (backend/Dockerfile.ansible) carries
+  # ansible-core and the network collections; nothing else in the stack does.
+  ansible:
+    <<: *backend
+    build: { context: ./backend, dockerfile: Dockerfile.ansible }
+    image: fortisiem-ansible:1.0.0
+    command: ["python", "-m", "app.playbooks.runner"]
+    environment:
+      <<: *backend-env
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key          # device credentials from the vault
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+    secrets: [db_app_password, clickhouse_app_password, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, egress]             # egress: SSH to the devices
+    tmpfs: ["/tmp:size=256m,mode=1777,noexec,nosuid,nodev"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/runner.heartbeat')<60 else 1)"]
+      interval: 30s
+      start_period: 30s
+    deploy: { resources: { limits: { cpus: "2", memory: 1g, pids: 512 } } }
+
+  # SNMP switch / wireless-controller polling in its own process. SNMP decoding is pure-Python CPU work: sharing the
+  # worker's event loop it took 75% of that core and slowed alert evaluation 10-20x (docs/performance/INITIAL_AUDIT.md).
+  # More devices: POLLER_REPLICAS=N in .env; each switch is claimed with a database lease, never twice.
+  poller:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      WORKER_ROLES: snmp
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key          # decrypts the SNMP credential profiles
+      TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
+    secrets: [db_app_password, clickhouse_app_password, token_encryption_key, token_encryption_key_previous]
+    networks: [backend, egress]             # egress: SNMP to the devices
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.heartbeat')<120 else 1)"]
+      interval: 30s
+      start_period: 30s
+    # each replica leases only as many devices as it has free poll slots (SWITCH_MAX_CONCURRENT_POLLS), so N replicas
+    # share the fleet and its SNMP decoding across N cores
+    deploy: { replicas: "${POLLER_REPLICAS:-1}", resources: { limits: { cpus: "2", memory: 1g, pids: 256 } } }
 
   # Owns the syslog port and is never rebuilt by code deploys (its own tiny image). Buffers to disk while the syslog
   # service below restarts, so deploys lose no logs, and UDP senders keep a valid connection-tracking entry.
@@ -158,6 +255,9 @@ services:
     volumes: [ingress_spool:/var/spool/rsyslog]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true                         # writes only its disk queue (volume) and the pid file (/tmp)
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    init: true
     healthcheck:
       test: ["CMD-SHELL", "kill -0 $$(cat /tmp/rsyslogd.pid)"]
       interval: 15s
@@ -166,7 +266,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     logging: *logging
-    deploy: { resources: { limits: { cpus: "1", memory: 1g } } }
+    deploy: { resources: { limits: { cpus: "1", memory: 1g, pids: 128 } } }
 
   syslog:
     <<: *backend
@@ -187,7 +287,7 @@ services:
       start_period: 20s
     # receiver + parser processes (SYSLOG_WORKERS, default CPUs-1, max 4): ~3.5k events/s per parser core.
     # On a bigger VM raise SYSLOG_CPUS to parsers + 1 (e.g. 5 on 8 cores) in .env.
-    deploy: { resources: { limits: { cpus: "${SYSLOG_CPUS:-3}", memory: "${SYSLOG_MEMORY:-2g}" } } }
+    deploy: { resources: { limits: { cpus: "${SYSLOG_CPUS:-3}", memory: "${SYSLOG_MEMORY:-2g}", pids: 512 } } }
 
   traps:
     <<: *backend
@@ -196,7 +296,7 @@ services:
       <<: *backend-env
       TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key          # decrypts the SNMP credential profiles
       TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE: /run/secrets/token_encryption_key_previous
-    secrets: [db_app_password, clickhouse_password, token_encryption_key, token_encryption_key_previous]
+    secrets: [db_app_password, clickhouse_app_password, token_encryption_key, token_encryption_key_previous]
     networks: [backend, egress]             # egress: the published UDP port needs a non-internal network
     # SNMP traps / informs (docs/SNMP.md). Bound to loopback until TRAP_BIND_IP is set in .env (e.g. 0.0.0.0 or the
     # management interface address). Only inventory devices authenticating with their own credential profile are accepted.
@@ -208,27 +308,53 @@ services:
       test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/traps.heartbeat')<180 else 1)"]
       interval: 30s
       start_period: 90s
-    deploy: { resources: { limits: { cpus: "0.5", memory: "512m" } } }
+    deploy: { resources: { limits: { cpus: "0.5", memory: "512m", pids: 256 } } }
+
+  # NetFlow v5 / v9, IPFIX and sFlow v5 collector (backend/app/flows). Bound to loopback until FLOW_BIND_IP is set in
+  # .env (the management interface address). Only datagrams from inventory devices (switch / controller management
+  # addresses, registered firewalls) are decoded; everything else is counted and dropped.
+  flows:
+    <<: *backend
+    command: ["python", "-m", "app.flows"]
+    secrets: [db_app_password, clickhouse_app_password]
+    networks: [backend, egress]             # egress: the published UDP ports need a non-internal network
+    ports:
+      - "${FLOW_BIND_IP:-127.0.0.1}:2055:2055/udp"
+      - "${FLOW_BIND_IP:-127.0.0.1}:4739:4739/udp"
+      - "${FLOW_BIND_IP:-127.0.0.1}:6343:6343/udp"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/flows.heartbeat')<180 else 1)"]
+      interval: 30s
+      start_period: 90s
+    deploy: { resources: { limits: { cpus: "1", memory: "768m", pids: 256 } } }
 
   web:
     build: ./frontend
     image: fortisiem-web:1.0.0
+    # nginx runs unprivileged on 8443 / 8080 in the container (the host still publishes 443 / 80), as the owner of
+    # deploy/certs/siem.key (WEB_UID, set by deploy.sh) so the key can stay mode 0600; no capabilities at all
+    user: "${WEB_UID:-101}:101"
     ports:
-      - "${WEB_BIND_IP:-127.0.0.1}:443:443"
-      - "${WEB_BIND_IP:-127.0.0.1}:80:80"
-    volumes: ["./deploy/certs:/etc/nginx/certs:ro"]
+      - "${WEB_BIND_IP:-127.0.0.1}:443:8443"
+      - "${WEB_BIND_IP:-127.0.0.1}:80:8080"
+    volumes: ["./deploy/certs:/etc/nginx/certs:ro,z"]
     networks: [frontend]                    # reaches the api only; no route to the databases
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     read_only: true
-    tmpfs: ["/var/cache/nginx:size=64m", "/var/run:size=1m", "/tmp:size=16m"]
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]       # pid file and request buffers (frontend/nginx-main.conf)
+    init: true
     depends_on:
       api: { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/api/health | grep -q ok"]
+      # loopback probe of the container's own certificate (any name): verification is not the point of a liveness check
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1:8443/api/health | grep -q ok"]
       interval: 15s
     restart: unless-stopped
     logging: *logging
-    deploy: { resources: { limits: { cpus: "1", memory: 256m } } }
+    deploy: { resources: { limits: { cpus: "1", memory: 256m, pids: 128 } } }
 
   # TACACS+ server (tac_plus-ng + deploy agent). Opt-in: COMPOSE_PROFILES=tacacs. Restrict TCP/49 to the network device
   # management subnets in the host firewall; see docs/TACACS.md.
@@ -237,15 +363,23 @@ services:
     image: fortisiem-tacacs:1.0.0
     profiles: ["tacacs"]
     restart: unless-stopped
+    networks: [aaa]                         # shares a network with api / worker only, not with the databases
     ports: ["${TACACS_BIND:-0.0.0.0}:49:49/tcp"]
     volumes:
       - tacacs_config:/tacacs/config
       - tacacs_logs:/tacacs/logs
+    # runs as tacacs (uid 10003, group tacshare 10050) from the start, with no capability at all: port 49 is bindable
+    # because this container's network namespace lowers the privileged-port boundary (a namespaced sysctl; it does not
+    # affect the host). No file capability on tac_plus-ng, so privilege escalation can stay disabled.
+    user: "10003:10050"
+    sysctls: { net.ipv4.ip_unprivileged_port_start: 49 }
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID, FOWNER, NET_BIND_SERVICE, DAC_OVERRIDE]
-    security_opt: ["no-new-privileges:false"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    init: true
     logging: *logging
-    deploy: { resources: { limits: { cpus: "1", memory: 512m } } }
+    deploy: { resources: { limits: { cpus: "1", memory: 512m, pids: 512 } } }
 
 networks:
   backend:          # databases + services that use them; internal: no route out of the host
@@ -255,13 +389,15 @@ networks:
   ingest:           # ingress relay -> syslog; internal, so syslog (untrusted input) has no route out
     internal: true
   syslog_edge: {}   # the published syslog port on the ingress relay
+  aaa: {}           # tacacs <-> api (AAA tests) / worker (health); not internal: tac_plus-ng reaches LDAP / AD and publishes TCP/49
 
 # Plain Compose bind-mounts these files read-only at /run/secrets/<name>; they are created by scripts/gen-secrets.sh
 # (new installs) or scripts/migrate-secrets.sh (existing .env), mode 0444 inside a 0700 directory.
 secrets:
   postgres_password: { file: ./secrets/postgres_password }
   db_app_password: { file: ./secrets/db_app_password }
-  clickhouse_password: { file: ./secrets/clickhouse_password }
+  clickhouse_password: { file: ./secrets/clickhouse_password }          # admin (clickhouse container, operator scripts)
+  clickhouse_app_password: { file: ./secrets/clickhouse_app_password }  # the services' account
   secret_key: { file: ./secrets/secret_key }
   token_encryption_key: { file: ./secrets/token_encryption_key }
   token_encryption_key_previous: { file: ./secrets/token_encryption_key_previous }   # empty unless rotating

@@ -67,7 +67,7 @@ DEFAULT_RULES = [
      "description": "The switch rejects the monitoring credentials (wrong SNMPv3 user / keys, or the engine ID changed).", "params": {}},
     {"key": "switch_stale_metrics", "name": "Switch metrics stale or polling failing", "severity": "medium", "mitre": {},
      "description": "A switch's metrics are older than 3 poll intervals, or a metric group keeps failing while the switch answers.",
-     "params": {"failing_minutes": 15}},
+     "params": {"failing_minutes": 15, "stale_intervals": 3, "grace_seconds": 60}},
     {"key": "switch_cpu_high", "name": "Switch CPU high", "severity": "medium", "mitre": {},
      "description": "Switch CPU utilisation over the threshold for several consecutive polls.", "params": {"cpu_pct": 90, "min_samples": 3, "window_minutes": 10}},
     {"key": "switch_memory_high", "name": "Switch memory high", "severity": "medium", "mitre": {},
@@ -158,9 +158,27 @@ def _det(sw: Switch, by_site, key: str, rule: str, explanation: str, *, first, l
                      event_filter={}, severity=severity)
 
 
+def poll_interval(sw: Switch) -> int:
+    """The interval the poller actually uses (poller.run_due / intervals_of: never below 30 s). This used max(60, …),
+    so a device configured for 30 s was reported, and judged, as 60 s."""
+    return max(30, int(sw.poll_interval_seconds or 60))
+
+
+def stale_after(sw: Switch, p: dict | None = None) -> float:
+    """Seconds without a successful poll before metrics count as stale: `stale_intervals` missed intervals plus the
+    poll's own time budget (a wireless controller may legitimately take its whole budget for one poll) plus grace.
+    Derived from the device's configuration instead of one fixed threshold for every device."""
+    from ..config import get_settings
+    from .poller import is_wlc
+    p = p or {}
+    st = get_settings()
+    budget = st.switch_wlc_poll_timeout_seconds if is_wlc(sw) else st.switch_poll_timeout_seconds
+    return float(p.get("stale_intervals", 3)) * poll_interval(sw) + budget + float(p.get("grace_seconds", 60))
+
+
 def _fresh(sw: Switch, now) -> bool:
     last = _aware(sw.last_success_at)
-    return bool(last and (now - last).total_seconds() <= 3 * max(60, sw.poll_interval_seconds or 60) + 120)
+    return bool(last and (now - last).total_seconds() <= stale_after(sw))
 
 
 def _thr(sw: Switch, p: dict, k: str):
@@ -197,6 +215,7 @@ async def rule_switch_unreachable(ch, now, p):
             dependents.setdefault(root.id, []).append(sw.name)
             continue
         down.append(sw)
+    ap_impact = await _ap_impact(sws, by_id)
     out = []
     for sw in down:
         since = _aware(sw.state_since) or now
@@ -204,12 +223,41 @@ async def rule_switch_unreachable(ch, now, p):
         if mins < float(p.get("min_down_minutes", 2)):
             continue
         deps = sorted(dependents.get(sw.id, []))
+        imp = ap_impact.get(sw.id)
         out.append(_det(sw, bs, f"{sw.id}:{since:%Y%m%d%H%M%S}", "switch_unreachable",
                         f"{sw.name} ({sw.address}) has not answered SNMP for {mins:.0f} min ({sw.fail_streak} failed polls): {sw.last_error}"
-                        + (f" — {len(deps)} downstream device(s) unreachable behind it are not alerted separately" if deps else ""),
+                        + (f" — {len(deps)} downstream device(s) unreachable behind it are not alerted separately" if deps else "")
+                        + (f" — {len(imp['aps'])} access point(s) cabled behind it ({imp['clients']} clients at last poll) are not alerted separately"
+                           if imp else ""),
                         first=since, last=now, count=sw.fail_streak, component="SNMP agent", metric="switch_up", value=0,
                         last_healthy=sw.last_success_at.isoformat() if sw.last_success_at else None,
-                        extra={"dependent_devices": deps} if deps else None))
+                        extra={**({"dependent_devices": deps} if deps else {}),
+                               **({"dependent_aps": imp["aps"][:200], "affected_clients": imp["clients"]} if imp else {})} or None))
+    return out
+
+
+def ap_root(ap_switch_id: int | None, by_id: dict) -> Switch | None:
+    """The down device an AP depends on: its uplink switch if down, else the topmost down device above that switch."""
+    sw = by_id.get(ap_switch_id) if ap_switch_id else None
+    if sw is None:
+        return None
+    return down_root(sw, by_id) or (sw if sw.state == "down" else None)
+
+
+async def _ap_impact(sws: list, by_id: dict) -> dict[int, dict]:
+    """APs (and their last client counts) cabled behind each down root device."""
+    if not any(x.state == "down" for x in sws):
+        return {}
+    from ..db.models import WirelessAp
+    async with session_factory()() as s:
+        aps = (await s.execute(select(WirelessAp).where(WirelessAp.switch_id.is_not(None), WirelessAp.present.is_(True)))).scalars().all()
+    out: dict[int, dict] = {}
+    for a in aps:
+        root = ap_root(a.switch_id, by_id)
+        if root is not None:
+            d = out.setdefault(root.id, {"aps": [], "clients": 0})
+            d["aps"].append(a.name or a.mac)
+            d["clients"] += a.clients or 0
     return out
 
 
@@ -229,11 +277,12 @@ async def rule_switch_stale_metrics(ch, now, p):
         if sw.state != "up":
             continue
         last = _aware(sw.last_success_at)
-        iv = max(60, sw.poll_interval_seconds or 60)
-        if last and (now - last).total_seconds() > 3 * iv + 60:
+        iv, limit = poll_interval(sw), stale_after(sw, p)
+        if last and (now - last).total_seconds() > limit:
             out.append(_det(sw, bs, f"{sw.id}:stale", "switch_stale_metrics", f"{sw.name}: no successful poll for {(now - last).total_seconds() / 60:.0f} min "
-                            f"(interval {iv}s). Check the worker.", first=last, last=now, component="poller", metric="last_success_age_seconds",
-                            value=round((now - last).total_seconds()), threshold=3 * iv))
+                            f"(poll interval {iv}s, stale after {limit / 60:.0f} min). Check the poller service.", first=last, last=now,
+                            component="poller", metric="last_success_age_seconds", value=round((now - last).total_seconds()), threshold=round(limit),
+                            extra={"poll_interval_seconds": iv, "last_poll_duration_ms": sw.poll_duration_ms, "last_error": sw.last_error}))
             continue
         ivs = intervals_of(sw)
         failing = []

@@ -16,12 +16,12 @@ log = logging.getLogger("bootstrap")
 
 async def backfill_alert_mitre(s: AsyncSession) -> int:
     """Alerts created before ATT&CK mapping existed get their rule's mapping (idempotent)."""
-    from .alerts.rules import RULE_MITRE
+    from .alerts.engine import rule_mitre
     from .db.models import Alert
     n = 0
     for a in (await s.execute(select(Alert))).scalars():
-        if not a.mitre and a.rule_key in RULE_MITRE:
-            a.mitre = RULE_MITRE[a.rule_key]
+        if not a.mitre and rule_mitre(a.rule_key):
+            a.mitre = rule_mitre(a.rule_key)
             n += 1
     if n:  # refresh tactics/severity of open incidents that contain back-filled alerts
         from .db.models import Incident
@@ -34,8 +34,13 @@ async def backfill_alert_mitre(s: AsyncSession) -> int:
     return n
 
 
-async def seed(s: AsyncSession) -> None:
-    await ensure_default_rules(s)
+async def seed(s: AsyncSession, product: str | None = None) -> None:
+    from .composition import load
+    load(product)
+    await ensure_default_rules(s, product)
+    if product in (None, "nms"):
+        from .traffic.registry import ensure_defaults as traffic_defaults   # signature registry, zone policies
+        await traffic_defaults(s)
     await ensure_default_policies(s)
     await ensure_default_feeds(s)
     await backfill_alert_mitre(s)

@@ -19,8 +19,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import Switch, SwitchInterface, WirelessAp, WirelessClient, WirelessEvent, WirelessRadio, WirelessWlan
+from ..db.models import Switch, SwitchInterface, WirelessAp, WirelessClient, WirelessEvent, WirelessRadio, WirelessRogue, WirelessWlan
 from ..switches.collect import port_key
+from . import history
 from . import rf as RF
 
 log = logging.getLogger("wireless")
@@ -77,6 +78,7 @@ class Out:
         self.rf_rows: list[dict] = []
         self.events: list[WirelessEvent] = []
         self.client_events = 0
+        self.history: list[dict] = []           # client association changes (wireless_client_events)
 
     def m(self, metric: str, value, *, ap_id=0, slot=-1, wlan_id=0, band="", source=""):
         if value is None:
@@ -423,6 +425,8 @@ async def persist(s: AsyncSession, ch, sw: Switch, data: dict, ran: set[str], no
         new_macs = [m for m in cur if m not in known]
         stale = {c.mac: c for c in (await s.execute(select(WirelessClient).where(WirelessClient.wlc_id == sw.id, WirelessClient.mac.in_(new_macs[:5000]),
                                                                                WirelessClient.present.is_(False)))).scalars()} if new_macs else {}
+        before = history.snapshot({**stale, **known})        # session tracking compares against the state before this poll
+        rows: dict = {}
         for m, d in cur.items():
             c = known.get(m) or stale.get(m)
             ap_id = ap_mac_id.get(d.get("ap_mac", ""))
@@ -449,6 +453,7 @@ async def persist(s: AsyncSession, ch, sw: Switch, data: dict, ran: set[str], no
             c.username = (d.get("username") or "")[:128]
             c.ap_id = ap_id
             c.present, c.last_seen = True, now
+            rows[m] = c
             out.samples.append({"ts": now, "wlc_id": sw.id, "mac": m, "ap_id": ap_id or 0, "slot": d.get("slot") if d.get("slot") is not None else -1,
                                 "ssid": d.get("ssid") or "", "band": d.get("band") or "", "rssi_dbm": d.get("rssi_dbm"), "snr_db": d.get("snr_db"),
                                 "tx_rate_mbps": d.get("tx_rate_mbps"), "rx_bytes": d.get("rx_bytes"), "tx_bytes": d.get("tx_bytes"),
@@ -461,6 +466,8 @@ async def persist(s: AsyncSession, ch, sw: Switch, data: dict, ran: set[str], no
                     out.ev("client_disconnected", "informational", f"client {m} no longer listed by the controller"
                            + (f" (last reason {c.reason})" if c.reason else ""), ap_id=c.ap_id, client_mac=m, client=True, last_ap=c.ap_mac,
                            reason=c.reason or None)
+        out.history = await history.track(s, sw, now, cur, before, rows, ap_mac_id, table_ok and not data.get("wireless_client_truncated"),
+                                          stored={**stale, **known})
         if out.client_events > MAX_CLIENT_EVENTS:
             out.ev("client_churn", "informational", f"{out.client_events} client association changes in one poll; {MAX_CLIENT_EVENTS} recorded individually")
         out.m("wireless_wlc_client_count", len(cur), source="+".join(sorted({x for d in cur.values() for x in d.get("sources", [])})))
@@ -479,6 +486,34 @@ async def persist(s: AsyncSession, ch, sw: Switch, data: dict, ran: set[str], no
             if w.clients is None and w.present:
                 w.clients = per_ssid.get(w.ssid, 0)
         health["clients_truncated"] = bool(data.get("wireless_client_truncated"))
+    # ---------------------------------------------------------------- rogue APs (controller rogue detection)
+    if "wireless_rogue" in ran and data.get("wireless_rogues") is not None:
+        cur_r: dict = data["wireless_rogues"]
+        ours = {w.ssid for w in (await s.execute(select(WirelessWlan).where(WirelessWlan.wlc_id == sw.id))).scalars() if w.present and w.ssid}
+        stored = {r.mac: r for r in (await s.execute(select(WirelessRogue).where(WirelessRogue.wlc_id == sw.id))).scalars()}
+        for m, d in cur_r.items():
+            r = stored.get(m)
+            spoof = bool(d.get("ssid") and d["ssid"] in ours)
+            if r is None:
+                r = WirelessRogue(wlc_id=sw.id, mac=m, first_seen=now)
+                s.add(r)
+                if spoof or d.get("class_type") == "malicious" or d.get("on_network"):
+                    out.ev("rogue_detected", "high" if spoof or d.get("on_network") else "medium",
+                           f"rogue AP {m} ({d.get('ssid') or 'hidden SSID'}) detected by {d.get('detecting_ap') or 'an AP'}"
+                           + (" — broadcasts one of our SSIDs" if spoof else "") + (" — seen on the wired network" if d.get("on_network") else ""),
+                           component=m, rogue=m, ssid=d.get("ssid"))
+            for k in ("ssid", "channel", "rssi_dbm", "clients", "detecting_aps", "detecting_ap", "type", "on_network", "state", "class_type"):
+                v = d.get(k)
+                setattr(r, k, v if v is not None else (None if k in ("channel", "rssi_dbm", "clients", "detecting_aps") else False if k == "on_network" else ""))
+            r.ssid, r.detecting_ap = (r.ssid or "")[:64], (r.detecting_ap or "")[:64]
+            r.spoofs_ssid, r.present, r.last_seen = spoof, True, now
+        if data.get("wireless_rogue_table_ok") and not data.get("wireless_rogue_truncated"):
+            for m, r in stored.items():
+                if m not in cur_r:
+                    r.present = False
+        health["rogues"] = len(cur_r)
+        health["rogues_flagged"] = sum(1 for d in cur_r.values() if d.get("class_type") == "malicious" or d.get("on_network")
+                                       or (d.get("ssid") and d["ssid"] in ours))
     # ---------------------------------------------------------------- controller summary
     present = [a for a in aps.values() if a.present or a.state == "down"]
     health.update(aps=len(present), aps_up=sum(1 for a in present if a.state == "up"), aps_down=sum(1 for a in present if a.state == "down"),
@@ -502,6 +537,8 @@ async def persist(s: AsyncSession, ch, sw: Switch, data: dict, ran: set[str], no
             await ch.ainsert("rf_telemetry", out.rf_rows, RF_COLS)
         if out.samples:
             await ch.ainsert("wireless_client_samples", out.samples, CLIENT_COLS)
+        if out.history:
+            await ch.ainsert("wireless_client_events", out.history, history.EVENT_COLS)
     except Exception:  # history is best effort; inventory and state are already in the session
         log.exception("storing wireless metrics failed for %s", sw.name)
     return {"events": len(out.events), "metrics": len(out.metrics), "client_samples": len(out.samples)}
@@ -511,5 +548,7 @@ async def housekeeping(s: AsyncSession, now: datetime | None = None, events_days
     now = now or datetime.now(timezone.utc)
     await s.execute(delete(WirelessEvent).where(WirelessEvent.at < now - timedelta(days=events_days)))
     await s.execute(delete(WirelessClient).where(WirelessClient.present.is_(False), WirelessClient.last_seen < now - timedelta(days=clients_days)))
+    from ..config import get_settings
+    await history.housekeeping(s, now, get_settings().wireless_session_retention_days)
     await s.commit()
 

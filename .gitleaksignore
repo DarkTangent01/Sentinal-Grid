@@ -1,0 +1,16 @@
+# Reviewed gitleaks findings (security/DOCKER_SECURITY_AUDIT.md, DS2-14): exact fingerprints only, so a real secret
+# added anywhere, including these files, is still reported. Format: <commit>:<file>:<rule>:<line>
+# SNMP counter names (bsnAPIfDot11...), not a key
+7727d5a7a9e1fe0aacd1b0c03d8176337afd5256:backend/app/wireless/collect.py:generic-api-key:142
+# fixed dummy SECRET_KEY for the local benchmark harness
+7727d5a7a9e1fe0aacd1b0c03d8176337afd5256:backend/tools/bench_api.py:generic-api-key:8
+# deliberately wrong SNMPv3 password in a negative test
+7727d5a7a9e1fe0aacd1b0c03d8176337afd5256:backend/tests/test_switches.py:generic-api-key:234
+# SNMP counter names (bsnAPIfDot11...), not a key
+c4664880b0381ffb45e4b1a6b69bc628239cef4b:backend/app/wireless/collect.py:generic-api-key:142
+# deliberately wrong SNMPv3 password in a negative test
+c4664880b0381ffb45e4b1a6b69bc628239cef4b:backend/tests/test_switches.py:generic-api-key:234
+# fixed dummy SECRET_KEY for the test suite
+f9ca3615c2e5c247c305eb11eb59c0d8892bc11d:backend/tests/conftest.py:generic-api-key:10
+# fixed dummy SECRET_KEY for the test suite
+15aa691f23e121600db98aafee660738f631459a:backend/tests/conftest.py:generic-api-key:10

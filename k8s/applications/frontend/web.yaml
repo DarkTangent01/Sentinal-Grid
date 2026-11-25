@@ -1,0 +1,128 @@
+# nginx (frontend/Dockerfile): static UI, TLS termination and the /api reverse proxy to the api Service. uid 101,
+# unprivileged ports, read-only. TLS from the kubernetes.io/tls Secret sentinel-web-tls (mounted 0440, group 101).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-upstream
+data:
+  upstream.inc: |
+    # nginx's resolver ignores DNS search domains: the cluster DNS Service and the api's fully qualified name
+    resolver kube-dns.kube-system.svc.cluster.local valid=10s ipv6=off;
+    resolver_timeout 3s;
+    set $api_upstream http://api.sentinel.svc.cluster.local:8000;
+    # device access: no separate gateway Deployment on Kubernetes yet, so the api serves it in-process
+    # (ACCESS_GATEWAY_INPROCESS defaults to true); docs/nms/PRODUCTION_DEPLOYMENT.md
+    set $access_upstream http://api.sentinel.svc.cluster.local:8000;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: web
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: web
+        image: sentinel/web:1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: https
+          containerPort: 8443
+        - name: http
+          containerPort: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '1'
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+        readinessProbe:
+          httpGet:
+            path: /
+            port: https
+            scheme: HTTPS
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: https
+          periodSeconds: 15
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: tls
+          mountPath: /etc/nginx/certs
+          readOnly: true
+        - name: upstream
+          mountPath: /etc/nginx/conf.d/upstream.inc
+          subPath: upstream.inc
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: upstream
+        configMap:
+          name: web-upstream
+      - name: tls
+        secret:
+          secretName: sentinel-web-tls
+          defaultMode: 288
+          items:
+          - key: tls.crt
+            path: siem.crt
+          - key: tls.key
+            path: siem.key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: web
+  ports:
+  - name: https
+    port: 8443
+    targetPort: https
+  - name: http
+    port: 8080
+    targetPort: http

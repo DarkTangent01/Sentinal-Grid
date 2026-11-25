@@ -287,11 +287,8 @@ async def test_baseline_anomaly_rules_and_views(clean_ch, db, monkeypatch):
     kinds = {r["kind"] for r in clean_ch.query("SELECT kind FROM bgp_events")}
     assert {"more_specific", "default_route", "route_withdraw", "route_add", "unreachable"} <= kinds
     # watchlist of critical prefixes
-    from app.db.models import Watchlist, WatchlistItem
-    w = Watchlist(name="bgp_critical_prefixes", kind="ip", created_by="t")
-    db.add(w)
-    await db.flush()
-    db.add(WatchlistItem(watchlist_id=w.id, value="10.0.0.0/16", label="DC", added_by="t"))
+    from app.db.models import WanSetting
+    db.add(WanSetting(data={"bgp_critical_prefixes": [{"prefix": "10.0.0.0/16", "label": "DC"}]}))   # NMS setting, not a SIEM watchlist
     await db.commit()
     await ensure_default_rules(db)
     for r in (await db.execute(select(AlertRule))).scalars():

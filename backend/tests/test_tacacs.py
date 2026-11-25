@@ -6,6 +6,7 @@ infrastructure is touched."""
 import asyncio
 import importlib.util
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def snap() -> dict:
                     {"id": 2, "name": "corp-ad", "kind": "ad", "enabled": True, "settings": {"hosts": ["ldaps://dc1.example.net:636"], "base": "dc=example,dc=net",
                                                                                              "bind_dn": "CN=svc-tacacs,OU=svc,DC=example,DC=net",
                                                                                              "memberof_regex": "^CN=tac_([^,]+),.*"}}],
-        "users": [{"username": "alice", "source_kind": "local", "enabled": True, "emergency": False, "groups": [], "password_hash": "$6$abc$hash"},
+        "users": [{"username": "alice", "source_kind": "local", "enabled": True, "emergency": False, "groups": [], "password_hash": "$6$rounds=656000$abc$hash"},
                   {"username": "breakglass", "source_kind": "local", "enabled": True, "emergency": True, "groups": [], "password_hash": "$6$x$y"},
                   {"username": "mallory", "source_kind": "directory", "enabled": False, "emergency": False, "groups": ["netops"], "password_hash": ""}],
         "roles": roles,
@@ -76,7 +77,7 @@ def test_render_full_and_redacted():
     sn = snap()
     full = R.render(sn, SECRETS, redact=False, now=NOW)
     red = R.render(sn, SECRETS, redact=True, now=NOW)
-    for secret in ("Kc1sco-Secret-Value-1234", "Ruck-NEW-secret-4321", "Bind-Pass-Value!", "Tester-Key-777", "$6$abc$hash"):
+    for secret in ("Kc1sco-Secret-Value-1234", "Ruck-NEW-secret-4321", "Bind-Pass-Value!", "Tester-Key-777", "$6$rounds=656000$abc$hash"):
         assert secret in full and secret not in red
     assert full.count("{") == full.count("}") and red.count("{") == red.count("}")
     assert "device wh1-acc-sw01 {" in full and "address = 10.20.0.11/32" in full and "tag = cisco" in full
@@ -92,7 +93,21 @@ def test_render_full_and_redacted():
     prof = full[full.index("profile r_network_engineer_cisco"):]
     assert prof.index("rule:3") < prof.index("rule:1") < prof.index("rule:2")  # exception (priority 5) before category deny before regex deny
     assert "device ggn-fw-01" in full and "profile r_network_engineer_fortinet" in full
-    assert "user alice {" in full and "password login = crypt $6$abc$hash" in full and "user mallory" not in full
+    assert "user alice {" in full and "password login = crypt \"$6$rounds=656000$abc$hash\"" in full and "user mallory" not in full
+
+
+def test_rendered_regexes_accept_cisco_cr_like_the_simulator():
+    """Regression: Cisco authorizes "configure terminal <cr>"; the simulator strips " <cr>" but the server regex ended
+    in "$", so the real server denied what the simulator permitted (found against tac_plus-ng, 2026-11-03)."""
+    import re as _re
+    from app.tacacs.vendors import normalize_cmd
+    full = R.render(snap(), SECRETS, redact=False, now=NOW)
+    pats = [ln.split("=~ /", 1)[1].rsplit("/)", 1)[0].replace("\\/", "/") for ln in full.splitlines() if "cmd =~ /" in ln]
+    cfg = next(p for p in pats if "configure( terminal)?" in p and "replace" not in p)
+    for cmd in ("configure terminal <cr>", "configure terminal", "configure <cr>"):
+        assert _re.search(cfg, cmd) and _re.search(cfg.replace("( <cr>)?$", "$"), normalize_cmd(cmd)), cmd
+    assert not _re.search(cfg, "configure terminal now <cr>")
+    assert R._re(r"^a\$b[$]") == r"/^a\$b[$]/"  # escaped / bracketed dollars are literal
 
 
 def test_render_rejects_bad_identifiers_and_escapes_strings():
@@ -198,6 +213,14 @@ def test_parse_all_kinds_and_result_classes():
     assert bad["parse_ok"] == 0 and bad["parse_error"]
 
 
+def test_priv_level_prefers_the_av_pair_over_the_header():
+    e = P.parse_line("acct", line("acct", "ACCT-START", "1", "10.20.0.11", "d", "u", "tty2", "c", "start", "shell", "0", "", "", "s", "",
+                                  "task_id=5|priv-lvl=15"), 1)
+    assert e["priv_lvl"] == 15
+    e = P.parse_line("acct", line("acct", "ACCT-START", "1", "10.20.0.11", "d", "u", "tty2", "c", "start", "shell", "7", "", "", "s", "", "task_id=5"), 1)
+    assert e["priv_lvl"] == 7
+
+
 def test_redaction_before_storage():
     for cmd, leak in (("username bob privilege 15 secret 9 $9$abcdefg", "$9$abcdefg"), ("snmp-server community Publ1c RO", "Publ1c"),
                       ("set password ENC AAAAAAAAAAAAAAAAAAAA", "AAAAAAAAAAAA"), ("tacacs-server key 7 0822455D0A16", "0822455D0A16"),
@@ -267,6 +290,21 @@ async def test_ingestion_cursor_duplicates_rotation_and_sessions(db, ch, tmp_pat
     assert ev["total"] == 4 and len(ev["items"]) == 2 and "raw" not in ev["items"][0]
 
 
+async def test_range_registered_client_is_attributed_by_device_name(db, ch, tmp_path):
+    """Regression: a client registered as a range never matched a device address, so its events had client_id 0
+    (unknown device) and no last authentication time."""
+    ch.command("TRUNCATE TABLE tacacs_events")
+    srv = await _server(db)
+    rng = TacClient(name="lab-icx-range", address="10.40.0.0/28", vendor="ruckus", site="LAB", secret_ciphertext=S.seal("k" * 20))
+    db.add(rng)
+    await db.commit()
+    _write(tmp_path, "authc", [line("authc", "AUTHC-PASS", "7", "10.40.0.3", "lab-icx-range", "dave", "ssh", "10.99.0.5", "permit", "shell login", "0",
+                                    "r", "m1", "s", "", "")])
+    await J.ingest(db, ch, srv, str(tmp_path))
+    rows = ch.query("SELECT client_id, vendor, site FROM tacacs_events FINAL WHERE username = 'dave'")
+    assert rows == [{"client_id": rng.id, "vendor": "ruckus", "site": "LAB"}]
+
+
 async def test_missing_log_files_reported(db, ch, tmp_path):
     from app.tacacs import queries as Q
     srv = await _server(db)
@@ -295,12 +333,13 @@ async def test_siem_health_probes_are_not_unknown_devices(db, ch, tmp_path):
 
 # Log variables tac_plus-ng accepts in a log format (parse_log_format in tac_plus-ng/utils.c at the pinned commit); a name it does
 # not know makes the whole configuration fail to load ("log variable 'privlvl' is not recognized").
-TAC_LOG_VARIABLES = {"msgid", "session.id", "device.address", "device.name", "device.port", "user", "client", "result", "action", "priv-lvl",
+TAC_LOG_VARIABLES = {"msgid", "session.id", "device.address", "device", "device.port", "user", "client", "result", "action", "priv-lvl",
                      "profile", "rule", "server.address", "server.port", "identity-source", "hint", "service", "cmd", "args", "accttype",
                      "conn.protocol", "peer.address", "peer.port"}
 
 
 def test_log_formats_use_known_variables_and_match_bootstrap():
+    assert all("device.name" not in names for names in P.FIELDS.values())  # the server's hostname, not the device (see parse.py)
     for kind, names in P.FIELDS.items():
         assert set(names) <= TAC_LOG_VARIABLES, (kind, set(names) - TAC_LOG_VARIABLES)
     boot = (Path(__file__).resolve().parents[2] / "deploy" / "tacacs" / "bootstrap.cfg").read_text()
@@ -377,12 +416,49 @@ async def test_deploy_requires_approval_by_someone_else(db, tmp_path):
     await db.commit()
     await J.run_job(db, j3, config_dir=str(tmp_path), timeout=1.5)
     assert j3.status == "failed" and "no answer" in j3.result["reason"] and not list((tmp_path / "requests").iterdir())
+    assert not list((tmp_path / "candidates").iterdir())  # the candidate holds every device key: removed on timeout too
     # stale: the active configuration changed after the request
     j4 = await S.request_deploy(db, v, srv, pol, "again")
     srv.deployed_sha256 = "f" * 64
     with pytest.raises(S.TacError):
         await S.decide(db, j4, appr, "approve", j4.approval_hash, "")
     assert j4.status == "cancelled"
+
+
+def test_candidate_gets_the_shared_group_and_is_never_world_readable(tmp_path, monkeypatch):
+    """Regression: production volumes lost their setgid bit (no CAP_FSETID), so candidates got the worker's group and
+    the agent failed every request with PermissionError. The worker now sets the volume's group itself."""
+    (tmp_path / "candidates").mkdir()
+    f = tmp_path / "candidates" / "1.cfg.tmp"
+    f.write_text("x")
+    real_stat, calls = os.stat, []
+
+    class St:
+        def __init__(self, st, gid):
+            self.st_gid, self.st_mode = gid, st.st_mode
+
+    monkeypatch.setattr(J.os, "stat", lambda p: St(real_stat(p), 10050 if str(p) == str(tmp_path) else 999))
+    monkeypatch.setattr(J.os, "chown", lambda p, uid, gid: calls.append((str(p), uid, gid)))
+    J._share(str(f), str(tmp_path))
+    assert calls == [(str(f), -1, 10050)]
+    calls.clear()
+    monkeypatch.setattr(J.os, "stat", lambda p: St(real_stat(p), 10050))
+    J._share(str(f), str(tmp_path))
+    assert calls == []  # already right: no chown
+
+
+def test_agent_names_the_file_on_permission_errors(tmp_path):
+    m = _agent_module(tmp_path)
+    (tmp_path / "candidates" / "8.cfg").write_text("cfg key = Secret123")
+
+    def denied(p):
+        raise PermissionError(13, "Permission denied", p)
+    m.sha256 = denied
+    (tmp_path / "requests" / "8.json").write_text(json.dumps({"id": 8, "action": "validate", "sha256": "0" * 64}))
+    r = m.process("8.json")
+    assert r["status"] == "failed" and r["output"] == "agent error: PermissionError (Permission denied) on candidates/8.cfg"
+    assert json.loads((tmp_path / "results" / "8.json").read_text())["output"] == r["output"] and not (tmp_path / "requests" / "8.json").exists()
+    assert m.process("../x.json") is None and m.process("notes.txt") is None
 
 
 def _agent_module(base: Path):
@@ -439,6 +515,28 @@ async def test_health_damping_outage_and_recovery(db, monkeypatch):
     assert srv.status == "up" and srv.fail_streak == 0
 
 
+async def test_health_reports_unwritable_log_directory(db, monkeypatch, tmp_path):
+    """Regression: with the log volume owned by another user tac_plus-ng logged nothing, and the SIEM only showed the
+    files as missing (indistinguishable from "no events yet")."""
+    import time as _t
+    srv = await _server(db)
+
+    async def fake(host, port, timeout=3.0):
+        return True, 1.0, ""
+    monkeypatch.setattr(J, "tcp_check", fake)
+    st = {"running": True, "listening": True, "logs_writable": False, "time": _t.time(), "commit": "dc3ce306f0a9"}
+    (tmp_path / "status.json").write_text(json.dumps(st))
+    hc = await J.health(db, srv, NOW, config_dir=str(tmp_path))
+    assert hc.status == "degraded" and hc.agent_ok is False and "cannot write /tacacs/logs" in hc.detail
+    (tmp_path / "status.json").write_text(json.dumps({**st, "logs_writable": True}))
+    assert (await J.health(db, srv, NOW + timedelta(seconds=30), config_dir=str(tmp_path))).status == "up"
+    (tmp_path / "agentbase").mkdir()
+    m = _agent_module(tmp_path / "agentbase")
+    m.LOG_DIR = str(tmp_path)
+    m.status()
+    assert json.loads((tmp_path / "agentbase" / "status.json").read_text())["logs_writable"] is True
+
+
 async def test_tcp_check_respects_outbound_guard():
     ok, _ms, err = await J.tcp_check("127.0.0.1", 49, 0.5)
     assert not ok and "not allowed" in err
@@ -459,9 +557,22 @@ async def test_client_auth_and_accounting_against_simulated_server(monkeypatch):
         acct = await TC.account("127.0.0.1", sim.port, "Tester-Key-777", "sentinel-grid-test", "sgtest-1", 3)
         assert acct["ok"] and any(r["type"] == "acct" and b"task_id=sgtest-1" in r["raw"] for r in sim.received)
         mismatch = await TC.authenticate("127.0.0.1", sim.port, "Wrong-Key", "carol", "Correct-Horse-1", 3)
-        assert not mismatch["ok"] and mismatch["category"] in ("protocol_error", "server_error", "auth_reject")
+        assert not mismatch["ok"] and mismatch["category"] == "protocol_error"  # wrong key: never a plain FAIL or server error
     finally:
         await sim.stop()
+        get_settings.cache_clear()
+    # the server closes the connection (tac_plus-ng does this for an unknown source address or the bootstrap configuration)
+    async def hang_up(r, w):
+        w.close()
+    closer = await asyncio.start_server(hang_up, "127.0.0.1", 0)
+    monkeypatch.setenv("OUTBOUND_ALLOWED_HOSTS", "127.0.0.1")
+    get_settings.cache_clear()
+    try:
+        port = closer.sockets[0].getsockname()[1]
+        for step in (await TC.authenticate("127.0.0.1", port, "k", "carol", "pw", 3), await TC.account("127.0.0.1", port, "k", "u", "t1", 3)):
+            assert step["category"] == "reset" and "tester address" in step["help"], step
+    finally:
+        closer.close()
         get_settings.cache_clear()
     down = await TC.tcp("192.0.2.1", 49, 0.5)  # TEST-NET: never answers
     assert not down["ok"] and down["category"] in ("timeout", "refused")
@@ -560,6 +671,13 @@ async def test_api_rbac_secrets_validation_and_workflow(api, db, ch):  # noqa: F
     assert r.status_code == 422 and "authorised client network" in r.text
     assert (await admin.put("/api/tacacs/settings", json={"client_networks": ["10.0.0.0/8"], "tester_address": "172.18.0.5"})).json()["tester_secret_set"]
     assert (await admin.put("/api/tacacs/settings", json={"client_networks": ["0.0.0.0/0"]})).status_code == 422
+    # tests run from the api container: its address, or the aaa network's subnet (addresses change on recreate)
+    r = await admin.put("/api/tacacs/settings", json={"client_networks": ["10.0.0.0/8"], "tester_address": "172.18.5.0/24"})
+    assert r.status_code == 200 and r.json()["tester_address"] == "172.18.5.0/24"
+    for bad in ("172.18.0.0/16", "127.0.0.1", "not-an-ip"):
+        assert (await admin.put("/api/tacacs/settings", json={"client_networks": ["10.0.0.0/8"], "tester_address": bad})).status_code == 422, bad
+    r = await admin.put("/api/tacacs/settings", json={"client_networks": ["10.0.0.0/8"], "tester_address": "172.18.0.5/32"})
+    assert r.json()["tester_address"] == "172.18.0.5"
     r = await admin.post("/api/tacacs/clients", json=body)
     assert r.status_code == 201 and len(r.json()["shared_secret"]) >= 32
     secret, cid = r.json()["shared_secret"], r.json()["id"]

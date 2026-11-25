@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { fmtBytes, fmtNum } from "../../lib/format";
-import { Card, Drawer, Empty, Kpi, Loading, Sev, TableWrap, Tabs, Time, Trunc, rowProps, useDebounced } from "../../components/ui";
+import { Card, Drawer, Empty, Kpi, Loading, Pager, rowProps, Sev, TableWrap, Tabs, Time, Trunc, useDebounced } from "../../components/ui";
 import { Bps, Flags, Fresh, KV, MetricStatus, Oper, RangeSelect, Section, SeriesChart, StateDot, Util, fmtBps, fmtPctOrDash, fmtUptime, fmtWatts, statusTone } from "./common";
 import { EventTable } from "./SwitchesPage";
 import { SwitchForm } from "./Admin";
 
+const DeviceAccessTab = lazy(() => import("../nms/Access").then((m) => ({ default: m.DeviceAccessTab })));
+
 const ALL_TABS: [string, string, string | null][] = [["overview", "Overview", null], ["interfaces", "Interfaces", "interfaces"], ["vlans", "VLANs", "vlans"],
   ["macs", "MAC table", "mac_table"], ["stp", "STP", "stp"], ["lacp", "LACP / port-channels", "lacp"], ["neighbors", "Neighbors", "neighbors"], ["poe", "PoE", "poe"], ["hardware", "Hardware", "hw"],
-  ["routing", "Routing", "routing"], ["events", "Events & alerts", null], ["health", "Monitoring health", null]];
+  ["routing", "Routing", "routing"], ["events", "Events & alerts", null], ["health", "Monitoring health", null], ["access", "Access", null]];
 
 export function SwitchDetail() {
   const { id } = useParams();
@@ -60,6 +62,7 @@ export function SwitchDetail() {
     {tab === "routing" && <Routing d={d} sid={sid} />}
     {tab === "events" && <EventsTab d={d} sid={sid} />}
     {tab === "health" && <Health sid={sid} />}
+    {tab === "access" && <Suspense fallback={<Loading q={{ isLoading: true, error: null }} />}><DeviceAccessTab sid={sid} /></Suspense>}
     {sp.get("if") && <InterfaceDrawer sid={sid} ifindex={Number(sp.get("if"))} onClose={() => { const n = new URLSearchParams(sp); n.delete("if"); setSp(n); }} />}
     {edit && <SwitchForm sw={d} onClose={() => { setEdit(false); qc.invalidateQueries({ queryKey: ["switch-detail", sid] }); }} />}
   </div>;
@@ -231,8 +234,7 @@ function Macs({ sid }: { sid: number }) {
         <TableWrap><table className="tbl"><thead><tr><th>MAC</th><th className="num">VLAN</th><th>Port</th><th>Type</th><th className="num">Moves</th><th>First seen</th><th>Last seen</th></tr></thead>
           <tbody>{r.data.items.map((m: any) => <tr key={`${m.mac}-${m.vlan}`}><td className="font-mono text-xs">{m.mac}</td><td className="num">{m.vlan || "—"}</td><td className="font-mono text-xs">{m.port || "—"}</td>
             <td className="text-xs">{m.status}</td><td className={`num ${m.moves ? "text-amber-300" : ""}`}>{m.moves}</td><td><Time v={m.first_seen} /></td><td><Time v={m.last_seen} /></td></tr>)}</tbody></table></TableWrap>)}
-      {r.data && r.data.total > 200 && <div className="flex gap-2 p-2"><button className="btn" disabled={!page} onClick={() => setPage(page - 1)}>Previous</button>
-        <button className="btn" disabled={(page + 1) * 200 >= r.data.total} onClick={() => setPage(page + 1)}>Next</button></div>}
+      {r.data && <Pager page={page + 1} size={200} total={r.data.total} onPage={(p) => setPage(p - 1)} />}
     </Card>
     <Card title="MAC movement and learning bursts" bodyClass="p-0"><EventTable rows={r.data?.moves || []} showSwitch={false} />
       <p className="text-2xs text-muted p-2">A move is a MAC seen on a different port than in the previous poll (moves between members of the same port-channel are ignored). One move is

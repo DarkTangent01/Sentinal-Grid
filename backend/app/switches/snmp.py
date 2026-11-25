@@ -70,20 +70,33 @@ class Credentials:
                 raise SnmpError("config", f"the SNMPv3 {what} passphrase must be 8-128 characters")
 
 
+_T: tuple = ()
+
+
+def _types() -> tuple:
+    """pyasn1 / pysnmp classes, imported once (this runs for every value of every walk)."""
+    global _T
+    if not _T:
+        from pyasn1.type import univ
+        from pysnmp.proto import rfc1902, rfc1905
+        _T = ((rfc1905.NoSuchObject, rfc1905.NoSuchInstance, rfc1905.EndOfMibView), rfc1902.IpAddress, univ.ObjectIdentifier,
+              univ.OctetString, univ.Integer, univ.Null)
+    return _T
+
+
 def _convert(v):
-    from pyasn1.type import univ
-    from pysnmp.proto import rfc1902, rfc1905
-    if isinstance(v, (rfc1905.NoSuchObject, rfc1905.NoSuchInstance, rfc1905.EndOfMibView)) or v is None:
+    missing, ip, oid, octets, integer, null = _types()
+    if v is None or isinstance(v, missing):
         return MISSING
-    if isinstance(v, rfc1902.IpAddress):
-        return ".".join(str(b) for b in v.asOctets())
-    if isinstance(v, univ.ObjectIdentifier):
-        return ".".join(str(x) for x in v)
-    if isinstance(v, (univ.OctetString,)):
-        return bytes(v.asOctets())
-    if isinstance(v, univ.Integer):
+    if isinstance(v, integer):                     # the most frequent type first (counters, gauges, enums are Integer subclasses)
         return int(v)
-    if isinstance(v, univ.Null):
+    if isinstance(v, ip):
+        return ".".join(str(b) for b in v.asOctets())
+    if isinstance(v, octets):
+        return bytes(v.asOctets())
+    if isinstance(v, oid):
+        return ".".join(map(str, v))
+    if isinstance(v, null):
         return MISSING
     return v
 
@@ -214,12 +227,12 @@ class PysnmpClient:
                     break
                 done = False
                 for name, val in vbs:
-                    oid = ".".join(str(x) for x in name)
+                    t = tuple(name)
+                    oid = ".".join(map(str, t))
                     v = _convert(val)
                     if not oid.startswith(prefix) or v is MISSING:
                         done = True
                         break
-                    t = tuple(name)
                     if t <= last:  # agent returned a non-increasing OID: stop instead of looping
                         done = True
                         break
@@ -258,9 +271,9 @@ class PysnmpClient:
                     b = active[i % n]
                     if b in finished:
                         continue
-                    oid = ".".join(str(x) for x in name)
+                    t = tuple(name)                     # one pass over the OID (pyasn1 iteration is not free)
+                    oid = ".".join(map(str, t))
                     v = _convert(val)
-                    t = tuple(name)
                     if not oid.startswith(b + ".") or v is MISSING or t <= last[b] or len(out[b]) >= limit:
                         finished.add(b)
                         continue

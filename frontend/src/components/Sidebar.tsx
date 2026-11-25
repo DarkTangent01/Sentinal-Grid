@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { Me } from "../lib/context";
 import { fmtAgo } from "../lib/format";
 import { ADMIN, NAV, PRODUCT, Product, activeItem, lastPathOf } from "../lib/products";
+import { SentinelMark, SentinelTile } from "./Brand";
 
 // 24×24 stroke icons (inline, no icon dependency)
 const I = (d: ReactNode) => (
@@ -48,6 +49,7 @@ export const ICONS: Record<string, ReactNode> = {
   identity: I(<><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M16 11.5l1.6 1.6 3.4-3.6" /></>),
   iac: I(<><path d="M8 7l-5 5 5 5M16 7l5 5-5 5" /><path d="M13.5 4.5l-3 15" /></>),
   aaa: I(<><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" /><circle cx="12" cy="10" r="2" /><path d="M12 12v4" /></>),
+  terminal: I(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12.5 15H17" /></>),
   switch: I(<><rect x="2.5" y="8" width="19" height="8" rx="1.5" /><path d="M6 12h.01M9 12h.01M12 12h.01M15 12h.01M18 12h.01M6 16v3M18 16v3" /></>),
   tunnel: I(<><path d="M3 18V10a9 9 0 0 1 18 0v8" /><path d="M7 18v-7a5 5 0 0 1 10 0v7M3 18h18" /></>),
   logsrc: I(<><path d="M4 6h16M4 12h16M4 18h10" /><circle cx="19" cy="18" r="2" /></>),
@@ -75,20 +77,12 @@ function useFolded(product: Product): [Set<string>, (t: string) => void] {
   })];
 }
 
-const TONE: Record<Product, { tile: string; text: string; bar: string; bg: string; ring: string }> = {
-  grid: { tile: "bg-[#e23744] shadow-[0_4px_12px_-4px_rgb(226_55_68/0.6)]", text: "text-brand-400", bar: "bg-[#e23744]", bg: "bg-brand-500/10", ring: "focus-visible:ring-brand-400" },
-  nms: { tile: "bg-[#0e9f9a] shadow-[0_4px_12px_-4px_rgb(14_159_154/0.6)]", text: "text-teal-300", bar: "bg-[#14b8a6]", bg: "bg-teal-500/10", ring: "focus-visible:ring-teal-300" },
-};
-
+/** Product glyphs for menus (the platform mark stays the same; this marks the product's domain). */
 export function ProductMark({ product, size = 18 }: { product: Product; size?: number }) {
-  return product === "grid" ? (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M8 12h2l1.5-3 2 6 1.5-3h1" /></svg>
-  ) : (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="5" r="2.2" /><circle cx="5" cy="18" r="2.2" /><circle cx="19" cy="18" r="2.2" /><path d="M12 7.2v4.3M12 11.5l-5.6 4.8M12 11.5l5.6 4.8" /><circle cx="12" cy="11.5" r="1.2" fill="currentColor" /></svg>
-  );
+  return <SentinelMark size={size} tone={product} />;
 }
+
+const CHEVRON = <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>;
 
 export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, lastIngest }: {
   me: Me; product: Product; open: boolean; collapsed: boolean; setCollapsed: (v: boolean) => void; onLogout: () => void; lastIngest?: string | null;
@@ -114,47 +108,48 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
   const ingestAge = lastIngest ? (Date.now() - Date.parse(lastIngest.replace(" ", "T") + (/[zZ+]/.test(lastIngest.slice(19)) ? "" : "Z"))) / 1000 : null;
   const live = ingestAge !== null && ingestAge < 180;
   const initials = me.username.slice(0, 2).toUpperCase();
-  const tone = TONE[product];
   const groups = [...NAV[product], ADMIN];
   const active = activeItem(groups, loc.pathname, loc.search);
   const others = me.products.filter((p) => p !== product);
   const sw = (p: Product) => { setMenu(false); nav(lastPathOf(p)); };
+  const status = product === "grid" ? (live ? "Ingesting events" : lastIngest ? `Last event ${fmtAgo(lastIngest)}` : "No recent events") : PRODUCT[product].kind;
 
   return (
     <aside id="sidebar" aria-label="Sidebar"
-      className={`fixed inset-y-0 left-0 z-40 shrink-0 bg-panel border-r border-line flex flex-col transition-[transform,width] duration-200
-        w-60 lg:static lg:translate-x-0 ${rail ? "lg:w-16" : "lg:w-60"} ${open ? "translate-x-0" : "-translate-x-full"}`}>
+      className={`fixed inset-y-0 left-0 z-40 shrink-0 bg-panel2 border-r border-line flex flex-col transition-[transform,width] duration-200 ease-out
+        w-64 lg:static lg:translate-x-0 ${rail ? "lg:w-[4.25rem]" : "lg:w-64"} ${open ? "translate-x-0 shadow-pop" : "-translate-x-full"}`}>
       {/* brand + product switcher */}
-      <div className={`relative flex items-center gap-2.5 h-16 px-4 border-b border-line ${rail ? "lg:justify-center lg:px-0" : ""}`}>
-        <div className={`h-9 w-9 shrink-0 rounded-xl flex items-center justify-center text-[#ffffff] ${tone.tile}`}><ProductMark product={product} /></div>
+      <div className={`relative flex items-center gap-2.5 h-14 px-3.5 border-b border-line ${rail ? "lg:justify-center lg:px-0" : ""}`}>
+        <SentinelTile size={34} tone={product} />
         <div className={`min-w-0 flex-1 ${rail ? "lg:hidden" : ""}`}>
-          <div className="font-extrabold tracking-tight text-[15px] text-slate-100 leading-tight truncate">Sentinel <span className={tone.text}>{PRODUCT[product].accent}</span></div>
-          <div className="text-2xs text-muted flex items-center gap-1.5" title={lastIngest ? `Last event ingested ${fmtAgo(lastIngest)}` : "No recent ingestion"}>
-            <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} aria-hidden />
-            {product === "grid" ? (live ? "Ingesting" : lastIngest ? `Last event ${fmtAgo(lastIngest)}` : "No recent events") : "Network monitoring"}
+          <div className="font-semibold tracking-[-0.02em] text-[15px] text-slate-100 leading-tight truncate">Sentinel <span className="text-brand-400">{PRODUCT[product].accent}</span></div>
+          <div className="text-[10.5px] text-subtle flex items-center gap-1.5 truncate mt-0.5" title={product === "grid" && lastIngest ? `Last event ingested ${fmtAgo(lastIngest)}` : status}>
+            {product === "grid" && <span className={`dot !h-1.5 !w-1.5 ${live ? "dot-ok animate-pulse" : "dot-warn"}`} aria-hidden />}
+            <span className="truncate">{status}</span>
           </div>
         </div>
-        {others.length > 0 && <button className={`shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 ${tone.ring} ${rail ? "lg:hidden" : ""}`}
+        {others.length > 0 && <button type="button" className={`btn-ghost btn btn-icon !p-1 shrink-0 text-subtle ${rail ? "lg:hidden" : ""}`}
           aria-label="Switch product" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)} title="Switch product">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M7 10l5-5 5 5M7 14l5 5 5-5" /></svg></button>}
         {menu && <>
           <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} aria-hidden />
-          <div role="menu" aria-label="Products" className="absolute left-3 right-3 top-14 z-50 rounded-lg border border-line bg-panel shadow-xl p-1"
+          <div role="menu" aria-label="Products" className="absolute left-2.5 right-2.5 top-12 z-50 rounded-lg border border-line bg-elevated shadow-pop p-1 animate-pop-in"
             onKeyDown={(e) => { if (e.key === "Escape") setMenu(false); }}>
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">Switch product</div>
-            {me.products.map((p) => <button key={p} role="menuitemradio" aria-checked={p === product} autoFocus={p === others[0]}
-              className={`w-full flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-slate-800/60 focus-visible:outline-none focus-visible:bg-slate-800/60 ${p === product ? "text-slate-100" : "text-slate-300"}`}
+            <div className="eyebrow px-2 py-1.5">Switch product</div>
+            {me.products.map((p) => <button key={p} type="button" role="menuitemradio" aria-checked={p === product} autoFocus={p === others[0]}
+              className={`w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-left text-[13px] hover:bg-slate-800/70 focus-visible:outline-none focus-visible:bg-slate-800/70 ${p === product ? "text-slate-100" : "text-slate-300"}`}
               onClick={() => sw(p)}>
-              <span className={`h-6 w-6 rounded-md flex items-center justify-center text-[#ffffff] ${TONE[p].tile}`}><ProductMark product={p} size={14} /></span>
-              <span className="flex-1">{PRODUCT[p].name}<span className="block text-2xs text-muted">{PRODUCT[p].kind}</span></span>
-              {p === product && <span className="text-2xs text-muted">current</span>}</button>)}
-            <button role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-xs text-muted hover:bg-slate-800/60 hover:text-slate-200"
+              <SentinelTile size={28} tone={p} />
+              <span className="flex-1 min-w-0">{PRODUCT[p].name}<span className="block text-2xs text-subtle truncate">{PRODUCT[p].kind}</span></span>
+              {p === product && <span className="pill bg-slate-800 text-muted">current</span>}</button>)}
+            <div className="my-1 border-t border-line" />
+            <button type="button" role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-xs text-muted hover:bg-slate-800/70 hover:text-slate-200"
               onClick={() => { setMenu(false); nav("/select-product"); }}>All products…</button>
           </div></>}
       </div>
 
       {/* navigation */}
-      <nav aria-label={`${PRODUCT[product].name} navigation`} className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-3">
+      <nav aria-label={`${PRODUCT[product].name} navigation`} className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-4">
         {groups.map((g) => {
           const items = g.items.filter((it) => !it.admin || me.role === "admin");
           if (!items.length) return null;
@@ -162,32 +157,34 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
           const gid = `nav-${product}-${g.title.replace(/\W+/g, "-")}`;
           return (
           <div key={g.title}>
-            <button className={`w-full flex items-center gap-1 px-3 mb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 hover:text-slate-300 ${rail ? "lg:hidden" : ""}`}
+            <button type="button" className={`group/g w-full flex items-center gap-1 px-2.5 mb-1 eyebrow hover:text-slate-300 transition-colors ${rail ? "lg:hidden" : ""}`}
               aria-expanded={!isFolded} aria-controls={gid} onClick={() => toggle(g.title)}>
               <span className="flex-1 text-left truncate">{g.title}</span>
-              <span className={`transition-transform ${isFolded ? "-rotate-90" : ""}`} aria-hidden>▾</span></button>
+              <span className={`opacity-60 group-hover/g:opacity-100 transition-transform duration-150 ${isFolded ? "-rotate-90" : ""}`}>{CHEVRON}</span></button>
             {rail && <div className="hidden lg:block mx-3 mb-2 border-t border-line" aria-hidden />}
-            {!isFolded && <ul id={gid} className="space-y-0.5">
+            {!isFolded && <ul id={gid} className="space-y-px">
               {items.map((it) => {
                 const isActive = it.to === active;
                 if (it.planned) return (
                   <li key={it.to}><span title={it.planned} aria-disabled="true"
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-600 cursor-not-allowed ${rail ? "lg:justify-center lg:px-0" : ""}`}>
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-subtle/70 cursor-not-allowed ${rail ? "lg:justify-center lg:px-0" : ""}`}>
                     <span className="shrink-0">{ICONS[it.icon]}</span><span className={`truncate flex-1 ${rail ? "lg:hidden" : ""}`}>{it.label}</span>
-                    <span className={`pill bg-slate-800 text-slate-500 ${rail ? "lg:hidden" : ""}`}>planned</span></span></li>);
+                    <span className={`pill bg-slate-800 text-subtle ${rail ? "lg:hidden" : ""}`}>planned</span></span></li>);
+                const n = it.badge ? badges[it.badge] : 0;
                 return (
                 <li key={it.to}>
-                  <Link to={it.to} title={rail ? it.label : undefined} aria-current={isActive ? "page" : undefined}
-                    className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors
-                      ${rail ? "lg:justify-center lg:px-0" : ""}
-                      ${isActive ? `${tone.bg} ${tone.text} font-semibold` : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"}`}>
-                    {isActive && <span className={`absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r ${tone.bar}`} aria-hidden />}
-                    <span className={`shrink-0 ${isActive ? tone.text : "text-slate-500 group-hover:text-slate-300"}`}>{ICONS[it.icon]}</span>
+                  <Link to={it.to} aria-current={isActive ? "page" : undefined} aria-label={rail ? `${it.label}${n ? `, ${n} open` : ""}` : undefined}
+                    title={rail ? it.label : undefined}
+                    className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150
+                      ${rail ? "lg:justify-center lg:px-0 lg:py-2" : ""}
+                      ${isActive ? "bg-brand-500/[0.12] text-slate-100 font-medium" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"}`}>
+                    {isActive && <span className="absolute -left-2 top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-400" aria-hidden />}
+                    <span className={`shrink-0 ${isActive ? "text-brand-400" : "text-subtle group-hover:text-slate-300"}`}>{ICONS[it.icon]}</span>
                     <span className={`truncate flex-1 ${rail ? "lg:hidden" : ""}`}>{it.label}</span>
-                    {it.badge && badges[it.badge] > 0 && (
-                      <span aria-label={`${badges[it.badge]} open`}
-                        className={`rounded-full bg-[#cb202d] text-[#ffffff] text-[10px] font-bold tabular-nums px-1.5 py-0.5 leading-none
-                          ${rail ? "lg:absolute lg:top-0.5 lg:right-1.5 lg:px-1" : ""}`}>{badges[it.badge] > 99 ? "99+" : badges[it.badge]}</span>
+                    {n > 0 && (
+                      <span aria-label={rail ? undefined : `${n} open`}
+                        className={`rounded-full bg-bad text-[#fff] text-[10px] font-semibold tabular-nums px-1.5 py-0.5 leading-none
+                          ${rail ? "lg:absolute lg:top-0.5 lg:right-1 lg:px-1" : ""}`}>{n > 99 ? "99+" : n}</span>
                     )}
                   </Link>
                 </li>);
@@ -198,24 +195,25 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
       </nav>
 
       {/* collapse (desktop) */}
-      <button onClick={() => setCollapsed(!collapsed)} aria-label={rail ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!rail}
-        className={`hidden lg:flex items-center gap-2 mx-2 mb-2 rounded-md px-2.5 py-1.5 text-xs text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 ${rail ? "justify-center px-0" : ""}`}>
-        <span className={`transition-transform ${rail ? "rotate-180" : ""}`}>{ICONS.chevron}</span>
+      <button type="button" onClick={() => setCollapsed(!collapsed)} aria-label={rail ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!rail}
+        className={`hidden lg:flex items-center gap-2 mx-2 mb-2 rounded-md px-2.5 py-1.5 text-xs text-subtle hover:bg-slate-800/60 hover:text-slate-200 transition-colors ${rail ? "justify-center px-0" : ""}`}>
+        <span className={`transition-transform duration-200 ${rail ? "rotate-180" : ""}`}>{ICONS.chevron}</span>
         {!rail && <span>Collapse</span>}
       </button>
 
       {/* user */}
       <div className={`border-t border-line p-3 flex items-center gap-2.5 ${rail ? "lg:flex-col lg:px-0" : ""}`}>
-        <div className={`h-8 w-8 shrink-0 rounded-full ${tone.bg} ${tone.text} flex items-center justify-center text-xs font-bold`} title={`${me.username} (${me.role})`} aria-hidden>{initials}</div>
+        <div className="h-8 w-8 shrink-0 rounded-full bg-brand-500/15 text-brand-300 ring-1 ring-inset ring-brand-500/30 flex items-center justify-center text-xs font-semibold"
+          title={`${me.username} (${me.role})`} aria-hidden>{initials}</div>
         <div className={`min-w-0 flex-1 ${rail ? "lg:hidden" : ""}`}>
           <div className="flex items-center gap-1.5">
-            <span className="text-sm text-slate-200 truncate">{me.username}</span>
-            <span className={`pill ${me.role === "admin" ? `${tone.bg} ${tone.text}` : "bg-slate-700/60 text-slate-300"}`}>{me.role}</span>
+            <span className="text-[13px] font-medium text-slate-200 truncate">{me.username}</span>
+            <span className={`pill ${me.role === "admin" ? "bg-brand-500/15 text-brand-300" : "bg-slate-800 text-muted"}`}>{me.role}</span>
           </div>
-          <div className="text-2xs text-muted truncate" title="Display timezone (Settings → Preferences)">{me.timezone}</div>
+          <div className="text-2xs text-subtle truncate" title="Display timezone (Settings → Preferences)">{me.timezone}</div>
         </div>
-        <button onClick={onLogout} aria-label="Sign out" title="Sign out"
-          className="shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-brand-500/10 hover:text-brand-400">{ICONS.logout}</button>
+        <button type="button" onClick={onLogout} aria-label="Sign out" data-tip={rail ? "Sign out" : undefined}
+          className="tip shrink-0 rounded-md p-1.5 text-subtle hover:bg-slate-800/70 hover:text-slate-100 transition-colors">{ICONS.logout}</button>
       </div>
     </aside>
   );

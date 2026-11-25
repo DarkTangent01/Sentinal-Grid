@@ -56,17 +56,17 @@ function ChannelForm({ c, onClose }: { c: any; onClose: () => void }) {
       return c.id ? api(`/notifications/channels/${c.id}`, { method: "PUT", body }) : api("/notifications/channels", { method: "POST", body });
     }, onSuccess: onClose,
   });
-  const i = (k: string, l: string, p: any = {}) => <div><label className="label">{l}</label><input className="input w-full" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...p} /></div>;
+  const i = (k: string, l: string, p: any = {}) => <label className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...p} /></label>;
   return (
     <Modal title={c.id ? `Edit ${c.name}` : "New channel"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
         {i("name", "Name")}
-        <div><label className="label">Type</label><select className="input w-full" value={f.type} disabled={!!c.id} onChange={(e) => setF({ ...f, type: e.target.value })}>
-          <option value="slack">Slack (incoming webhook)</option><option value="teams">Microsoft Teams (Workflows webhook)</option><option value="email">Email (SMTP)</option><option value="webhook">Generic webhook (JSON)</option></select></div>
+        <label className="block min-w-0"><span className="label">Type</span><select className="input w-full" value={f.type} disabled={!!c.id} onChange={(e) => setF({ ...f, type: e.target.value })}>
+          <option value="slack">Slack (incoming webhook)</option><option value="teams">Microsoft Teams (Workflows webhook)</option><option value="email">Email (SMTP)</option><option value="webhook">Generic webhook (JSON)</option></select></label>
         {f.type !== "email" && <div className="sm:col-span-2">{i("url", c.has_secret ? "Webhook URL (leave blank to keep current)" : "Webhook URL", { type: "password", placeholder: "https://…", autoComplete: "off" })}</div>}
         {f.type === "webhook" && <div className="sm:col-span-2">{i("hmac_secret", "HMAC signing secret (optional) → X-SIEM-Signature header", { type: "password", autoComplete: "off" })}</div>}
         {f.type === "email" && <>{i("host", "SMTP host")}{i("port", "Port", { type: "number" })}
-          <div><label className="label">Security</label><select className="input w-full" value={f.security} onChange={(e) => setF({ ...f, security: e.target.value })}><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None (internal relay only)</option></select></div>
+          <label className="block min-w-0"><span className="label">Security</span><select className="input w-full" value={f.security} onChange={(e) => setF({ ...f, security: e.target.value })}><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None (internal relay only)</option></select></label>
           {i("username", "Username (optional)")}{i("password", c.has_secret ? "Password (leave blank to keep)" : "Password", { type: "password", autoComplete: "new-password" })}
           {i("from_addr", "From address")}<div className="sm:col-span-2">{i("to", "Recipients (comma-separated)")}</div></>}
         <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Enabled</label>
@@ -114,15 +114,15 @@ function RuleForm({ r, channels, events, onClose }: { r: any; channels: any[]; e
   return (
     <Modal title={r.id ? "Edit rule" : "New rule"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div><label className="label">Channel</label><select className="input w-full" value={f.channel_id} onChange={(e) => setF({ ...f, channel_id: e.target.value })}>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-        <div className="sm:col-span-2"><label className="label">Events</label><div className="flex flex-wrap gap-3 text-sm">{events.map((e) => <label key={e} className="flex items-center gap-1"><input type="checkbox" checked={f.event_types.includes(e)} onChange={() => toggle(e)} />{EVENT_LABEL[e] || e}</label>)}</div></div>
-        <div><label className="label">Minimum severity</label><select className="input w-full" value={f.min_severity} onChange={(e) => setF({ ...f, min_severity: e.target.value })}>{["informational", "low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></div>
-        <div><label className="label">De-duplicate (minutes)</label><input type="number" min={0} className="input w-full" value={f.dedupe_minutes} onChange={(e) => setF({ ...f, dedupe_minutes: e.target.value })} /></div>
-        <div className="sm:col-span-2"><label className="label">Only these detection rules (keys, optional)</label><input className="input w-full" value={f.rule_keys} onChange={(e) => setF({ ...f, rule_keys: e.target.value })} placeholder="ti_match, impossible_travel" /></div>
-        <div><label className="label">Quiet hours start</label><input type="time" className="input w-full" value={f.quiet_start || ""} onChange={(e) => setF({ ...f, quiet_start: e.target.value })} /></div>
-        <div><label className="label">Quiet hours end</label><input type="time" className="input w-full" value={f.quiet_end || ""} onChange={(e) => setF({ ...f, quiet_end: e.target.value })} /></div>
-        <div><label className="label">Quiet hours timezone</label><input className="input w-full" value={f.quiet_tz} onChange={(e) => setF({ ...f, quiet_tz: e.target.value })} /></div>
+        <label className="block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Channel</span><select className="input w-full" value={f.channel_id} onChange={(e) => setF({ ...f, channel_id: e.target.value })}>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        <div className="sm:col-span-2" role="group" aria-label="Events"><span className="label">Events</span><div className="flex flex-wrap gap-3 text-sm">{events.map((e) => <label key={e} className="flex items-center gap-1"><input type="checkbox" checked={f.event_types.includes(e)} onChange={() => toggle(e)} />{EVENT_LABEL[e] || e}</label>)}</div></div>
+        <label className="block min-w-0"><span className="label">Minimum severity</span><select className="input w-full" value={f.min_severity} onChange={(e) => setF({ ...f, min_severity: e.target.value })}>{["informational", "low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">De-duplicate (minutes)</span><input type="number" min={0} className="input w-full" value={f.dedupe_minutes} onChange={(e) => setF({ ...f, dedupe_minutes: e.target.value })} /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Only these detection rules (keys, optional)</span><input className="input w-full" value={f.rule_keys} onChange={(e) => setF({ ...f, rule_keys: e.target.value })} placeholder="ti_match, impossible_travel" /></label>
+        <label className="block min-w-0"><span className="label">Quiet hours start</span><input type="time" className="input w-full" value={f.quiet_start || ""} onChange={(e) => setF({ ...f, quiet_start: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Quiet hours end</span><input type="time" className="input w-full" value={f.quiet_end || ""} onChange={(e) => setF({ ...f, quiet_end: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Quiet hours timezone</span><input className="input w-full" value={f.quiet_tz} onChange={(e) => setF({ ...f, quiet_tz: e.target.value })} /></label>
         <label className="text-sm flex items-center gap-2 self-end"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Enabled</label>
       </div>
       {save.error && <div role="alert" className="text-sm text-red-400 mt-2">{(save.error as Error).message}</div>}

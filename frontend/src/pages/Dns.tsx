@@ -23,7 +23,7 @@ export function Dns() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2 items-end">
-        <div><label className="label">Query contains</label><input aria-label="Query contains" className="input w-72" placeholder="example.com" value={query} onChange={(e) => setQuery(e.target.value.trim())} /></div>
+        <label className="block min-w-0"><span className="label">Query contains</span><input aria-label="Query contains" className="input w-72" placeholder="example.com" value={query} onChange={(e) => setQuery(e.target.value.trim())} /></label>
         <LimitSelect value={limit} onChange={setLimit} />
       </div>
       <p className="text-xs text-muted">Source: FortiGate DNS-filter logs (type=utm subtype=dns) via syslog or the log API. Only queries that pass through a DNS-filter profile are logged; response codes and resolved IPs appear only when FortiGate logs them.</p>

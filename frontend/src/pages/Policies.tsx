@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, Kpi, Loading, TableWrap, Time, Trunc, rowProps, useDebounced } from "../components/ui";
+import { Card, Empty, Kpi, Loading, Pager, rowProps, TableWrap, Time, Trunc, useDebounced } from "../components/ui";
 import { Donut, TopBar } from "../components/charts";
 
 export const STATE_LABEL: Record<string, string> = {
@@ -45,15 +45,15 @@ export function ScopeBar({ scope, setScope, window, setWindow }: { scope: string
   const sync = useMutation({ mutationFn: (fw: number) => api<any>(`/v1/policies/sync/${fw}`, { method: "POST" }), onSuccess: () => qc.invalidateQueries() });
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <div><label className="label">Firewall / VDOM</label>
+      <label className="block min-w-0"><span className="label">Firewall / VDOM</span>
         <select aria-label="Firewall and VDOM" className="input" value={scope} onChange={(e) => setScope(e.target.value)}>
           <option value="">All firewalls</option>
           {(scopes.data || []).map((s) => <option key={`${s.firewall_id}|${s.vdom}`} value={`${s.firewall_id}|${s.vdom}`}>{s.firewall} / {s.vdom}{s.is_demo ? " (demo)" : ""}</option>)}
-        </select></div>
-      <div><label className="label">Observation window</label>
+        </select></label>
+      <label className="block min-w-0"><span className="label">Observation window</span>
         <select aria-label="Observation window" className="input" value={window} onChange={(e) => setWindow(Number(e.target.value))}>
           {[7, 30, 60, 90].map((d) => <option key={d} value={d}>{d} days</option>)}
-        </select></div>
+        </select></label>
       <div className="flex-1" />
       <div className="text-xs text-muted space-y-0.5 text-right">
         {(sel ? [sel] : scopes.data || []).slice(0, 4).map((s) => (
@@ -97,7 +97,6 @@ export function Policies() {
   const th = (k: string, label: string, cls = "") => (
     <th className={`cursor-pointer select-none ${cls}`} onClick={() => { if (sort === k) setOrder(order === "asc" ? "desc" : "asc"); else { setSort(k); setOrder(k === "seq" ? "asc" : "desc"); } }}>
       {label}{sort === k ? (order === "asc" ? " ▲" : " ▼") : ""}</th>);
-  const pages = inv.data ? Math.max(1, Math.ceil(inv.data.total / inv.data.size)) : 1;
 
   return (
     <div className="space-y-4 min-w-0">
@@ -123,19 +122,16 @@ export function Policies() {
           {s.top_by_bytes?.length > 0 && <p className="text-2xs text-muted mt-1">Source per policy: {Array.from(new Set(s.top_by_bytes.map((r: any) => r.source))).join(", ")}</p>}</Card>
       </div>
       <Card title={`Policy inventory (${fmtNum(inv.data?.total)})`} right={
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button><span className="text-muted">{page} / {pages}</span>
-          <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>›</button>
-        </div>}>
+        <Pager className="" page={page} size={inv.data?.size || 1} total={inv.data?.total} onPage={setPage} />}>
         <div className="grid gap-2 grid-cols-2 md:grid-cols-4 xl:grid-cols-8 mb-3">
           {[["q", "ID / name / UUID"], ["srcintf", "Source interface"], ["dstintf", "Destination interface"], ["addr", "Address object"], ["service", "Service"]].map(([k, l]) => (
-            <div key={k}><label className="label">{l}</label><input className="input w-full" value={f[k] || ""} onChange={(e) => setFilter(k, e.target.value)} /></div>))}
+            <label key={k} className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k] || ""} onChange={(e) => setFilter(k, e.target.value)} /></label>))}
           {[["action", "Action", ["accept", "deny"]], ["status", "Status", ["enable", "disable"]], ["logging", "Logging", ["all", "utm", "disable"]],
             ["assessment", "Assessment", Object.keys(STATE_LABEL)], ["shadow", "Shadow", ["any", ...Object.keys(SHADOW_LABEL)]]].map(([k, l, opts]) => (
-            <div key={k as string}><label className="label">{l as string}</label>
+            <label key={k as string} className="block min-w-0"><span className="label">{l as string}</span>
               <select className="input w-full" value={f[k as string] || ""} onChange={(e) => setFilter(k as string, e.target.value)}>
                 <option value="">any</option>{(opts as string[]).map((o) => <option key={o} value={o}>{STATE_LABEL[o] || SHADOW_LABEL[o] || o}</option>)}
-              </select></div>))}
+              </select></label>))}
           <div className="flex items-end"><button className="btn w-full justify-center" onClick={() => { setF({}); setPage(1); }}>Clear</button></div>
         </div>
         <Loading q={inv} />

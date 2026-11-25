@@ -5,17 +5,45 @@
 export type Product = "grid" | "nms";
 export const ALL_PRODUCTS: Product[] = ["grid", "nms"];
 
+/** Build-time product (npm run build:grid | build:nms set VITE_PRODUCT): that product's app alone, served on its
+ *  own address with its own API (docs/architecture/FRONTEND_SEPARATION.md). null = the combined app with both. */
+export const BUILD_PRODUCT: Product | null = toProduct(import.meta.env.VITE_PRODUCT);
+
+export function toProduct(v: string | undefined | null): Product | null {
+  return v === "grid" || v === "nms" ? v : null;
+}
+
+/** The products this build offers to an account: its allowed products, narrowed to the build's product. */
+export function buildProducts(allowed: Product[], build: Product | null = BUILD_PRODUCT): Product[] {
+  return build ? allowed.filter((p) => p === build) : allowed;
+}
+
+/** Pages shared in the combined app whose API belongs to Sentinel Grid (assets inventory, log sources): a
+ *  Sentinel NMS build leaves them out. */
+export const GRID_SERVED = ["/assets", "/log-sources"];
+
+export function servedBy(path: string, build: Product | null = BUILD_PRODUCT): boolean {
+  const p = path.split("?")[0];
+  if (build === "nms" && GRID_SERVED.some((x) => p === x || p.startsWith(x + "/"))) return false;
+  const owner = productOfLocation(p);
+  return !build || !owner || owner === build;
+}
+
+export function filterNav(groups: NavGroup[], build: Product | null = BUILD_PRODUCT): NavGroup[] {
+  return groups.map((g) => ({ ...g, items: g.items.filter((it) => servedBy(it.to, build)) })).filter((g) => g.items.length);
+}
+
 export const PRODUCT: Record<Product, { name: string; accent: string; kind: string; tagline: string; home: string; features: string[] }> = {
   grid: {
-    name: "Sentinel Grid", accent: "Grid", kind: "Security Information and Event Management", home: "/grid",
-    tagline: "Centralized security monitoring, threat detection, incident response, security analytics and threat hunting.",
+    name: "Sentinel Grid", accent: "Grid", kind: "Security Intelligence Platform", home: "/grid",
+    tagline: "Security monitoring, threat detection, incident response, security analytics and threat hunting.",
     features: ["Alerts & incidents", "Threat intelligence", "Hunting & search", "Identity security", "Compliance evidence"],
   },
   nms: {
-    name: "Sentinel NMS", accent: "NMS", kind: "Network Monitoring System", home: "/nms",
-    tagline: "Network infrastructure visibility, ISP / WAN monitoring, device health, performance analytics, configuration management and network operations.",
-    features: ["ISP / WAN & SD-WAN", "Wireless (Cisco WLC)", "Cisco, Fortinet, Juniper, Ruckus & any SNMP device", "Service checks & SLA analytics", "BGP & VPN tunnels",
-      "TACACS+ AAA", "Policy & config management"],
+    name: "Sentinel NMS", accent: "NMS", kind: "Network Monitoring & Intelligence", home: "/nms",
+    tagline: "Network visibility, ISP / WAN monitoring, device health, traffic intelligence, configuration management and network operations.",
+    features: ["ISP / WAN & SD-WAN", "Traffic & application intelligence", "Wireless (Cisco WLC)", "Cisco, Fortinet, Juniper, Ruckus & any SNMP device",
+      "Service checks & SLA analytics", "BGP, VPN tunnels & TACACS+", "Policy & config management"],
   },
 };
 
@@ -23,19 +51,22 @@ export interface NavItem { to: string; label: string; icon: string; end?: boolea
   primary?: boolean }  // primary: highlighted when the path matches but no item's ?tab does
 export interface NavGroup { title: string; items: NavItem[] }
 
-export const NAV: Record<Product, NavGroup[]> = {
+const ALL_NAV: Record<Product, NavGroup[]> = {
   grid: [
-    { title: "Overview", items: [{ to: "/grid", label: "Dashboard", icon: "dashboard", end: true }, { to: "/incidents", label: "Incidents", icon: "incidents", badge: "incidents" },
+    { title: "Overview", items: [{ to: "/grid", label: "Dashboard", icon: "dashboard", end: true }, { to: "/soc", label: "SOC Overview", icon: "workbooks" },
+      { to: "/incidents", label: "Incidents", icon: "incidents", badge: "incidents" },
       { to: "/alerts?product=grid", label: "Alerts", icon: "alerts", badge: "grid_alerts" }] },
     { title: "Security Analytics", items: [{ to: "/sources", label: "Top Sources", icon: "sources" }, { to: "/destinations", label: "Top Destinations", icon: "destinations" },
       { to: "/ports", label: "Top Ports", icon: "ports" }, { to: "/web", label: "Web / URL", icon: "web" }, { to: "/dns", label: "DNS", icon: "dns" },
-      { to: "/geo", label: "Geography", icon: "geo" }, { to: "/explorer", label: "Event Explorer", icon: "explorer" }] },
+      { to: "/geo", label: "Geography", icon: "geo" }, { to: "/network-security", label: "Network Security (Zeek)", icon: "web" },
+      { to: "/explorer", label: "Event Explorer", icon: "explorer" }] },
     { title: "Threat Detection", items: [{ to: "/security", label: "Security Events", icon: "security" }, { to: "/threat-intel", label: "Threat Intel", icon: "ti" },
-      { to: "/detections", label: "Detections", icon: "detections" }, { to: "/watchlists", label: "Watchlists", icon: "watchlists" },
+      { to: "/detections", label: "Detections", icon: "detections" }, { to: "/attack", label: "ATT&CK Coverage", icon: "compliance" },
+      { to: "/risk", label: "Entity Risk", icon: "identity" }, { to: "/watchlists", label: "Watchlists", icon: "watchlists" },
       { to: "/searches", label: "Saved Searches", icon: "searches" }] },
     { title: "Security Operations", items: [{ to: "/search", label: "Search", icon: "search" }, { to: "/hunting", label: "Hunting", icon: "hunting" },
       { to: "/graph", label: "Entity Graph", icon: "graph" }, { to: "/workbooks", label: "Workbooks", icon: "workbooks" },
-      { to: "/automation", label: "Automation", icon: "automation" }] },
+      { to: "/automation", label: "Automation", icon: "automation" }, { to: "/response", label: "Response Actions", icon: "security" }] },
     { title: "Identity & Access Security", items: [{ to: "/vpn", label: "VPN & Users", icon: "vpn" }, { to: "/identity", label: "Users & Identity", icon: "identity" }] },
     { title: "Governance", items: [{ to: "/compliance", label: "Compliance", icon: "compliance" }, { to: "/reports", label: "Security Reports", icon: "reports" }] },
   ],
@@ -47,21 +78,35 @@ export const NAV: Record<Product, NavGroup[]> = {
       { to: "/nms/analytics?tab=availability", label: "Availability & SLA", icon: "compliance" }, { to: "/nms/analytics?tab=capacity", label: "Capacity Planning", icon: "workbooks" },
       { to: "/nms/analytics?tab=top", label: "Top-N & 95th Percentile", icon: "ports" }, { to: "/nms/analytics?tab=inventory", label: "Inventory & Lifecycle", icon: "assets" },
       { to: "/nms/analytics?tab=alerts", label: "Alert Analytics", icon: "alerts" }] },
+    { title: "Application & Protocol Intelligence", items: [{ to: "/nms/traffic?tab=overview", label: "Traffic Overview", icon: "explorer", primary: true },
+      { to: "/nms/traffic?tab=applications", label: "Applications", icon: "web" }, { to: "/nms/traffic?tab=protocols", label: "Protocols & QUIC", icon: "ports" },
+      { to: "/nms/traffic?tab=sources", label: "Top Talkers", icon: "sources" }, { to: "/nms/traffic?tab=conversations", label: "Conversations", icon: "graph" },
+      { to: "/nms/traffic?tab=vlans", label: "VLAN Intelligence", icon: "switch" }, { to: "/nms/traffic?tab=interfaces", label: "Interface Traffic", icon: "health" },
+      { to: "/nms/traffic?tab=domains", label: "DNS & Domains", icon: "dns" }, { to: "/nms/traffic?tab=detections", label: "Traffic Detections", icon: "alerts" },
+      { to: "/nms/traffic?tab=rules", label: "Traffic Rules", icon: "policies" }, { to: "/nms/traffic?tab=collectors", label: "Flow Collectors", icon: "compliance" }] },
     { title: "SNMP Monitoring", items: [{ to: "/snmp?tab=vendors", label: "Vendor & Device Overview", icon: "switch", primary: true },
       { to: "/snmp?tab=health", label: "Polling Health", icon: "health" }, { to: "/snmp?tab=traps", label: "SNMP Traps", icon: "alerts" },
       { to: "/snmp?tab=registry", label: "MIB / OID Registry", icon: "searches" }, { to: "/snmp?tab=custom", label: "Custom OIDs", icon: "workbooks" },
       { to: "/snmp?tab=mibs", label: "MIB Modules", icon: "policies" }, { to: "/snmp?tab=matrix", label: "Support Matrix", icon: "compliance" }] },
     { title: "Monitoring Operations", items: [{ to: "/nms/services", label: "Service Checks", icon: "web" },
-      { to: "/nms/maintenance", label: "Maintenance Windows", icon: "searches" }, { to: "/nms/dependencies", label: "Device Dependencies", icon: "graph" }] },
+      { to: "/nms/maintenance", label: "Maintenance Windows", icon: "searches" }, { to: "/nms/dependencies", label: "Device Dependencies", icon: "graph" },
+      { to: "/nms/configs", label: "Config Changes", icon: "policies" }, { to: "/nms/monitoring", label: "NMS Self-Monitoring", icon: "health" }] },
+    { title: "Device Access", items: [{ to: "/nms/access?tab=devices", label: "Device Access & SSH", icon: "terminal", primary: true },
+      { to: "/nms/access?tab=bulk", label: "Bulk Diagnostics", icon: "automation" }, { to: "/nms/access?tab=automation", label: "Ansible Automation", icon: "iac" },
+      { to: "/nms/access?tab=consoles", label: "Console Servers", icon: "terminal" }, { to: "/nms/access?tab=changes", label: "Change Requests", icon: "policies" },
+      { to: "/nms/access?tab=sessions", label: "Access Sessions", icon: "identity" }, { to: "/nms/access?tab=vault", label: "Credential Vault", icon: "vpn" },
+      { to: "/nms/access?tab=audit", label: "Access Audit", icon: "searches" }, { to: "/nms/access?tab=roles", label: "NMS Roles", icon: "aaa", admin: true }] },
     { title: "ISP & WAN Monitoring", items: [{ to: "/isp?tab=overview", label: "ISP / WAN", icon: "isp", primary: true }, { to: "/isp?tab=sdwan", label: "SD-WAN Health", icon: "health" },
       { to: "/isp?tab=live", label: "WAN Performance", icon: "explorer" }, { to: "/isp?tab=circuits", label: "Circuit Availability", icon: "ports" },
       { to: "/isp?tab=analytics", label: "ISP Incident Analytics", icon: "workbooks" }] },
     { title: "Wireless Analysis", items: [{ to: "/wireless?tab=overview", label: "Wireless Overview", icon: "wifi", primary: true },
       { to: "/wireless?tab=controllers", label: "WLC Inventory", icon: "firewalls" }, { to: "/wireless?tab=aps", label: "Access Points", icon: "wifi_ap" },
       { to: "/wireless?tab=clients", label: "Wireless Clients", icon: "identity" },
-      { to: "/wireless?tab=wlans", label: "WLAN / SSID Analytics", icon: "web" }, { to: "/wireless?tab=roaming", label: "Roaming Analysis", icon: "graph" },
+      { to: "/wireless?tab=wlans", label: "WLAN / SSID Analytics", icon: "web" }, { to: "/wireless?tab=roaming", label: "Roaming Analysis", icon: "graph" }, { to: "/wireless?tab=floors", label: "Floor Experience", icon: "health" },
+      { to: "/wireless?tab=rogues", label: "Rogue APs", icon: "alerts" },
       { to: "/wireless?tab=events", label: "Wireless Events", icon: "searches" }, { to: "/alerts?product=nms&rule_prefix=wireless_", label: "Wireless Alerts", icon: "alerts" },
-      { to: "/wireless?tab=troubleshoot", label: "Wireless Troubleshooting", icon: "hunting" }, { to: "/wireless?tab=health", label: "Monitoring Health", icon: "compliance" }] },
+      { to: "/wireless?tab=troubleshoot", label: "Wireless Troubleshooting", icon: "hunting" }, { to: "/wireless?tab=health", label: "Monitoring Health", icon: "compliance" },
+      { to: "/wireless?tab=integrations", label: "Controller & Cloud Integrations", icon: "graph" }] },
     { title: "RF & Frequency Monitoring", items: [{ to: "/wireless?tab=rf-overview", label: "RF Overview", icon: "wifi", primary: true },
       { to: "/wireless?tab=rf-frequency", label: "Frequency Distribution", icon: "ports" }, { to: "/wireless?tab=rf-heatmap", label: "Utilisation Heatmap", icon: "health" },
       { to: "/wireless?tab=rf-radios", label: "AP Radio Details", icon: "wifi_ap" }, { to: "/wireless?tab=rf-events", label: "RF Events", icon: "searches" },
@@ -74,20 +119,21 @@ export const NAV: Record<Product, NavGroup[]> = {
     { title: "Configuration & Policy", items: [{ to: "/policies", label: "Policy Analytics", icon: "policies", end: true }, { to: "/policies/shadow", label: "Shadow Analysis", icon: "shadow" },
       { to: "/drift", label: "Config Drift", icon: "drift" }, { to: "/iac", label: "Infrastructure as Code", icon: "iac" }, { to: "/hardening", label: "Hardening", icon: "hardening" }] },
     { title: "Network Governance", items: [{ to: "/reports", label: "Network Reports", icon: "reports" }, { to: "/iac?tab=audit", label: "Configuration Audit", icon: "searches" },
-      { to: "/network-compliance", label: "Network Compliance", icon: "compliance", planned: "Planned: network compliance frameworks are not implemented yet. Firewall hardening checks are under Hardening." }] },
+      { to: "/network-compliance", label: "Network Compliance", icon: "compliance" }] },
   ],
 };
 
 /** Shared administration, shown in both products according to the user's role. */
-export const ADMIN: NavGroup = {
+const ALL_ADMIN: NavGroup = {
   title: "Administration", items: [{ to: "/log-sources", label: "Log Sources", icon: "logsrc" }, { to: "/notifications", label: "Notifications", icon: "notifications", admin: true },
     { to: "/settings", label: "Settings", icon: "settings" }],
 };
 
 const OWN: Record<Product, string[]> = {
   grid: ["/grid", "/incidents", "/sources", "/destinations", "/ports", "/web", "/dns", "/geo", "/explorer", "/security", "/threat-intel", "/detections",
-    "/watchlists", "/searches", "/search", "/hunting", "/graph", "/workbooks", "/automation", "/vpn", "/identity", "/compliance", "/investigate"],
-  nms: ["/nms", "/snmp", "/isp", "/wireless", "/firewalls", "/fw-health", "/vpn-tunnels", "/bgp", "/switches", "/tacacs", "/policies", "/drift", "/iac", "/hardening"],
+    "/watchlists", "/searches", "/search", "/hunting", "/graph", "/workbooks", "/automation", "/vpn", "/identity", "/compliance", "/investigate",
+    "/soc", "/attack", "/risk", "/response", "/network-security"],
+  nms: ["/nms", "/snmp", "/isp", "/wireless", "/firewalls", "/fw-health", "/vpn-tunnels", "/bgp", "/switches", "/tacacs", "/policies", "/drift", "/iac", "/hardening", "/network-compliance"],
 };
 
 const under = (path: string, p: string) => path === p || path.startsWith(p + "/");
@@ -153,3 +199,7 @@ export function lastPathOf(p: Product): string {
   } catch { /* ignore */ }
   return PRODUCT[p].home;
 }
+
+// after OWN / under: the filters read them
+export const NAV: Record<Product, NavGroup[]> = { grid: filterNav(ALL_NAV.grid), nms: filterNav(ALL_NAV.nms) };
+export const ADMIN: NavGroup = filterNav([ALL_ADMIN])[0];

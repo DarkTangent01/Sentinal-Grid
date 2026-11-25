@@ -1,0 +1,29 @@
+id: ZEEK-4006
+name: Windows executable downloaded over plain HTTP (Zeek)
+description: >
+  Zeek extracted file metadata showing a Windows executable transferred over unencrypted HTTP to an internal host.
+  Legitimate software mostly uses HTTPS; plain-HTTP executables deserve a look. The hash is in the event for lookup.
+version: 1
+severity: low
+confidence: low
+category: execution
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection: {event_subtype: files, app: HTTP, msg: {contains: "application/x-dosexec"}, dst_ip: {internal: true}}
+  condition: {group_by: [dst_ip], count: 1, timeframe: 30m}
+explanation: "{dst_ip} received {metric} Windows executable(s) over HTTP in {timeframe}: {samples}"
+data_sources: [Zeek files.log (and http.log for the URL, same uid)]
+falsepositives:
+  - Software updaters that still use HTTP (the vendor signs the file instead)
+investigation:
+  - Look up the sha256 / sha1 in your malware intelligence source
+  - Open the HTTP record with the same uid for the host and URL
+mitre: {tactic: TA0002, techniques: [T1204.002]}
+tests:
+  - name: exe over http
+    events: [{event_subtype: files, app: HTTP, src_ip: 198.51.100.7, dst_ip: 10.20.1.15, msg: "mime_type=application/x-dosexec filename=setup.exe"}]
+    expect_alerts: 1
+  - name: a PDF
+    events: [{event_subtype: files, app: HTTP, src_ip: 198.51.100.7, dst_ip: 10.20.1.15, msg: "mime_type=application/pdf"}]
+    expect_alerts: 0

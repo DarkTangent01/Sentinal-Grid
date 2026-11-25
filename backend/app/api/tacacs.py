@@ -1183,23 +1183,29 @@ async def put_settings(body: SettingsIn, request: Request, user: User = Depends(
             re.compile(r)
         except re.error:
             raise HTTPException(422, f"invalid redaction regex: {r}")
-    if body.tester_address:
+    tester = body.tester_address.strip()
+    if tester:
+        # tests run from the api container: its address on the aaa network, or that network's subnet (container
+        # addresses change when containers are recreated). Narrow only: the tester device has a deny-all profile.
         try:
-            ip = ipaddress.ip_address(body.tester_address)
+            net = ipaddress.ip_network(tester, strict=False)
         except ValueError:
-            raise HTTPException(422, "tester address must be the SIEM worker's source IP as the TACACS+ server sees it")
-        if ip.is_loopback or ip.is_unspecified or ip.is_multicast:
+            raise HTTPException(422, "tester address must be the SIEM's source IP (or its /24-or-narrower container subnet) as the TACACS+ server sees it")
+        if net.prefixlen < (24 if net.version == 4 else 120):
+            raise HTTPException(422, "tester subnet must be /24 or narrower (/120 for IPv6)")
+        if net.network_address.is_loopback or net.network_address.is_unspecified or net.network_address.is_multicast:
             raise HTTPException(422, "tester address cannot be loopback / unspecified / multicast")
+        tester = str(net.network_address) if net.num_addresses == 1 else str(net)
     row = await S.get_settings_row(s)
-    data = {**S.DEFAULT_SETTINGS, **(row.data or {}), **body.model_dump(exclude={"rotate_tester_secret"}), "client_networks": nets}
+    data = {**S.DEFAULT_SETTINGS, **(row.data or {}), **body.model_dump(exclude={"rotate_tester_secret"}), "client_networks": nets, "tester_address": tester}
     shown = None
-    if body.tester_address and (body.rotate_tester_secret or not data.get("tester_secret_ciphertext")):
+    if tester and (body.rotate_tester_secret or not data.get("tester_secret_ciphertext")):
         shown = "generated"
         data["tester_secret_ciphertext"] = S.seal(S.generate_secret())
     row.data, row.updated_by = data, user.username
     await s.commit()
     await audit(s, request, user.username, "tacacs_settings_update", "", {"client_networks": nets, "require_approval": body.require_approval,
-                                                                           "tester_address": body.tester_address, "tester_secret": shown or "unchanged"})
+                                                                           "tester_address": tester, "tester_secret": shown or "unchanged"})
     return {k: v for k, v in data.items() if not k.endswith("ciphertext")} | {"tester_secret_set": bool(data.get("tester_secret_ciphertext"))}
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics import queries as Q
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..db.ch import ClickHouse
 from ..db.models import Alert, Firewall, User
 from ..db.pg import get_session

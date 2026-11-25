@@ -2,35 +2,44 @@
 import plugin from "tailwindcss/plugin";
 import twColors from "tailwindcss/colors";
 
-// Colours reference CSS variables so the whole UI switches between night (default) and day themes.
-// Semantic tokens live in src/index.css. The Tailwind hue palettes used across components (slate, sky, emerald,
-// red, amber, orange, white) are also variables: the day theme mirrors each scale (shifted one step darker) so classes
-// written for a dark UI (light text, dark hover surfaces) become dark text on light surfaces with the same contrast.
+// Sentinel design system (docs/design-system.md). Colours reference CSS variables so the UI switches between night
+// (default) and day themes, and between the two products' accents, without component changes.
+//
+// - Neutrals: Tailwind's slate scale *is* the Sentinel neutral ramp (#F1F5F9 text, #94A3B8 secondary, #64748B muted,
+//   #0F172A secondary background); semantic surfaces (bg / panel / line) live in src/index.css.
+// - brand: the product accent. Sentinel NMS = sky (#38BDF8, hover #0EA5E9), Sentinel Grid = violet (#A78BFA, hover
+//   #8B5CF6), switched by <html data-product="…">. Components only ever say "brand".
+// - Status hues are fixed in meaning: emerald = healthy (#22C55E family), amber = warning (#F59E0B), red = critical
+//   (#EF4444), sky = informational (#38BDF8), slate = unknown / disabled (#64748B).
+// The day theme mirrors each scale one step darker (400 → 700 …), so classes written for the dark UI (light text on
+// dark surfaces) keep AA contrast on light surfaces.
 const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
-const HUES = ["slate", "sky", "emerald", "red", "amber", "orange", "teal", "brand"];  // teal: Sentinel NMS accent
-// Zomato theme: "brand" is the Zomato red scale (500 = #E23744, 600 = #CB202D); "slate" maps to neutral greys so the
-// UI reads warm-neutral like Zomato's surfaces instead of blue-grey. Class names stay unchanged across components.
+const HUES = ["slate", "sky", "emerald", "red", "amber", "orange", "teal", "violet", "indigo", "brand"];
 const SCALES = {
-  sky: twColors.sky, emerald: twColors.emerald, red: twColors.red, amber: twColors.amber, orange: twColors.orange, teal: twColors.teal,
-  slate: twColors.neutral,
-  brand: { 50: "#fff0f1", 100: "#ffdfe2", 200: "#ffc2c8", 300: "#ff96a0", 400: "#ef4f5f", 500: "#e23744",
-           600: "#cb202d", 700: "#a81a25", 800: "#8b1821", 900: "#741820", 950: "#400a0e" },
+  slate: twColors.slate, sky: twColors.sky, emerald: twColors.green, red: twColors.red, amber: twColors.amber, orange: twColors.orange,
+  teal: twColors.cyan, violet: twColors.violet, indigo: twColors.indigo,
 };
+const ACCENT = { nms: twColors.sky, grid: twColors.violet };
 const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
 const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`; };
+const mirror = (scale, i) => scale[SHADES[Math.min(SHADES.length - 1, SHADES.length - i)]];
 
 const paletteColors = Object.fromEntries(HUES.map((h) => [h, Object.fromEntries(SHADES.map((s) => [s, v(`c-${h}-${s}`)]))]));
-const nightVars = {}, dayVars = {};
-for (const h of HUES) {
+const nightVars = {}, dayVars = {}, accentVars = { nms: [{}, {}], grid: [{}, {}] };
+for (const h of HUES.filter((x) => x !== "brand")) {
   SHADES.forEach((s, i) => {
     nightVars[`--c-${h}-${s}`] = rgb(SCALES[h][s]);
-    // mirror one step darker (400→700, 500→600, 600→500): text written as -400 for dark backgrounds needs
-    // -700 on white to reach WCAG AA 4.5:1; translucent backgrounds stay light
-    dayVars[`--c-${h}-${s}`] = rgb(SCALES[h][SHADES[Math.min(SHADES.length - 1, SHADES.length - i)]]);
+    dayVars[`--c-${h}-${s}`] = rgb(mirror(SCALES[h], i));
   });
 }
-nightVars["--c-white"] = "255 255 255";
-dayVars["--c-white"] = rgb(SCALES.slate[900]);
+for (const [p, scale] of Object.entries(ACCENT)) {
+  SHADES.forEach((s, i) => {
+    accentVars[p][0][`--c-brand-${s}`] = rgb(scale[s]);
+    accentVars[p][1][`--c-brand-${s}`] = rgb(mirror(scale, i));
+  });
+}
+Object.assign(nightVars, accentVars.nms[0], { "--c-white": "255 255 255" });
+Object.assign(dayVars, accentVars.nms[1], { "--c-white": rgb(twColors.slate[900]) });
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -40,18 +49,36 @@ export default {
       colors: {
         ...paletteColors,
         white: v("c-white"),
-        bg: v("bg"), panel: v("surface"), panel2: v("surface-2"), line: v("border"),
-        muted: v("text-muted"), accent: v("accent"), ok: v("ok"), warn: v("warn"), bad: v("bad"),
+        bg: v("bg"), panel: v("surface"), panel2: v("surface-2"), elevated: v("surface-3"), line: v("border"),
+        scrim: v("scrim"), muted: v("text-muted"), subtle: v("text-subtle"), accent: v("accent"), ok: v("ok"), warn: v("warn"), bad: v("bad"), info: v("info"),
         sev: { critical: v("sev-critical"), high: v("sev-high"), medium: v("sev-medium"), low: v("sev-low"), info: v("sev-info") },
+        // solid fills carrying text (primary buttons, badges, logo tiles): per product and theme, tokens in index.css
+        solid: { brand: v("solid-brand"), "brand-hover": v("solid-brand-hover"), on: v("solid-on") },
       },
-      // system stack only: no web-font download (CSP font-src is 'self'); Zomato's own typeface is not bundled
-      fontFamily: { sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
-                    mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"] },
+      fontFamily: {
+        sans: ["Inter Variable", "Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+      },
       fontSize: { "2xs": ["0.6875rem", "1rem"] },
-      borderRadius: { card: "0.875rem" },
-      boxShadow: { card: "0 1px 2px rgb(28 28 28 / 0.04), 0 4px 16px -8px rgb(28 28 28 / 0.10)" },
-      screens: { xs: "480px" },
+      borderRadius: { card: "0.75rem" },
+      boxShadow: {
+        card: "0 1px 2px rgb(var(--shadow) / 0.06), 0 2px 8px -4px rgb(var(--shadow) / 0.12)",
+        pop: "0 12px 32px -12px rgb(var(--shadow) / 0.45), 0 2px 6px rgb(var(--shadow) / 0.12)",
+      },
+      transitionTimingFunction: { out: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+      keyframes: {
+        "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
+        "pop-in": { from: { opacity: "0", transform: "translateY(4px) scale(0.98)" }, to: { opacity: "1", transform: "none" } },
+        "slide-in": { from: { transform: "translateX(16px)", opacity: "0" }, to: { transform: "none", opacity: "1" } },
+        shimmer: { "0%": { backgroundPosition: "-200% 0" }, "100%": { backgroundPosition: "200% 0" } },
+      },
+      animation: { "fade-in": "fade-in .15s ease-out", "pop-in": "pop-in .16s cubic-bezier(0.2,0.8,0.2,1)", "slide-in": "slide-in .2s cubic-bezier(0.2,0.8,0.2,1)",
+                   shimmer: "shimmer 1.6s linear infinite" },
+      screens: { xs: "480px", hd: "1360px" },  // hd: 1366×768 laptops (header fits one row from here)
     },
   },
-  plugins: [plugin(({ addBase }) => addBase({ ":root": nightVars, ":root.light": dayVars }))],
+  plugins: [plugin(({ addBase }) => addBase({
+    ":root": nightVars, ":root.light": dayVars,
+    ':root[data-product="grid"]': accentVars.grid[0], ':root.light[data-product="grid"]': accentVars.grid[1],
+  }))],
 };

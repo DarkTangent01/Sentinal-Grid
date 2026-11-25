@@ -1,0 +1,34 @@
+id: ZEEK-4002
+name: SSH login succeeded after repeated failures (Zeek)
+description: >
+  Zeek's SSH analysis saw several failed authentications from one client to one server and then a successful one.
+  Zeek infers the result from the encrypted exchange, so treat it as a strong hint, not proof.
+version: 1
+severity: high
+confidence: medium
+category: credential_access
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection: {event_subtype: ssh, action: logon-fail}
+  condition: {group_by: [src_ip, dst_ip], count: 5, timeframe: 15m}
+  followed_by:
+    selection: {event_subtype: ssh, action: logon}
+    within: 15m
+explanation: "{src_ip} → {dst_ip}: {metric} failed SSH logins in {timeframe}, then a successful one (Zeek ssh.log)"
+data_sources: [Zeek ssh.log]
+falsepositives:
+  - Automation that tries several keys before the right one (each try can be logged as a failure)
+investigation:
+  - Check the server's own auth log for the account that logged in
+  - Is the client an expected administration host?
+mitre: {tactic: TA0006, techniques: [T1110, T1021.004]}
+tests:
+  - name: six failures then success
+    events:
+      - {event_subtype: ssh, action: logon-fail, src_ip: 203.0.113.50, dst_ip: 10.20.5.5, repeat: 6, at: "-9m"}
+      - {event_subtype: ssh, action: logon, src_ip: 203.0.113.50, dst_ip: 10.20.5.5, at: "-3m"}
+    expect_alerts: 1
+  - name: failures only
+    events: [{event_subtype: ssh, action: logon-fail, src_ip: 203.0.113.50, dst_ip: 10.20.5.5, repeat: 6, at: "-9m"}]
+    expect_alerts: 0

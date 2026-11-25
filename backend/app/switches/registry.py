@@ -41,11 +41,12 @@ GROUPS: dict[str, dict] = {
     "wireless_ap": {"interval": 60, "label": "Wireless: access points", "wlc": True},
     "wireless_radio": {"interval": 60, "label": "Wireless: radios and channel utilisation", "wlc": True},
     "wireless_radio_rf": {"interval": 300, "label": "Wireless: noise and 802.11 interference", "wlc": True},
-    "wireless_client": {"interval": 120, "label": "Wireless: clients", "wlc": True},
+    "wireless_client": {"interval": 300, "label": "Wireless: clients", "wlc": True},
     "wireless_wlan": {"interval": 600, "label": "Wireless: WLANs / SSIDs", "wlc": True},
     "wireless_ap_cdp": {"interval": 900, "label": "Wireless: AP uplink neighbours (CDP)", "wlc": True},
     "wireless_radio_meta": {"interval": 900, "label": "Wireless: radio configuration, regulatory domain, RRM recommendation", "wlc": True},
-    "wireless_rf_neighbors": {"interval": 300, "label": "Wireless: RRM neighbour radios (RF proximity)", "wlc": True},
+    "wireless_rf_neighbors": {"interval": 900, "label": "Wireless: RRM neighbour radios (RF proximity)", "wlc": True},
+    "wireless_rogue": {"interval": 900, "label": "Wireless: rogue access points detected by the controller", "wlc": True},
 }
 WLC_GROUPS = [g for g, d in GROUPS.items() if d.get("wlc")]
 

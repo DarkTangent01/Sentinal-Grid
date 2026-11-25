@@ -5,7 +5,7 @@ import { api } from "../../lib/api";
 import { useTheme } from "../../lib/theme";
 import { escHtml, fmtNum, getTimezone } from "../../lib/format";
 import { Chart, PALETTES, axisStyle } from "../../components/Chart";
-import { Card, Empty, Kpi, Loading, TableWrap, useDebounced } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, rowProps, TableWrap, useDebounced } from "../../components/ui";
 import { Avail, CollectorBadge, Dur, Pager, RangePicker, SortTh, StaleBanner, StateDot, dur, stackedDaily, useRange, useWanMeta } from "./common";
 
 export function useGo() {
@@ -58,7 +58,7 @@ export function WanOverview() {
           <Card title="By location" right={<span className="text-2xs text-muted">incidents started in range · click to filter</span>} bodyClass="p-0">
             {!d.by_location.length ? <Empty text="No ISP incidents in this range." /> :
               <TableWrap maxH="max-h-96"><table className="tbl"><tbody>{d.by_location.map((x: any) => (
-                <tr key={x.site} className="cursor-pointer hover:bg-white/5" onClick={() => go("incidents", { ...rangeArgs, site: x.site })}>
+                <tr key={x.site} {...rowProps(() => go("incidents", { ...rangeArgs, site: x.site }))}>
                   <td>{x.site}</td><td className="num font-semibold">{x.incidents}</td></tr>))}</tbody></table></TableWrap>}
           </Card>
         </div>
@@ -91,7 +91,7 @@ function IspTable({ rp, site, isp, go, rangeArgs }: { rp: any; site: string; isp
           {S("availability", "Availability")}{S("open_incidents", "Open inc.")}</tr></thead>
           <tbody>{q.data.items.map((x: any) => {
             const filt = group === "circuit" ? { circuit_id: x.isp_link_id } : { site: x.site || undefined, isp: x.isp || undefined };
-            return <tr key={x.group} className="cursor-pointer hover:bg-white/5" onClick={() => go(group === "circuit" ? "live" : "incidents", group === "circuit" ? { q: x.name } : { ...rangeArgs, ...filt })}>
+            return <tr key={x.group} {...rowProps(() => go(group === "circuit" ? "live" : "incidents", group === "circuit" ? { q: x.name } : { ...rangeArgs, ...filt }))}>
               {group === "isp_site" ? <><td className="font-medium">{x.isp}</td><td>{x.site}</td></> :
                 <td className="font-medium">{x.group}{group === "circuit" && x.isp && <div className="text-2xs text-muted">{x.isp} · {x.site}</div>}</td>}
               <td><StateDot s={x.state} /></td><td className="num">{fmtNum(x.outages)}</td><td className="num"><Dur s={x.downtime_s} /></td>

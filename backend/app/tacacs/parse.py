@@ -12,12 +12,14 @@ import hashlib
 import re
 from datetime import datetime, timezone
 
+# "device" is the matched device's configured name. Not "device.name": tac_plus-ng evaluates that to the server's own
+# hostname (utils.c: efun[S_devicename] = eval_log_format_hostname), so it named the TACACS+ container on every event.
 FIELDS = {
-    "authc": ["msgid", "session.id", "device.address", "device.name", "user", "device.port", "client", "result", "action", "priv-lvl",
+    "authc": ["msgid", "session.id", "device.address", "device", "user", "device.port", "client", "result", "action", "priv-lvl",
               "profile", "rule", "server.address", "identity-source", "hint"],
-    "authz": ["msgid", "session.id", "device.address", "device.name", "user", "device.port", "client", "result", "service", "priv-lvl",
+    "authz": ["msgid", "session.id", "device.address", "device", "user", "device.port", "client", "result", "service", "priv-lvl",
               "profile", "rule", "server.address", "cmd", "args"],
-    "acct": ["msgid", "session.id", "device.address", "device.name", "user", "device.port", "client", "accttype", "service", "priv-lvl",
+    "acct": ["msgid", "session.id", "device.address", "device", "user", "device.port", "client", "accttype", "service", "priv-lvl",
              "profile", "rule", "server.address", "cmd", "args"],
     "conn": ["msgid", "accttype", "conn.protocol", "peer.address", "peer.port", "server.address", "server.port"],
 }
@@ -133,11 +135,12 @@ def parse_line(kind: str, line: str, server_id: int, rules: list[re.Pattern] | N
     etype, result = EVENT.get(msgid, ("unknown", vals.get("result") or ""))
     args = vals.get("args", "")
     av = {k: v for k, v in AV.findall(args)}
-    priv = vals.get("priv-lvl") or av.get("priv-lvl") or ""
+    # the AV pair is what the device reports; ${priv-lvl} is the packet header's level, which some clients leave at 0
+    priv = av.get("priv-lvl") or vals.get("priv-lvl") or ""
     cmd = redact(vals.get("cmd", ""), rules)
     ev.update(ts=t, parse_ok=1, msgid=msgid, event_type=etype, result=result if kind != "authz" else (vals.get("result") or result),
               session_id=vals.get("session.id", ""), device_address=vals.get("device.address", "") or vals.get("peer.address", ""),
-              device_name=vals.get("device.name", ""), username=vals.get("user", ""), port=vals.get("device.port", ""),
+              device_name=vals.get("device", ""), username=vals.get("user", ""), port=vals.get("device.port", ""),
               remote_addr=vals.get("client", ""), service=vals.get("service", "") or av.get("service", ""),
               priv_lvl=int(priv) if priv.isdigit() and int(priv) <= 15 else None, profile=vals.get("profile", ""), rule=vals.get("rule", ""),
               server_address=vals.get("server.address", ""), cmd=cmd[:2000], task_id=av.get("task_id", ""),

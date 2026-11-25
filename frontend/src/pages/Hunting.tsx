@@ -95,13 +95,13 @@ function HuntEditor({ h, onClose }: { h: Partial<Hunt>; onClose: () => void }) {
   return (
     <Modal title={h.id ? `Edit hunt: ${h.name}` : "New hunt"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-3">
-        <div className="sm:col-span-3"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div className="sm:col-span-3"><label className="label">Description</label><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
-        <div className="sm:col-span-3"><label className="label">Query</label><textarea className="input w-full font-mono text-[13px] min-h-[5rem]" spellCheck={false} value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></div>
-        <div><label className="label">Default range</label><select className="input w-full" value={f.range} onChange={(e) => setF({ ...f, range: e.target.value })}>{RANGES.map((r) => <option key={r}>{r}</option>)}</select></div>
-        <div><label className="label">Tactic</label><select className="input w-full" value={f.tactic} onChange={(e) => setF({ ...f, tactic: e.target.value })}>
-          <option value="">—</option>{(tactics.data || []).map((t) => <option key={t.id} value={t.id}>{t.id} {t.name}</option>)}</select></div>
-        <div><label className="label">Techniques</label><input className="input w-full font-mono" value={f.techniques} onChange={(e) => setF({ ...f, techniques: e.target.value })} placeholder="T1071.004" /></div>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Description</span><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Query</span><textarea className="input w-full font-mono text-[13px] min-h-[5rem]" spellCheck={false} value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Default range</span><select className="input w-full" value={f.range} onChange={(e) => setF({ ...f, range: e.target.value })}>{RANGES.map((r) => <option key={r}>{r}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Tactic</span><select className="input w-full" value={f.tactic} onChange={(e) => setF({ ...f, tactic: e.target.value })}>
+          <option value="">—</option>{(tactics.data || []).map((t) => <option key={t.id} value={t.id}>{t.id} {t.name}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Techniques</span><input className="input w-full font-mono" value={f.techniques} onChange={(e) => setF({ ...f, techniques: e.target.value })} placeholder="T1071.004" /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2 font-mono">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.name || !f.query || m.isPending} onClick={() => m.mutate()}>Save</button>
@@ -145,8 +145,8 @@ function BookmarkView({ b, onClose }: { b: any; onClose: () => void }) {
       <div className="font-mono text-xs mb-3 cell-wrap">{b.query}</div>
       <ResultTable r={{ kind: "table", columns: b.columns, rows: b.rows, elapsed_ms: 0, truncated: false }} maxH="max-h-80" />
       <div className="grid gap-2 sm:grid-cols-[1fr_12rem] mt-3">
-        <div><label className="label">Notes</label><textarea className="input w-full h-20" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-        <div><label className="label">Attach to incident #</label><input className="input w-full" inputMode="numeric" value={inc} onChange={(e) => setInc(e.target.value.replace(/\D/g, ""))} /></div>
+        <label className="block min-w-0"><span className="label">Notes</span><textarea className="input w-full h-20" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <label className="block min-w-0"><span className="label">Attach to incident #</span><input className="input w-full" inputMode="numeric" value={inc} onChange={(e) => setInc(e.target.value.replace(/\D/g, ""))} /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={m.isPending} onClick={() => m.mutate()}>Save</button>

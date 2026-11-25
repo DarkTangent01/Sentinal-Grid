@@ -219,7 +219,7 @@ async def act_suggest_block(s, target, a, f, ch, dry):
 
 
 async def act_run_query(s, target, a, f, ch, dry):
-    from .analytics.filters import EventFilter
+    from .platform.eventquery import EventFilter
     from .analytics.pipeline import run_pipeline, watchlist_names
     from .watchlists import load_watchlists
     if ch is None:

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { Card, Empty, Loading, TableWrap, Time } from "../../components/ui";
@@ -17,13 +17,20 @@ export function Testing() {
   const [src, setSrc] = useState("");
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
-  const run = useSave(({ kind, body }: any) => api<any>(`/tacacs/tests/${kind}`, { method: "POST", body }), ["tac-tests", "tac-clients", "tac-sources"], () => setPw(""));
+  // the test password goes to the request through a ref that is cleared on use: never into the mutation's variables
+  // (kept by TanStack Query after the call) and never left in the field after a failed test
+  const pwRef = useRef("");
+  const run = useSave(({ kind, body }: any) => {
+    const b = kind === "auth" ? { ...body, password: pwRef.current } : body;
+    pwRef.current = "";
+    return api<any>(`/tacacs/tests/${kind}`, { method: "POST", body: b });
+  }, ["tac-tests", "tac-clients", "tac-sources"]);
   const server = Number(sid || servers.data?.items[0]?.id);
   const r: any = run.data;
   if (!can("operator")) return <div className="space-y-4"><Denied role="operator" what="run AAA tests" /><Simulator /></div>;
   return <div className="space-y-4">
-    {!meta.data?.tester_configured && <div role="alert" className="card p-3 text-sm text-amber-300">Authentication and accounting tests need the tester device: set the SIEM worker's source
-      address under Settings, then deploy a configuration version (it adds the sentinel_grid_tester device, which can authenticate but never opens a shell).</div>}
+    {!meta.data?.tester_configured && <div role="alert" className="card p-3 text-sm text-amber-300">Authentication and accounting tests need the tester device: set the SIEM's source
+      address (the api container on the aaa network, or its subnet) under Settings, then deploy a configuration version (it adds the sentinel_grid_tester device, which can authenticate but never opens a shell).</div>}
     <Card title="Run a test">
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="space-y-2">
@@ -37,7 +44,7 @@ export function Testing() {
             <Field label="Test user"><input className="input w-full" autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} /></Field>
             <Field label="Password (used once, never stored)"><input type="password" autoComplete="new-password" className="input w-full" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
           </div>
-          <button className="btn btn-primary" disabled={!server || !user || !pw || run.isPending} onClick={() => run.mutate({ kind: "auth", body: { server_id: server, username: user, password: pw } })}>
+          <button className="btn btn-primary" disabled={!server || !user || !pw || run.isPending} onClick={() => { pwRef.current = pw; setPw(""); run.mutate({ kind: "auth", body: { server_id: server, username: user } }); }}>
             Test authentication</button>
         </div>
         <div className="space-y-2">

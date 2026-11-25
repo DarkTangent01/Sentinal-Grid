@@ -88,6 +88,30 @@ async def test_clickhouse_queries_run_concurrently_up_to_pool_size(monkeypatch):
     assert took < 0.75                   # 8 x 0.2 s in 2 waves, vs 1.6 s serialised
 
 
+def test_server_mode_binds_datetimes_with_milliseconds(monkeypatch):
+    """Regression: clickhouse-connect binds datetime parameters at whole seconds, so DateTime64(3) windows lost their
+    milliseconds in production (TACACS+ sessions showed no commands); the embedded test engine never had the problem."""
+    from datetime import datetime, timezone
+    import clickhouse_connect
+    from app.db.ch import ClickHouse, _server_params
+    seen = []
+
+    class Capture(_FakeCH):
+        def query(self, sql, parameters=None):
+            seen.append(parameters)
+
+            class R:
+                column_names, result_rows = ["x"], [(1,)]
+            return R()
+    monkeypatch.setattr(clickhouse_connect, "get_client", lambda **kw: Capture(**kw))
+    get_settings.cache_clear()
+    ch = ClickHouse(mode="server")
+    t = datetime(2026, 11, 3, 10, 19, 45, 346789, tzinfo=timezone.utc)
+    ch.query("SELECT {a:DateTime64(3)}", {"a": t, "n": 3, "s": "x", "l": [t]})
+    assert seen[-1] == {"a": "2026-11-03 10:19:45.346", "n": 3, "s": "x", "l": ["2026-11-03 10:19:45.346"]}
+    assert _server_params(None) == {}
+
+
 # ------------------------------------------------------------------ migration 0027 (query indexes)
 def test_migration_0027_upgrade_downgrade_roundtrip(tmp_path, monkeypatch):
     """Applies the full chain on a fresh SQLite file, then 0027 down and up again; indexes appear/disappear."""
@@ -125,6 +149,7 @@ class _FlakyCH:
     def __init__(self):
         self.down = False
         self.rows: list[dict] = []
+        self.other: dict[str, list[dict]] = {}
 
     async def ainsert(self, table, rows, columns):
         self.insert(table, rows, columns)
@@ -132,6 +157,9 @@ class _FlakyCH:
     def insert(self, table, rows, columns):
         if self.down:
             raise ConnectionError("clickhouse down")
+        if table != "events":            # ingestion accounting rows (ingest_rejects) are not events
+            self.other.setdefault(table, []).extend(rows)
+            return
         if any(r.get("_poison") for r in rows):
             raise ValueError("Too many partitions for single INSERT block")
         self.rows.extend(rows)
@@ -412,7 +440,7 @@ async def test_queued_switch_poll_uses_its_own_start_time(db, monkeypatch):
         db.add(other)
         await db.commit()
         t0 = datetime.now(timezone.utc)
-        await P.run_due(None, _pg.session_factory())   # worker mode: no explicit `now`
+        await P.run_due(None, _pg.session_factory(), wait=True)   # no explicit `now`; one batch, polled to completion
     finally:
         monkeypatch.delenv("SWITCH_MAX_CONCURRENT_POLLS")
         get_settings.cache_clear()

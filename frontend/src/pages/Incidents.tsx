@@ -1,31 +1,19 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, IpLink, Kpi, Loading, Sev, TableWrap, Tabs, Time, Trunc, rowProps, useExplore } from "../components/ui";
+import { Card, Empty, Field, IpLink, Kpi, Loading, Modal, Sev, TableWrap, Tabs, Time, Trunc, rowProps, useExplore } from "../components/ui";
+import { ActionForm } from "./Soc";
+import { Mitre, TACTIC_NAMES } from "../components/Mitre";
 
-export const TACTIC_NAMES: Record<string, string> = {
-  TA0043: "Reconnaissance", TA0001: "Initial Access", TA0006: "Credential Access", TA0007: "Discovery",
-  TA0005: "Defense Evasion", TA0011: "Command and Control", TA0010: "Exfiltration", TA0008: "Lateral Movement",
-};
+export { Mitre, TACTIC_NAMES };   // existing importers
+
 const STATUS_CLS: Record<string, string> = {
   open: "bg-red-500/15 text-red-300", in_progress: "bg-amber-500/15 text-amber-300", resolved: "bg-emerald-500/15 text-emerald-300", closed: "bg-slate-700/60 text-slate-300",
 };
 const REASONS: [string, string][] = [["true_positive", "True positive"], ["false_positive", "False positive"], ["benign", "Benign / expected"], ["duplicate", "Duplicate"]];
-
-export function Mitre({ m }: { m?: any }) {
-  if (!m?.tactic) return null;
-  return (
-    <span className="inline-flex flex-wrap gap-1 items-center">
-      <span className="pill bg-indigo-500/15 text-sky-200 ring-1 ring-sky-500/20" title={m.tactic}>{m.tactic_name || TACTIC_NAMES[m.tactic] || m.tactic}</span>
-      {(m.techniques || []).map((t: string) => (
-        <a key={t} className="pill bg-slate-800 text-slate-300 hover:text-brand-400" href={`https://attack.mitre.org/techniques/${t.replace(".", "/")}/`}
-          target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{t}</a>))}
-    </span>
-  );
-}
 
 function SlaBadge({ sla, status }: { sla: any; status: string }) {
   if (!sla?.resolve_due) return null;
@@ -187,6 +175,7 @@ export function IncidentDetail() {
           </Card>
           <Card title="Case">
             <div className="space-y-2 text-sm">
+              <Lifecycle i={i} patch={(b) => patch.mutate(b)} reason={reason} onEscalated={refresh} />
               <div className="flex justify-between gap-2"><span className="text-muted">Assignee</span><span>{i.assignee || "unassigned"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted">Acknowledge by</span><span><Time v={i.sla.ack_due} /></span></div>
               <div className="flex justify-between gap-2"><span className="text-muted">Resolve by</span><span><Time v={i.sla.resolve_due} /></span></div>
@@ -239,6 +228,7 @@ export function IncidentDetail() {
               </div>
             </Card>
             <LinkedIncidents i={i} onChange={refresh} />
+            <IncidentResponse i={i} />
           </div>
         </div>
       </>}
@@ -272,4 +262,45 @@ function AiSummary({ id, onSaved }: { id: number; onSaved: () => void }) {
       </>}
     </Card>
   );
+}
+
+const STAGES = ["new", "triage", "investigation", "containment", "eradication", "recovery", "closed"];
+
+/** Response lifecycle: stage, priority, tags, escalation. Closing needs a closure reason (the one chosen above). */
+function Lifecycle({ i, patch, reason, onEscalated }: { i: any; patch: (b: any) => void; reason: string; onEscalated: () => void }) {
+  const [tags, setTags] = useState((i.tags || []).join(", "));
+  const [esc, setEsc] = useState(false);
+  const [to, setTo] = useState("");
+  const [why, setWhy] = useState("");
+  const m = useMutation({ mutationFn: () => api(`/incidents/${i.id}/escalate`, { method: "POST", body: { to, reason: why } }), onSuccess: () => { setEsc(false); onEscalated(); } });
+  return <div className="space-y-2">
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Stage"><select className="input w-full" value={i.stage} onChange={(e) => patch({ stage: e.target.value, ...(e.target.value === "closed" ? { closure_reason: i.closure_reason || reason } : {}) })}>
+        {STAGES.map((st) => <option key={st} value={st}>{st}</option>)}</select></Field>
+      <Field label={i.priority_set ? "Priority" : "Priority (from severity)"}><select className="input w-full" value={i.priority_set ? i.priority : ""} onChange={(e) => patch({ priority: e.target.value })}>
+        <option value="">{`by severity (${i.priority})`}</option>{["P1", "P2", "P3", "P4"].map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+    </div>
+    <Field label="Tags (comma separated)"><input className="input w-full" value={tags} onChange={(e) => setTags(e.target.value)}
+      onBlur={() => tags !== (i.tags || []).join(", ") && patch({ tags: tags.split(",").map((t: string) => t.trim()).filter(Boolean) })} /></Field>
+    {i.escalated_at ? <p className="text-xs text-amber-300">Escalated <Time v={i.escalated_at} /> by {i.escalated_by}{i.escalated_to ? ` to ${i.escalated_to}` : ""}: {i.escalation_reason}</p>
+      : <button type="button" className="btn" onClick={() => setEsc(true)}>Escalate…</button>}
+    {esc && <Modal title={`Escalate incident #${i.id}`} onClose={() => setEsc(false)}>
+      <div className="space-y-3"><Field label="To (person, team or tier)"><input className="input w-full" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+        <Field label="Reason"><textarea className="input w-full h-20" value={why} onChange={(e) => setWhy(e.target.value)} /></Field>
+        {m.error && <div role="alert" className="text-sm text-red-400">{String((m.error as Error).message)}</div>}
+        <div className="flex justify-end gap-2"><button type="button" className="btn" onClick={() => setEsc(false)}>Cancel</button>
+          <button type="button" className="btn btn-primary" disabled={why.trim().length < 5 || m.isPending} onClick={() => m.mutate()}>Escalate</button></div></div>
+    </Modal>}
+  </div>;
+}
+
+function IncidentResponse({ i }: { i: any }) {
+  const q = useQuery({ queryKey: ["response", "incident", i.id], queryFn: () => api<any>("/response/actions", { params: { incident_id: i.id } }) });
+  const [open, setOpen] = useState(false);
+  const target = i.entity_type === "ip" || i.entity_type === "user" ? i.entity : "";
+  return <Card title={`Response actions (${q.data?.items.length ?? 0})`} right={<button type="button" className="btn py-0.5" onClick={() => setOpen(true)}>New…</button>}>
+    {q.data && (!q.data.items.length ? <Empty text="No response action for this incident." /> : <ul className="text-sm space-y-1">{q.data.items.map((a: any) =>
+      <li key={a.id}><Link className="link" to="/response">{a.kind.replace("_", " ")} {a.target}</Link> <span className="text-2xs text-muted">{a.status.replace("_", " ")} · {a.requested_by}</span></li>)}</ul>)}
+    {open && <ActionForm firewalls={q.data?.firewalls || []} init={{ kind: i.entity_type === "user" ? "disable_account" : "block_ip", target, incident_id: i.id }} onClose={() => setOpen(false)} />}
+  </Card>;
 }

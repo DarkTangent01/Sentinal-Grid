@@ -43,9 +43,11 @@ async def availability(range: str = Query("30d", pattern=RANGE), sla: float = Qu
 
 @router.get("/analytics/capacity")
 async def capacity(days: int = Query(30, ge=7, le=90), interface_threshold: float = Query(80, ge=10, le=100),
-                   device_threshold: float = Query(90, ge=10, le=100), limit: int = Query(100, ge=1, le=500), sc: Scope = Depends(),
+                   device_threshold: float = Query(90, ge=10, le=100), poe_threshold: float = Query(90, ge=10, le=100),
+                   limit: int = Query(100, ge=1, le=500), sc: Scope = Depends(),
                    _: User = Depends(current_user), s: AsyncSession = Depends(get_session), ch: ClickHouse = Depends(ch_dep)):
-    return await A.capacity(s, ch, days=days, threshold_if=interface_threshold, threshold_dev=device_threshold, limit=limit, **sc.kw)
+    return await A.capacity(s, ch, days=days, threshold_if=interface_threshold, threshold_dev=device_threshold, limit=limit,
+                            threshold_poe=poe_threshold, **sc.kw)
 
 
 @router.get("/analytics/top/interfaces")
@@ -330,6 +332,13 @@ async def delete_maintenance(mid: int, request: Request, user: User = Depends(re
     return {"ok": True}
 
 
+# ------------------------------------------------------------------ monitoring the monitor
+@router.get("/selfmon")
+async def selfmon(_: User = Depends(current_user), s: AsyncSession = Depends(get_session), ch: ClickHouse = Depends(ch_dep)):
+    from ..selfmon import slo_status
+    return await slo_status(s, ch)
+
+
 # ------------------------------------------------------------------ device dependencies
 class ParentIn(BaseModel):
     parent_id: int | None = None
@@ -345,6 +354,16 @@ async def dependencies(_: User = Depends(current_user), s: AsyncSession = Depend
             children[x.parent_id] = children.get(x.parent_id, 0) + 1
     return {"items": [{"id": x.id, "name": x.name, "site": x.site, "role": x.role, "state": x.state, "parent_id": x.parent_id,
                        "parent": by[x.parent_id].name if x.parent_id in by else None, "children": children.get(x.id, 0)} for x in sws]}
+
+
+@router.get("/dependencies/suggestions")
+async def dependency_suggestions(_: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Upstream devices proposed from LLDP / CDP links. Nothing is applied: accepting one is PUT /dependencies/{sid}."""
+    from ..switches.topology import infer_parents
+    rows = await infer_parents(s)
+    return {"items": rows, "differs": sum(1 for r in rows if r["differs"]),
+            "note": "Roots are core-role switches, else switches cabled to a firewall, else the best-connected switch of each group. "
+                    "A configured parent is never changed automatically."}
 
 
 @router.put("/dependencies/{sid}")

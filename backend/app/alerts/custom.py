@@ -17,7 +17,7 @@ import re
 import string
 from datetime import datetime, timedelta
 
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..analytics.pipeline import run_pipeline, watchlist_names
 from ..watchlists import load_watchlists
 from .engine import Detection, _dt

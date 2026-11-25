@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.analytics import queries as Q
-from app.analytics.filters import EventFilter
+from app.platform.eventquery import EventFilter
 from app.ingest.normalize import normalize
 from app.ingest.pipeline import DeviceRegistry, EventSink
 from app.retention import ensure_default_policies, run_retention
@@ -237,12 +237,42 @@ async def test_rollup_backfill_migration():
         old_cols = EVENT_COLUMNS[:EVENT_COLUMNS.index("raw") + 1]  # columns that existed before v5
         evs = [normalize(traffic(i), source="syslog", firewall=FW) for i in range(7)]
         ch.insert("events", evs, old_cols)
+        three_h = datetime.now(timezone.utc) - timedelta(hours=3)
+        older = [normalize({**traffic(50 + i, ts=three_h), "policyid": "5"}, source="syslog", firewall=FW) for i in range(4)]
+        ch.insert("events", older, old_cols)
         ch.command("CREATE TABLE schema_migrations (version UInt32, name String, applied_at DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY version")
         ch.command("INSERT INTO schema_migrations (version, name) VALUES (1,'a'),(2,'b'),(3,'c')")
-        assert run(ch) == [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-        assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 7  # backfilled exactly once
+        assert run(ch) == [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 11  # backfilled exactly once
+        # v16: traffic before the seam hour copied once into the policy usage rollup (the seam hour is read from raw)
+        raw = ch.query("SELECT count() AS n FROM events WHERE category = 'traffic' AND policy_id IS NOT NULL "
+                       "AND event_time < toStartOfHour(now())")[0]["n"]
+        assert raw == 4 and ch.query("SELECT sum(n) AS n FROM policy_usage_hourly")[0]["n"] == raw
+        # v17: the same older traffic seeded the first-seen baselines (one country-less source → port rows only)
+        assert ch.query("SELECT count() AS n FROM traffic_port_hourly WHERE hour < toStartOfHour(now())")[0]["n"] >= 1
         ch.insert("events", [normalize(traffic(100), source="syslog", firewall=FW)], EVENT_COLUMNS)
-        assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 8  # new inserts flow through the view
+        assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 12  # new inserts flow through the view
     finally:
         ch.command("DROP DATABASE IF EXISTS mig_test")
         ch.command("USE siem")
+
+
+def test_get_ch_creates_one_client_under_concurrent_first_use(monkeypatch):
+    import threading
+    import time
+    from app.db import ch as chmod
+    made = []
+
+    class Slow:
+        def __init__(self):
+            time.sleep(0.05)            # widen the race window
+            made.append(self)
+    monkeypatch.setattr(chmod, "ClickHouse", Slow)
+    monkeypatch.setattr(chmod, "_ch", None)
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(chmod.get_ch())) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(made) == 1 and all(g is made[0] for g in got)

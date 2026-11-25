@@ -1,0 +1,742 @@
+# Backend workloads (one image, app/ entry points). Same separation as docker-compose.yml:
+#   api      HTTP API behind the web tier; reads the TACACS+ agent status (tacacs-config, read-only)
+#   worker   alerting, polling of firewalls, ICMP, TACACS+ deploys; a singleton (Recreate) because shard 0 owns the alert loops
+#   poller   SNMP polling, horizontally scaled; devices are leased in the database so replicas never poll the same device
+#   syslog   parses events from the ingress relay; no route out of the cluster (NetworkPolicy)
+#   traps / flows  SNMP trap and NetFlow / IPFIX / sFlow receivers, exposed by k8s/ingress/external-services.yaml
+# All run as uid 10001 with the restricted security context; secrets are files under /run/secrets (0440, group = fsGroup).
+# api and worker use fsGroup 10050 (tacshare), the group the TACACS+ agent shares its volumes with.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10050
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: api
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - uvicorn
+        - app.main:create_app
+        - --factory
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8000'
+        - --workers
+        - '2'
+        - --no-server-header
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        - name: SECRET_KEY_FILE
+          value: /run/secrets/secret_key
+        - name: ANTHROPIC_API_KEY_FILE
+          value: /run/secrets/anthropic_api_key
+        - name: TOKEN_ENCRYPTION_KEY_FILE
+          value: /run/secrets/token_encryption_key
+        - name: TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE
+          value: /run/secrets/token_encryption_key_previous
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '2'
+            memory: 1Gi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        - name: tacacs-config
+          mountPath: /tacacs/config
+          readOnly: true
+        ports:
+        - name: http
+          containerPort: 8000
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          periodSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /api/ready
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password
+          - key: secret_key
+            path: secret_key
+          - key: anthropic_api_key
+            path: anthropic_api_key
+          - key: token_encryption_key
+            path: token_encryption_key
+          - key: token_encryption_key_previous
+            path: token_encryption_key_previous
+      - name: tacacs-config
+        persistentVolumeClaim:
+          claimName: tacacs-config
+          readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: worker
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10050
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: worker
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.worker
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        - name: WORKER_ROLES
+          value: core
+        - name: TOKEN_ENCRYPTION_KEY_FILE
+          value: /run/secrets/token_encryption_key
+        - name: TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE
+          value: /run/secrets/token_encryption_key_previous
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '2'
+            memory: 1Gi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        - name: tacacs-config
+          mountPath: /tacacs/config
+        - name: tacacs-logs
+          mountPath: /tacacs/logs
+          readOnly: true
+        - name: deadletter
+          mountPath: /var/lib/siem/deadletter
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.heartbeat')<120 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 60
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password
+          - key: token_encryption_key
+            path: token_encryption_key
+          - key: token_encryption_key_previous
+            path: token_encryption_key_previous
+      - name: tacacs-config
+        persistentVolumeClaim:
+          claimName: tacacs-config
+      - name: tacacs-logs
+        persistentVolumeClaim:
+          claimName: tacacs-logs
+          readOnly: true
+      - name: deadletter
+        persistentVolumeClaim:
+          claimName: worker-deadletter
+  strategy:
+    type: Recreate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: poller
+  labels:
+    app.kubernetes.io/name: poller
+    app.kubernetes.io/component: nms-polling
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poller
+        app.kubernetes.io/component: nms-polling
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: poller
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: poller
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.worker
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        - name: WORKER_ROLES
+          value: snmp
+        - name: TOKEN_ENCRYPTION_KEY_FILE
+          value: /run/secrets/token_encryption_key
+        - name: TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE
+          value: /run/secrets/token_encryption_key_previous
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 500m
+            memory: 256Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '2'
+            memory: 1Gi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/worker.heartbeat')<120 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 60
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password
+          - key: token_encryption_key
+            path: token_encryption_key
+          - key: token_encryption_key_previous
+            path: token_encryption_key_previous
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog
+  labels:
+    app.kubernetes.io/name: syslog
+    app.kubernetes.io/component: siem-ingestion
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: syslog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: syslog
+        app.kubernetes.io/component: siem-ingestion
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: syslog
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: syslog
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.syslog_server
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: '1'
+            memory: 1Gi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '3'
+            memory: 2Gi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        - name: deadletter
+          mountPath: /var/lib/siem/deadletter
+        ports:
+        - name: relay
+          containerPort: 5515
+          protocol: TCP
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/syslog.heartbeat')<30 else 1)
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 30
+        readinessProbe:
+          tcpSocket:
+            port: relay
+          periodSeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password
+      - name: deadletter
+        persistentVolumeClaim:
+          claimName: syslog-deadletter
+  strategy:
+    type: Recreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syslog
+  labels:
+    app.kubernetes.io/name: syslog
+    app.kubernetes.io/component: siem-ingestion
+    app.kubernetes.io/part-of: sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: syslog
+  ports:
+  - name: relay
+    port: 5515
+    targetPort: relay
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traps
+  labels:
+    app.kubernetes.io/name: traps
+    app.kubernetes.io/component: nms-receiver
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: traps
+        app.kubernetes.io/component: nms-receiver
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: traps
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: traps
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.snmp_traps
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        - name: TOKEN_ENCRYPTION_KEY_FILE
+          value: /run/secrets/token_encryption_key
+        - name: TOKEN_ENCRYPTION_KEY_PREVIOUS_FILE
+          value: /run/secrets/token_encryption_key_previous
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        ports:
+        - name: traps
+          containerPort: 1162
+          protocol: UDP
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/traps.heartbeat')<180 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 90
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/traps.heartbeat')<180 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password
+          - key: token_encryption_key
+            path: token_encryption_key
+          - key: token_encryption_key_previous
+            path: token_encryption_key_previous
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flows
+  labels:
+    app.kubernetes.io/name: flows
+    app.kubernetes.io/component: nms-receiver
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flows
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flows
+        app.kubernetes.io/component: nms-receiver
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: flows
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: flows
+        image: sentinel/backend:1.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - -m
+        - app.flows
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: DATABASE_PASSWORD_FILE
+          value: /run/secrets/db_app_password
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_app_password
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '1'
+            memory: 768Mi
+            ephemeral-storage: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+        ports:
+        - name: netflow
+          containerPort: 2055
+          protocol: UDP
+        - name: ipfix
+          containerPort: 4739
+          protocol: UDP
+        - name: sflow
+          containerPort: 6343
+          protocol: UDP
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/flows.heartbeat')<180 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 90
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/flows.heartbeat')<180 else 1)
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          initialDelaySeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: secrets
+        secret:
+          secretName: sentinel-app-secrets
+          defaultMode: 288
+          items:
+          - key: db_app_password
+            path: db_app_password
+          - key: clickhouse_app_password
+            path: clickhouse_app_password

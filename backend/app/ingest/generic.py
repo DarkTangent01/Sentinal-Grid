@@ -20,11 +20,11 @@ import json
 import re
 from datetime import datetime, timezone
 
-from . import netdev
+from . import formats, netdev
 from .normalize import normalize
 
 SOURCE_ID_BASE = 1_000_000
-KINDS = ("windows", "cef", "netdev", "syslog")
+KINDS = ("windows", "cef", "netdev", "syslog", "zeek", "json", "leef", "linux")
 
 WIN_EVENTS: dict[str, tuple[str, str, str]] = {  # EventID → (action, severity, description)
     "4624": ("logon", "informational", "An account was successfully logged on"),
@@ -192,21 +192,44 @@ def cef(src: dict, line: str) -> dict | None:
 
 
 def plain(src: dict, line: str) -> dict:
-    ev = _base(src, None, {"type": "syslog", "subtype": "", "msg": line.strip()[:1000]}, line.strip())
-    ev.update({"category": "system", "event_type": "syslog", "severity": "informational"})
+    """Unrecognised message: kept whole, with what the syslog header says (host, program, severity). The header time
+    is used only for RFC 5424 (it carries a zone); RFC 3164 times have none, so those keep the receive time."""
+    h = formats.syslog_header(line)
+    ev = _base(src, h["ts"] if h["rfc"] == "5424" else None,
+               {"type": "syslog", "subtype": h["app"][:64], "msg": (h["msg"] if h["rfc"] else line).strip()[:1000], "hostname": h["host"][:255],
+                "app": h["app"][:255], "logid": h["msgid"][:64]}, line.strip())
+    ev.update({"category": "system", "event_type": "syslog", "severity": h["severity"] or "informational",
+               "orig_severity": "" if h["pri"] is None else str(h["pri"] & 7)})
     return ev
 
 
 def parse(src: dict, line: str) -> dict | None:
     """Parse one line from a registered generic source; falls back to plain syslog so nothing is silently lost."""
-    if src["kind"] == "windows":
+    kind = src["kind"]
+    if kind == "windows":
         return windows(src, line) or plain(src, line)
-    if src["kind"] == "cef":
+    if kind == "cef":
         return cef(src, line) or plain(src, line)
-    if src["kind"] == "netdev":
+    if kind == "zeek":
+        return formats.zeek(src, line, _base) or formats.json_event(src, line, _base) or plain(src, line)
+    if kind == "json":
+        return ((formats.zeek(src, line, _base) if '"_path"' in line else None) or formats.json_event(src, line, _base) or plain(src, line))
+    if kind == "leef":
+        return formats.leef(src, line, _base) or plain(src, line)
+    if kind == "linux":
+        return formats.linux_auth(src, line, _base) or plain(src, line)
+    if kind == "netdev":
         p = netdev.parse(line)
-        return netdev.to_event(src, line, p, _base) if p else plain(src, line)
-    p = netdev.parse_cisco(line)   # Cisco's %FAC-n-MNEMONIC is distinctive enough to recognise on any syslog source
+        if p:
+            return netdev.to_event(src, line, p, _base)
+        return formats.juniper(src, line, _base) or formats.aruba(src, line, _base) or plain(src, line)
+    # "syslog": formats distinctive enough to recognise on any source, most specific first
+    p = netdev.parse_cisco(line)
     if p:
         return netdev.to_event(src, line, p, _base)
-    return cef(src, line) or plain(src, line)
+    if "CEF:" in line:
+        return cef(src, line) or plain(src, line)
+    if "LEEF:" in line:
+        return formats.leef(src, line, _base) or plain(src, line)
+    return (formats.linux_auth(src, line, _base) or formats.juniper(src, line, _base) or formats.aruba(src, line, _base)
+            or plain(src, line))

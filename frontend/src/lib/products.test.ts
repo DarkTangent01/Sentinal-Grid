@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
-import { ADMIN, NAV, PRODUCT, activeItem, entryTarget, productOfLocation } from "./products";
+import { ADMIN, NAV, PRODUCT, activeItem, buildProducts, entryTarget, filterNav, productOfLocation, servedBy, toProduct } from "./products";
 
 const app = Object.values(import.meta.glob("../App.tsx", { query: "?raw", import: "default", eager: true }))[0] as string;
 const routes = [...app.matchAll(/<Route path="([^"]+)"/g)].map((m) => m[1]);
@@ -61,5 +61,36 @@ describe("product routing", () => {
       "/policies/shadow", "/incidents", "/threat-intel", "/assets", "/geo", "/vpn", "/compliance", "/drift", "/notifications", "/searches", "/reports",
       "/search", "/hunting", "/detections", "/workbooks", "/watchlists", "/automation", "/graph", "/isp", "/fw-health", "/vpn-tunnels", "/bgp",
       "/identity", "/iac", "/switches", "/tacacs", "/log-sources", "/settings"]) expect(routeExists(r), r).toBe(true);
+  });
+});
+
+describe("single-product builds", () => {
+  it("narrows the account's products to the build's product", () => {
+    expect(buildProducts(["grid", "nms"], "nms")).toEqual(["nms"]);
+    expect(buildProducts(["grid"], "nms")).toEqual([]);          // no access in this product's app
+    expect(buildProducts(["grid", "nms"], null)).toEqual(["grid", "nms"]);
+    expect(toProduct("nms")).toBe("nms");
+    expect(toProduct("")).toBeNull();
+  });
+
+  it("serves only the build's own pages and the shared ones", () => {
+    expect(servedBy("/bgp", "nms")).toBe(true);
+    expect(servedBy("/bgp", "grid")).toBe(false);
+    expect(servedBy("/incidents/4", "nms")).toBe(false);
+    expect(servedBy("/alerts?product=nms", "nms")).toBe(true);
+    expect(servedBy("/reports", "grid")).toBe(true);
+    expect(servedBy("/assets", "nms")).toBe(false);                // assets inventory is a Grid API
+    expect(servedBy("/log-sources", "grid")).toBe(true);
+    expect(servedBy("/assets", null)).toBe(true);
+  });
+
+  it("drops navigation the build does not serve", () => {
+    const nms = filterNav(NAV.nms, "nms").flatMap((g) => g.items.map((i) => i.to));
+    expect(nms).not.toContain("/assets");
+    expect(nms).toContain("/bgp");
+    const admin = filterNav([ADMIN], "nms")[0].items.map((i) => i.to);
+    expect(admin).toEqual(["/notifications", "/settings"]);
+    const grid = filterNav(NAV.grid, "grid").flatMap((g) => g.items.map((i) => i.to));
+    expect(grid).toEqual(NAV.grid.flatMap((g) => g.items.map((i) => i.to)));   // Grid nav has no NMS pages
   });
 });

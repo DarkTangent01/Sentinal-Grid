@@ -352,6 +352,38 @@ async def wlans(wlc_id: list[int] = Query(default=[]), range: str = Query("24h",
             "note": "Traffic is the sum of the controller's per-client byte counters (Counter64) for current clients, not RF airtime or wired bandwidth."}
 
 
+# ------------------------------------------------------------------ rogues and floors
+@router.get("/rogues")
+async def rogues(wlc_id: list[int] = Query(default=[]), flagged: bool = False, include_gone: bool = False, _: User = Depends(current_user),
+                 s: AsyncSession = Depends(get_session)):
+    """Rogue APs the controllers detect (read-only: nothing here contains or classifies a rogue)."""
+    from ..db.models import WirelessRogue
+    from ..wireless.alerts import IGNORED_ROGUE_STATES
+    wlcs = {w.id: w for w in await W.controllers(s)}
+    q = select(WirelessRogue).where(WirelessRogue.wlc_id.in_([i for i in (wlc_id or list(wlcs)) if i in wlcs] or [0]))
+    if not include_gone:
+        q = q.where(WirelessRogue.present.is_(True))
+    rows = (await s.execute(q.order_by(WirelessRogue.rssi_dbm.desc().nulls_last()).limit(2000))).scalars().all()
+    items = []
+    for r in rows:
+        reasons = [w for w, hit in (("malicious", r.class_type == "malicious"), ("spoofs our SSID", r.spoofs_ssid), ("on wired network", r.on_network)) if hit]
+        is_flagged = bool(reasons) and r.state not in IGNORED_ROGUE_STATES and r.class_type != "friendly"
+        if flagged and not is_flagged:
+            continue
+        items.append({"id": r.id, "wlc": wlcs[r.wlc_id].name, "mac": r.mac, "ssid": r.ssid, "channel": r.channel, "rssi_dbm": r.rssi_dbm, "clients": r.clients,
+                      "detecting_aps": r.detecting_aps, "detecting_ap": r.detecting_ap, "type": r.type, "on_network": r.on_network, "state": r.state,
+                      "class_type": r.class_type, "spoofs_ssid": r.spoofs_ssid, "flagged": is_flagged, "reasons": reasons, "present": r.present,
+                      "first_seen": W._iso(r.first_seen), "last_seen": W._iso(r.last_seen)})
+    return {"items": items, "flagged": sum(1 for x in items if x["flagged"]),
+            "note": "From the controllers' rogue detection (AIRESPACE-WIRELESS-MIB bsnRogueAPTable), polled every 15 minutes."}
+
+
+@router.get("/floors")
+async def floors(site: str | None = Query(None, max_length=128), target_pct: float = Query(80, ge=10, le=100), days: int = Query(7, ge=1, le=14),
+                 _: User = Depends(current_user), s: AsyncSession = Depends(get_session), ch: ClickHouse = Depends(ch_dep)):
+    return await W.floors(s, ch, target_pct=target_pct, days=days, site=site or None)
+
+
 # ------------------------------------------------------------------ roaming, events, troubleshooting, health
 @router.get("/roaming")
 async def roaming(wlc_id: list[int] = Query(default=[]), hours: int = Query(24, ge=1, le=168), _: User = Depends(current_user),

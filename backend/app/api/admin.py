@@ -25,7 +25,7 @@ async def system_status(_: User = Depends(current_user), ch: ClickHouse = Depend
 @router.get("/system/coverage")
 async def data_coverage(_: User = Depends(current_user), ch: ClickHouse = Depends(ch_dep)):
     """Per-category collection status so the UI can tell 'no matching events' apart from 'not collected'."""
-    from ..analytics.queries import coverage
+    from ..platform.eventquery import coverage
     return await coverage(ch)
 
 

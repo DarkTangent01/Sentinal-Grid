@@ -1,0 +1,29 @@
+id: ZEEK-4003
+name: Zeek notice
+description: >
+  Zeek raised a notice (its own detection framework: scans, protocol violations, certificate problems, scripts
+  you loaded). The notice type is in the threat field. A notice is Zeek's opinion and needs a look, not a verdict.
+version: 1
+severity: medium
+confidence: medium
+category: network_anomaly
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection: {event_subtype: notice, threat: {exists: true}}
+  filter: {threat: {startswith: "CaptureLoss::"}}
+  condition: {group_by: [threat, src_ip], count: 1, timeframe: 15m}
+explanation: "Zeek notice {threat} for {src_ip} ({metric} in {timeframe}): {samples}"
+data_sources: [Zeek notice.log]
+falsepositives:
+  - Notice types that are noisy in your network (disable them in Zeek or allowlist the threat value here)
+investigation:
+  - Read the notice message, then pull every Zeek log with the same connection uid (Network Analytics page)
+mitre: {tactic: TA0007, techniques: [T1046]}
+tests:
+  - name: a scan notice
+    events: [{event_subtype: notice, threat: "Scan::Port_Scan", src_ip: 10.20.1.99, msg: "scanned 15 ports"}]
+    expect_alerts: 1
+  - name: capture loss is sensor health, not security
+    events: [{event_subtype: notice, threat: "CaptureLoss::Too_Much_Loss", src_ip: "", msg: loss}]
+    expect_alerts: 0

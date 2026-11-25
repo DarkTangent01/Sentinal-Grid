@@ -14,6 +14,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 PARSER_VERSION = "fgt-kv-1.0"
+MAX_FUTURE = timedelta(days=1)   # tolerated clock skew ahead of the server before a timestamp is rejected
 
 PROTO_NAMES = {1: "ICMP", 2: "IGMP", 6: "TCP", 17: "UDP", 41: "IPv6", 47: "GRE", 50: "ESP", 51: "AH",
                58: "ICMPv6", 89: "OSPF", 103: "PIM", 112: "VRRP", 132: "SCTP"}
@@ -164,6 +165,13 @@ def normalize(f: dict, *, source: str, raw: str | None = None, firewall: dict | 
     if not all_str:
         f = {k: v if isinstance(v, str) else ("" if v is None else str(v)) for k, v in f.items()}
     event_time, trusted = parse_event_time(f)
+    # A device clock far in the future (or an epoch-zero garbage value) would put the event in a partition nobody
+    # looks at: such events take the receive time and are marked, the device's own value stays in `raw`.
+    bad_ts = False
+    if trusted:
+        now = datetime.now(timezone.utc)
+        if event_time > now + MAX_FUTURE or event_time.year < 2000:
+            event_time, trusted, bad_ts = now, False, True
     category = categorize(f)
     typ = f.get("type", "")
     sub = f.get("subtype", "")
@@ -215,7 +223,7 @@ def normalize(f: dict, *, source: str, raw: str | None = None, firewall: dict | 
         "devid": f.get("devid", ""),
         "vdom": f.get("vd", ""),
         "source": source,
-        "parser_version": PARSER_VERSION + ("" if trusted else "+ingest-ts"),
+        "parser_version": PARSER_VERSION + ("+bad-ts" if bad_ts else "" if trusted else "+ingest-ts"),
         "severity": severity,
         "orig_severity": orig_sev,
         # VPN event logs carry the remote peer in remip rather than srcip

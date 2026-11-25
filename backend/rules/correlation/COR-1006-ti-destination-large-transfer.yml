@@ -1,0 +1,32 @@
+id: COR-1006
+name: Large upload to a threat-intelligence destination
+description: >
+  An internal host sent a large amount of data to a destination that matches a threat-intelligence indicator.
+  Volume to an ordinary destination is covered by the outbound-volume rules; this one needs both signals.
+version: 1
+severity: critical
+confidence: medium
+category: exfiltration
+author: sentinel
+log_source: {category: traffic}
+detection:
+  selection: {src_ip: {internal: true}, dst_ip: {internal: false}, ti_match: {exists: true}}
+  condition: {group_by: [src_ip], sum: {field: sent_bytes, threshold: 52428800}, timeframe: 60m}
+explanation: "{src_ip} sent {metric} bytes in {timeframe} to threat-intel destinations ({samples})"
+data_sources: [Firewall traffic logs with byte counts, threat-intelligence feeds]
+falsepositives:
+  - An indicator that is stale or covers shared hosting / CDN addresses (mark it as a false positive in Threat Intel)
+investigation:
+  - Which indicator matched and which feed lists it?
+  - What process or user on the host opened the sessions? Isolate the host if the destination is confirmed malicious
+mitre: {tactic: TA0010, techniques: [T1041]}
+tests:
+  - name: 60 MB to a listed address
+    events: [{src_ip: 10.1.1.15, dst_ip: 198.51.100.66, ti_match: 198.51.100.66, sent_bytes: 6291456, repeat: 10, action: accept}]
+    expect_alerts: 1
+  - name: same volume, destination not listed
+    events: [{src_ip: 10.1.1.15, dst_ip: 198.51.100.66, sent_bytes: 6291456, repeat: 10, action: accept}]
+    expect_alerts: 0
+  - name: listed destination, small volume
+    events: [{src_ip: 10.1.1.15, dst_ip: 198.51.100.66, ti_match: 198.51.100.66, sent_bytes: 1000, repeat: 10, action: accept}]
+    expect_alerts: 0

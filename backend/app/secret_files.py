@@ -1,4 +1,4 @@
-"""Secret loading (docs/SECRET_MANAGEMENT.md).
+"""Secret loading (security/SECRETS_MANAGEMENT.md).
 
 Every secret setting can come from a file instead of the environment: `<NAME>_FILE=/run/secrets/<name>` (Docker /
 Compose / Swarm secrets, Kubernetes secret volumes, Vault agent templates). The file wins over a plain `<NAME>`
@@ -90,4 +90,4 @@ def warn_plain_env(environment: str) -> None:
     names = plain_env_secrets()
     if names and environment == "production":
         log.warning("secrets passed as plain environment variables (visible via docker inspect): %s. Move them to files "
-                    "and set <NAME>_FILE (docs/SECRET_MANAGEMENT.md).", ", ".join(names))
+                    "and set <NAME>_FILE (security/SECRETS_MANAGEMENT.md).", ", ".join(names))

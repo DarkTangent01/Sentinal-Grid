@@ -82,3 +82,19 @@ EXPLAIN (ANALYZE, BUFFERS) SELECT switch_id, count(*) FROM switch_poll_runs WHER
 - `0027` is additive and reversible. `tests/test_modernization.py::test_migration_0027_upgrade_downgrade_roundtrip` runs the whole chain on SQLite, then downgrades to 0026 and upgrades again.
 - The production PostgreSQL DDL was rendered offline (`alembic upgrade 0026:0027 --sql`) and reviewed. Every statement is `CREATE INDEX CONCURRENTLY`, run outside a transaction.
 - No data is changed or deleted.
+
+## 8. Policy-usage assessment (2026-11-03)
+
+**Problem.** Every policy sync (about every 5 minutes per firewall) re-counted 30 days of raw traffic logs per policy. Production, 48 h: p50 13.6 s, p90 31.9 s, up to 553 million rows read, 8 runs hit ClickHouse's 60 s limit. It would have timed out on almost every run once the full 30 days of logs existed.
+
+**What the timeout broke.** The failure was caught, but the rollback expired the loaded rows. The next attribute read raised `MissingGreenlet`, so the whole sync was marked *error*, discarding policies, counters and analysis. The worker's policy loop then aborted the remaining firewalls in that pass.
+
+**Fix.**
+- **Hourly rollup.** ClickHouse migration 16 adds `policy_usage_hourly`, a per-policy hourly rollup (AggregatingMergeTree, filled by `policy_usage_hourly_mv`). `store.policy_usage` reads whole hours from it and the partial first and last hour from raw events, so results are exact to the millisecond. A test compares it with the old raw query over aligned, partial, sub-hour and boundary-straddling windows. Measured on production: the raw part takes 1.6–2.1 s at most; the rollup part reads a few thousand rows.
+- **Backfill.** It runs one day per statement (about 1.5 s per day for the busiest firewall). The cut-off is taken to the millisecond just before the view is created.
+- **Seam hour.** The hour in which the view was created is always read from raw events. Batches parsed before the view existed but inserted after it are never counted twice. The migration is restartable.
+- **`ingest_since`** reads the rollup instead of scanning every raw traffic row of the firewall.
+- **Error handling.** The collector commits the collected data before the assessment and reloads its status row asynchronously after a rollback. The worker gives each firewall its own session and error boundary.
+- **Datetime parameters.** These are now sent with milliseconds (`db/ch.py`). clickhouse-connect bound them at whole seconds, which mattered for the raw edge windows above.
+
+**Deploy note.** Migration 16 backfills existing traffic logs inside `migrate`: about 1.5 s per day per firewall. The running api and worker keep serving until `migrate` finishes.

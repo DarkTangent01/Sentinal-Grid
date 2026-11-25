@@ -1,0 +1,124 @@
+# What devices and users reach from outside the cluster. externalTrafficPolicy: Local keeps the client's source
+# address: the syslog, trap and flow receivers accept only inventory devices by source IP, and TACACS+ authorises by
+# client address. Restrict each Service with loadBalancerSourceRanges in the production overlay (management / device
+# networks). Overlays may turn these into NodePort (development, kind).
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-external
+  labels:
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: browser access; TLS terminates in the web pods
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: web
+  ports:
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syslog-external
+  labels:
+    app.kubernetes.io/name: ingress-relay
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: device syslog; Local keeps the device address that the parser trusts
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: ingress-relay
+  ports:
+  - name: syslog-udp
+    port: 514
+    targetPort: 5514
+    protocol: UDP
+  - name: syslog-tcp
+    port: 514
+    targetPort: 5514
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traps-external
+  labels:
+    app.kubernetes.io/name: traps
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: SNMP traps / informs from inventory devices
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: traps
+  ports:
+  - name: traps
+    port: 162
+    targetPort: 1162
+    protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flows-external
+  labels:
+    app.kubernetes.io/name: flows
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: flow exports from inventory devices
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: flows
+  ports:
+  - name: netflow
+    port: 2055
+    targetPort: 2055
+    protocol: UDP
+  - name: ipfix
+    port: 4739
+    targetPort: 4739
+    protocol: UDP
+  - name: sflow
+    port: 6343
+    targetPort: 6343
+    protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tacacs-external
+  labels:
+    app.kubernetes.io/name: tacacs
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: TACACS+ from network devices
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: tacacs
+  ports:
+  - name: tacacs
+    port: 49
+    targetPort: 49
+    protocol: TCP

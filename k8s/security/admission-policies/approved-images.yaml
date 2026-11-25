@@ -1,0 +1,42 @@
+# Production only (k8s/overlays/production): pods in Sentinel namespaces may only run digest-pinned images from the
+# approved registry and the two pinned third-party database images. Kubernetes >= 1.30 (ValidatingAdmissionPolicy GA).
+# Change registry.sentinel.internal to your registry. Signature verification (Cosign) needs an admission controller such as
+# the Sigstore policy-controller or Kyverno; see k8s/README.md.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sentinel-approved-images
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: sentinel
+    resourceRules:
+    - apiGroups:
+      - ''
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+  variables:
+  - name: images
+    expression: 'object.spec.containers.map(c, c.image) + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])'
+  validations:
+  - expression: variables.images.all(i, i.contains('@sha256:'))
+    message: images must be pinned by digest (repository@sha256:...)
+  - expression: variables.images.all(i, i.startsWith('registry.sentinel.internal/sentinel/') || i.startsWith('postgres:16.15-alpine@') || i.startsWith('clickhouse/clickhouse-server:24.8.14.39@'))
+    message: image not from the approved registry list (k8s/security/admission-policies/approved-images.yaml)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sentinel-approved-images
+spec:
+  policyName: sentinel-approved-images
+  validationActions:
+  - Deny
+  - Audit

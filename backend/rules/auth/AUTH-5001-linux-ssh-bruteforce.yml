@@ -1,0 +1,31 @@
+id: AUTH-5001
+name: SSH login failures on Linux hosts (brute force)
+description: >
+  Many failed SSH logins from one address, as reported by the Linux hosts' own sshd logs.
+version: 1
+severity: medium
+confidence: high
+category: credential_access
+author: sentinel
+log_source: {category: system, event_type: linux}
+detection:
+  selection: {action: logon-fail, src_ip: {exists: true}}
+  condition: {group_by: [src_ip], count: 20, timeframe: 10m}
+explanation: "{src_ip}: {metric} failed SSH logins in {timeframe} (threshold {threshold})"
+data_sources: [Linux auth log (sshd) forwarded by rsyslog / journald]
+falsepositives:
+  - Internet background noise against a public SSH port (move it behind VPN or allowlist)
+investigation:
+  - Did any login from this address succeed (rule COR-1001)?
+  - Were the accounts tried real ones or dictionary names?
+mitre: {tactic: TA0006, techniques: [T1110.001]}
+tests:
+  - name: thirty failures
+    events: [{action: logon-fail, src_ip: 203.0.113.90, user: root, repeat: 30}]
+    expect_alerts: 1
+  - name: five failures
+    events: [{action: logon-fail, src_ip: 203.0.113.90, user: root, repeat: 5}]
+    expect_alerts: 0
+  - name: windows failures are other rules
+    events: [{event_type: windows, action: logon-fail, src_ip: 203.0.113.90, user: root, repeat: 30}]
+    expect_alerts: 0

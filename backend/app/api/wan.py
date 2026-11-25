@@ -381,7 +381,7 @@ async def outages_csv(request: Request, range: str | None = Query("30d", pattern
 
 # ------------------------------------------------------------------ ISP incidents
 def inc_out(i: Incident, outs: list[WanOutage] | None = None) -> dict:
-    from ..incidents import sla_state
+    from ..platform.sla import sla_state
     d = {"id": i.id, "title": i.title, "status": i.status, "status_label": wan.STATUS_LABEL.get(i.status, i.status), "severity": i.severity,
          "entity_type": i.entity_type, "entity": i.entity, "site": i.site, "isp": i.isp_name, "isp_link_id": i.isp_link_id,
          "correlation_key": i.correlation_key, "assignee": i.assignee, "summary": i.summary, "probable_cause": i.probable_cause,

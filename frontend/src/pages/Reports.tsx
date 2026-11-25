@@ -8,6 +8,8 @@ const SECTION_LABEL: Record<string, string> = {
   summary: "Traffic summary", alerts: "Alerts", incidents: "Incidents & MTTR", threats: "Top threats", threat_intel: "Threat-intel matches",
   vpn: "VPN", policy_hygiene: "Firewall policy hygiene", compliance: "Compliance evidence", isp_sla: "ISP availability vs SLA",
   firewall_health: "Firewall health", vpn_tunnels: "Site-to-site VPN tunnels",
+  nms_availability: "Network availability & SLA (NMS)", nms_capacity_risks: "Capacity risks (NMS)", wireless_usage: "Wireless usage (NMS)",
+  nms_alerts: "Network alerts (NMS)", config_changes: "Configuration changes (NMS)", rogue_aps: "Rogue access points (NMS)", network_compliance: "Network compliance (NMS)",
 };
 
 export function Reports() {
@@ -35,7 +37,8 @@ export function Reports() {
         {q.data?.runs?.length ? <TableWrap><table className="tbl"><thead><tr><th>Generated</th><th className="w-full">Report</th><th>Period</th><th>Highlights</th><th /></tr></thead>
           <tbody>{q.data.runs.map((r: any) => <tr key={r.id}><td><Time v={r.generated_at} /></td><td>{r.name}</td><td className="text-xs nowrap"><Time v={r.period_start} /> – <Time v={r.period_end} /></td>
             <td className="text-xs">{r.summary?.alerts != null ? `${r.summary.alerts} alerts` : ""}{r.summary?.incidents ? ` · ${r.summary.incidents.total} incidents` : ""}</td>
-            <td><a className="btn" href={`/api/reports/runs/${r.id}.html`} target="_blank" rel="noopener noreferrer">Open</a></td></tr>)}</tbody></table></TableWrap>
+            <td className="whitespace-nowrap"><a className="btn" href={`/api/reports/runs/${r.id}.html`} target="_blank" rel="noopener noreferrer">Open</a>
+              {r.has_pdf && <a className="btn ml-1" href={`/api/reports/runs/${r.id}.pdf`}>PDF</a>}</td></tr>)}</tbody></table></TableWrap>
           : <Empty text="No reports generated yet." />}
       </Card>
       {edit && <ReportForm d={edit} sections={q.data?.sections || []} channels={chs.data || []} onClose={() => { setEdit(null); qc.invalidateQueries({ queryKey: ["reports"] }); }} />}
@@ -53,12 +56,12 @@ function ReportForm({ d, sections, channels, onClose }: { d: any; sections: stri
   return (
     <Modal title={d.id ? `Edit ${d.name}` : "New report"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div><label className="label">Period</label><select className="input w-full" value={f.period} onChange={(e) => setF({ ...f, period: e.target.value })}><option value="daily">Daily (last 24 h)</option><option value="weekly">Weekly (last 7 days)</option><option value="monthly">Monthly (previous calendar month, sent on the 1st)</option></select></div>
-        <div className="grid grid-cols-2 gap-2"><div><label className="label">Send at hour</label><input type="number" min={0} max={23} className="input w-full" value={f.send_hour} onChange={(e) => setF({ ...f, send_hour: e.target.value })} /></div>
-          <div><label className="label">Timezone</label><input className="input w-full" value={f.tz} onChange={(e) => setF({ ...f, tz: e.target.value })} /></div></div>
-        <div className="sm:col-span-2"><label className="label">Sections</label><div className="flex flex-wrap gap-3 text-sm">{sections.map((s) => <label key={s} className="flex items-center gap-1"><input type="checkbox" checked={f.sections.includes(s)} onChange={() => tog("sections", s)} />{SECTION_LABEL[s] || s}</label>)}</div></div>
-        <div className="sm:col-span-2"><label className="label">Deliver to channels (email recommended)</label>{channels.length ? <div className="flex flex-wrap gap-3 text-sm">{channels.map((c) => <label key={c.id} className="flex items-center gap-1"><input type="checkbox" checked={f.channel_ids.includes(c.id)} onChange={() => tog("channel_ids", c.id)} />{c.name} ({c.type})</label>)}</div> : <p className="text-xs text-muted">No channels yet; runs are still stored here.</p>}</div>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Period</span><select className="input w-full" value={f.period} onChange={(e) => setF({ ...f, period: e.target.value })}><option value="daily">Daily (last 24 h)</option><option value="weekly">Weekly (last 7 days)</option><option value="monthly">Monthly (previous calendar month, sent on the 1st)</option></select></label>
+        <div className="grid grid-cols-2 gap-2"><label className="block min-w-0"><span className="label">Send at hour</span><input type="number" min={0} max={23} className="input w-full" value={f.send_hour} onChange={(e) => setF({ ...f, send_hour: e.target.value })} /></label>
+          <label className="block min-w-0"><span className="label">Timezone</span><input className="input w-full" value={f.tz} onChange={(e) => setF({ ...f, tz: e.target.value })} /></label></div>
+        <div className="sm:col-span-2" role="group" aria-label="Sections"><span className="label">Sections</span><div className="flex flex-wrap gap-3 text-sm">{sections.map((s) => <label key={s} className="flex items-center gap-1"><input type="checkbox" checked={f.sections.includes(s)} onChange={() => tog("sections", s)} />{SECTION_LABEL[s] || s}</label>)}</div></div>
+        <div className="sm:col-span-2" role="group" aria-label="Deliver to channels (email recommended)"><span className="label">Deliver to channels (email recommended)</span>{channels.length ? <div className="flex flex-wrap gap-3 text-sm">{channels.map((c) => <label key={c.id} className="flex items-center gap-1"><input type="checkbox" checked={f.channel_ids.includes(c.id)} onChange={() => tog("channel_ids", c.id)} />{c.name} ({c.type})</label>)}</div> : <p className="text-xs text-muted">No channels yet; runs are still stored here.</p>}</div>
         <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Enabled</label>
       </div>
       {save.error && <div role="alert" className="text-sm text-red-400 mt-2">{(save.error as Error).message}</div>}

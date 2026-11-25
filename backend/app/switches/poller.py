@@ -36,13 +36,19 @@ from .snmp import Credentials, PysnmpClient, SnmpError
 log = logging.getLogger("switches")
 ORDER = ["system", "inventory", "interfaces", "cpu_memory", "environment", "stack", "poe", "lacp", "neighbors", "vlans", "stp", "mac_table", "routing", "storage",
          "vendor_health", "custom", "wireless_ap", "wireless_radio", "wireless_radio_rf", "wireless_wlan", "wireless_client", "wireless_ap_cdp",
-         "wireless_radio_meta", "wireless_rf_neighbors"]
+         "wireless_radio_meta", "wireless_rf_neighbors", "wireless_rogue"]
 FAST = {"system", "interfaces", "cpu_memory"}   # follow the switch's poll interval
+# large, independent wireless-controller tables: walked concurrently at the end of a poll (run_groups)
+PARALLEL_GROUPS = {"wireless_client", "wireless_rf_neighbors", "wireless_radio_rf", "wireless_radio_meta", "wireless_rogue"}
+# on a controller these same tables are polled as their own job (poll_wireless, lane "wireless") so that their minutes
+# of SNMP decoding never hold up its quick metrics (lane "fast"); see split_wireless()
+WIRELESS_HEAVY = PARALLEL_GROUPS
 DOWN_AFTER = 2
 METRIC_COLS = ["ts", "switch_id", "metric", "component", "value"]
 IF_COLS = ["ts", "switch_id", "ifindex", "interval_s", "rx_bps", "tx_bps", "rx_util", "tx_util", "rx_pps", "tx_pps", "in_errors",
            "out_errors", "in_discards", "out_discards", "crc", "oper", "admin", "flags"]
 _inflight: set[int] = set()
+_inflight_wireless: set[int] = set()        # controllers whose heavy wireless job is running in this process
 _background: set[asyncio.Task] = set()      # controller polls running beyond the current pass (references kept until done)
 
 
@@ -123,13 +129,13 @@ async def run_groups(ctx: C.Ctx, groups: list[str], group_timeout: float = 90.0,
     report: dict = {}
     ran: set[str] = set()
     timeouts = 0
-    for g in [x for x in ORDER if x in groups]:
-        if g not in groups:  # dropped after identification (e.g. wireless groups on a non-Cisco device)
-            continue
+
+    async def one(g: str) -> None:
+        nonlocal funcs, groups, timeouts
         t0 = time.monotonic()
         if timeouts >= 2:
             report[g] = {"ok": False, "skipped": True, "error": "skipped: the switch stopped answering during this poll"}
-            continue
+            return
         try:
             res = dict(await asyncio.wait_for(funcs[g](ctx), wireless_group_timeout if wireless_group_timeout and g.startswith("wireless_") else group_timeout))
             inv_ident = res.pop("identity", None)
@@ -177,6 +183,22 @@ async def run_groups(ctx: C.Ctx, groups: list[str], group_timeout: float = 90.0,
                 ctx.outcome.error(k, f"internal error: {type(e).__name__}")
             ran.add(g)
             report[g] = {"ok": False, "error": f"internal error: {type(e).__name__}", "duration_ms": int((time.monotonic() - t0) * 1000)}
+
+    # identification and the AP / radio indexes come first, in order; then the large wireless tables, which depend only
+    # on those, are walked concurrently: a controller's poll took the sum of its walks (≈ 260 s, clients 108 s + RF
+    # neighbours 78 s + …), so even its quick metrics refreshed only every ~5 minutes (docs/performance)
+    for g in [x for x in ORDER if x in groups and x not in PARALLEL_GROUPS]:
+        if g in groups:  # dropped after identification (e.g. wireless groups on a non-Cisco device)
+            await one(g)
+    late = [x for x in ORDER if x in groups and x in PARALLEL_GROUPS]
+    if late:
+        sem = asyncio.Semaphore(max(1, get_settings().switch_wireless_group_concurrency))
+
+        async def bounded(g: str) -> None:
+            async with sem:
+                if g in groups:
+                    await one(g)
+        await asyncio.gather(*(bounded(g) for g in late))
     return data, report, ran
 
 
@@ -193,10 +215,15 @@ class _Events:
 
 
 async def poll_switch(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | None, *, client=None, now: datetime | None = None,
-                      kind: str = "poll", force: bool = False) -> dict:
+                      kind: str = "poll", force: bool = False, lane: str = "all") -> dict:
+    """lane "all": every due group. lane "fast": a controller's poll without WIRELESS_HEAVY (polled by poll_wireless)."""
     now = now or datetime.now(timezone.utc)
     st = get_settings()
     t0 = time.monotonic()
+    if lane == "fast":
+        # the row lock serialises this poll's writes with the controller's wireless job (it locks the row to persist),
+        # and the refresh reads what that job last committed, so neither overwrites the other's group_state / health
+        await s.refresh(sw, with_for_update=True)
     ev = _Events(s, sw, now)
     intervals = intervals_of(sw)
     sw._prev_poll_at = sw.last_poll_at
@@ -231,7 +258,7 @@ async def poll_switch(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | 
     due = ["system"]
     for g in ORDER[1:]:
         iv = intervals.get(g, 0)
-        if iv == 0:
+        if iv == 0 or (lane == "fast" and g in WIRELESS_HEAVY):
             continue
         last = _aware((gs.get(g) or {}).get("last_run"))
         if force or last is None or (now - last).total_seconds() >= iv - 5 or sw.vendor == "unknown":
@@ -362,6 +389,79 @@ async def poll_switch(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | 
     await s.commit()
     await _insert(ch, "switch_metrics", metrics, METRIC_COLS)
     return {"ok": True, "groups": report, "events": [e.kind for e in ev.items], "duration_ms": dur, "requests": requests}
+
+
+def split_wireless(sw: Switch) -> bool:
+    """A Cisco controller whose heavy wireless tables are polled as their own job (SWITCH_WLC_SPLIT_WIRELESS)."""
+    return get_settings().switch_wlc_split_wireless and is_wlc(sw) and sw.vendor == "cisco"
+
+
+def wireless_due(sw: Switch, now: datetime, intervals: dict[str, int] | None = None) -> list[str]:
+    intervals = intervals if intervals is not None else intervals_of(sw)
+    gs = sw.group_state or {}
+    due = []
+    for g in ORDER:
+        if g not in WIRELESS_HEAVY or not intervals.get(g, 0):
+            continue
+        last = _aware((gs.get(g) or {}).get("last_run"))
+        if last is None or (now - last).total_seconds() >= intervals[g] - 5:
+            due.append(g)
+    return due
+
+
+async def poll_wireless(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | None, *, client=None, now: datetime | None = None) -> dict:
+    """A controller's heavy wireless tables (WIRELESS_HEAVY), apart from its quick poll. Touches only those groups'
+    state, their capabilities and the wireless inventory: reachability, backoff and last_success_at stay with the quick
+    poll, so a slow table walk can never make the controller look stale or down."""
+    now = now or datetime.now(timezone.utc)
+    st = get_settings()
+    t0 = time.monotonic()
+    intervals = intervals_of(sw)
+    from ..snmp_profiles import disabled_metrics
+    disabled = await disabled_metrics(s)
+    due = [g for g in wireless_due(sw, now, intervals) if not C.GROUP_METRICS.get(g) or not set(C.GROUP_METRICS[g]) <= disabled]
+    if not due or cred is None:
+        return {"ok": True, "groups": {}, "skipped": "nothing due" if cred else "no credential"}
+    from ..db.models import WirelessAp, WirelessRadio
+    # radio_rf keeps each radio's current channel; the radio group ran in the quick poll, so take channels from the store
+    radios = (await s.execute(select(WirelessAp.mac, WirelessRadio.slot, WirelessRadio.channel).join(WirelessAp, WirelessAp.id == WirelessRadio.ap_id)
+                              .where(WirelessRadio.wlc_id == sw.id))).all()
+    try:
+        client = client or make_client(sw, cred)
+        snmp_version = getattr(getattr(client, "creds", None), "version", None) or cred.version
+    except SnmpError as e:
+        report, ran, outcome, data = {"_client": {"ok": False, "error": e.message}}, set(), Outcome(), {}
+    else:
+        ctx = C.Ctx(client=client, vendor="cisco", outcome=Outcome(), snmp_version=snmp_version,
+                    prev={"wireless_radios": {f"{m}/{slot}": {"channel": chn} for m, slot, chn in radios}},
+                    max_vlan_contexts=st.switch_max_vlan_contexts, max_macs=st.switch_max_macs, product_line=sw.product_line or "")
+        ctx.disabled = disabled
+        try:
+            data, report, ran = await run_groups(ctx, due, wireless_group_timeout=st.switch_wireless_group_timeout_seconds)
+        finally:
+            await client.close()
+        outcome = ctx.outcome
+    # persist under the row lock, on the row as the quick poll last committed it
+    await s.refresh(sw, with_for_update=True)
+    health = dict(sw.health or {})
+    if ran:
+        from ..wireless.store import persist as wireless_persist
+        await wireless_persist(s, ch, sw, data, ran, now, intervals, health)
+    gs = dict(sw.group_state or {})
+    for g in ran:
+        gs[g] = {"last_run": now.isoformat(), **report.get(g, {})}
+    sw.group_state = gs
+    sw.capabilities = merge_capabilities(sw.capabilities, outcome, ran, now, sw.vendor, intervals)
+    cov = coverage(sw.capabilities, now, intervals)
+    sw.coverage_pct = cov["percent"]
+    health["coverage"] = cov
+    sw.health = health
+    failed = {g: r["error"] for g, r in report.items() if not r.get("ok")}
+    dur = int((time.monotonic() - t0) * 1000)
+    s.add(SwitchPollRun(switch_id=sw.id, started_at=now, duration_ms=dur, ok=not failed, kind="wireless", requests=getattr(client, "requests", 0),
+                        groups=report, error="; ".join(f"{g}: {e}" for g, e in failed.items())[:2000]))
+    await s.commit()
+    return {"ok": not failed, "groups": report, "duration_ms": dur}
 
 
 def backoff_seconds(fail_streak: int, interval: int, kind: str) -> int:
@@ -840,13 +940,17 @@ async def _neighbors(s, sw, nbrs: list[dict], now, ev: _Events, metrics):
 
 
 # ------------------------------------------------------------------ scheduling
-async def claim(s: AsyncSession, now: datetime, lease_seconds: int) -> list[int]:
+async def claim(s: AsyncSession, now: datetime, lease_seconds: int, limit: int | None = None) -> list[int]:
+    """Lease due switches to this process. At most `limit` (its free poll slots): a process that took every due device
+    would leave other poller replicas idle while it worked through them on one core."""
     rows = (await s.execute(select(Switch.id, Switch.last_poll_at, Switch.poll_interval_seconds, Switch.backoff_until).where(
         Switch.monitoring == "active", Switch.credential_id.is_not(None)))).all()
     due = [r.id for r in rows if r.id not in _inflight and not (r.backoff_until and _aware(r.backoff_until) > now) and (r.last_poll_at is None or
            (now - _aware(r.last_poll_at)).total_seconds() >= max(30, r.poll_interval_seconds or 60) - 2)]
     got = []
     for sid in due:
+        if limit is not None and len(got) >= limit:
+            break
         res = await s.execute(update(Switch).where(Switch.id == sid, (Switch.lease_until.is_(None)) | (Switch.lease_until < now))
                               .values(lease_until=now + timedelta(seconds=lease_seconds)))
         if res.rowcount == 1:
@@ -855,19 +959,72 @@ async def claim(s: AsyncSession, now: datetime, lease_seconds: int) -> list[int]
     return got
 
 
-async def run_due(ch, session_factory, now: datetime | None = None, clients: dict | None = None) -> dict:
-    """Poll every due switch. Wireless controllers get their own (longer) poll budget and run in the background, so a slow
-    controller walk never holds up the polling of every other switch; _inflight prevents a second poll of the same device."""
+async def claim_wireless(s: AsyncSession, now: datetime, lease_seconds: int, limit: int | None = None) -> list[int]:
+    """Lease controllers whose heavy wireless tables are due (their own lease: the quick poll keeps running meanwhile)."""
+    rows = (await s.execute(select(Switch).where(Switch.monitoring == "active", Switch.credential_id.is_not(None),
+                                                 func.lower(Switch.role) == "wlc", Switch.vendor == "cisco", Switch.state == "up"))).scalars().all()
+    got = []
+    for sw in rows:
+        if limit is not None and len(got) >= limit:
+            break
+        if sw.id in _inflight_wireless or not split_wireless(sw) or (sw.backoff_until and _aware(sw.backoff_until) > now) or not wireless_due(sw, now):
+            continue
+        res = await s.execute(update(Switch).where(Switch.id == sw.id, (Switch.wireless_lease_until.is_(None)) | (Switch.wireless_lease_until < now))
+                              .values(wireless_lease_until=now + timedelta(seconds=lease_seconds)))
+        if res.rowcount == 1:
+            got.append(sw.id)
+    await s.commit()
+    return got
+
+
+async def run_due(ch, session_factory, now: datetime | None = None, clients: dict | None = None, wait: bool | None = None) -> dict:
+    """Poll due switches. _inflight prevents a second poll of the same device.
+
+    Worker (wait=False, the default without `clients`): a refilling pool. Each call leases only as many devices as this
+    process has free poll slots and starts them in the background, so a slow device holds one slot while the others
+    refill on the next call, and several poller processes share the fleet instead of the first one leasing everything
+    (docs/performance). wait=True (tests, one-off runs): lease every due device and return when all polls are done."""
     fixed_now = now is not None  # callers (tests) that pass `now` get it for every poll
     now = now or datetime.now(timezone.utc)
     st = get_settings()
+    wait = clients is not None if wait is None else wait
     async with session_factory() as s:
-        ids = await claim(s, now, max(st.switch_poll_timeout_seconds, st.switch_wlc_poll_timeout_seconds) + 60)
+        free = None if wait else max(0, st.switch_max_concurrent_polls - len(_inflight) - len(_inflight_wireless))
+        if free == 0:
+            return {}
+        lease = max(st.switch_poll_timeout_seconds, st.switch_wlc_poll_timeout_seconds) + 60
+        ids = await claim(s, now, lease, limit=free)
         wlc_ids = {i for (i,) in (await s.execute(select(Switch.id).where(Switch.id.in_(ids or [0]), func.lower(Switch.role) == "wlc"))).all()}
-    if not ids:
+        # the worker splits each controller in two jobs; tests and one-off runs (wait=True) poll everything in one
+        split = set() if wait else {i for i in wlc_ids if split_wireless(await s.get(Switch, i))}
+        w_ids = [] if wait else await claim_wireless(s, now, st.switch_wlc_poll_timeout_seconds + 60,
+                                                     limit=None if free is None else max(0, free - len(ids)))
+    if not ids and not w_ids:
         return {}
     sem = asyncio.Semaphore(max(1, st.switch_max_concurrent_polls))
     results = {}
+
+    async def heavy(sid: int):
+        try:
+            async with session_factory() as s:
+                sw = await s.get(Switch, sid)
+                cred = await s.get(SwitchCredential, sw.credential_id) if sw and sw.credential_id else None
+                started = now if fixed_now else datetime.now(timezone.utc)
+                try:
+                    results[("wireless", sid)] = await asyncio.wait_for(poll_wireless(s, ch, sw, cred, client=(clients or {}).get(sid), now=started),
+                                                                         st.switch_wlc_poll_timeout_seconds)
+                except asyncio.TimeoutError:
+                    await s.rollback()
+                    s.add(SwitchPollRun(switch_id=sid, started_at=started, duration_ms=st.switch_wlc_poll_timeout_seconds * 1000, ok=False,
+                                        kind="wireless", groups={}, error=f"wireless poll exceeded {st.switch_wlc_poll_timeout_seconds}s"))
+                except Exception:
+                    log.exception("wireless poll %s failed", sid)
+                    await s.rollback()
+                finally:
+                    await s.execute(update(Switch).where(Switch.id == sid).values(wireless_lease_until=None))
+                    await s.commit()
+        finally:
+            _inflight_wireless.discard(sid)
 
     async def one(sid: int):
         timeout = st.switch_wlc_poll_timeout_seconds if sid in wlc_ids else st.switch_poll_timeout_seconds
@@ -882,7 +1039,8 @@ async def run_due(ch, session_factory, now: datetime | None = None, clients: dic
                 # slot would otherwise get skewed rates/timestamps, and the whole batch would stay in lockstep forever
                 started = now if fixed_now else datetime.now(timezone.utc)
                 try:
-                    results[sid] = await asyncio.wait_for(poll_switch(s, ch, sw, cred, client=(clients or {}).get(sid), now=started), timeout)
+                    results[sid] = await asyncio.wait_for(poll_switch(s, ch, sw, cred, client=(clients or {}).get(sid), now=started,
+                                                                      lane="fast" if sid in split else "all"), timeout)
                 except asyncio.TimeoutError:
                     await s.rollback()
                     sw = await s.get(Switch, sid)
@@ -897,14 +1055,41 @@ async def run_due(ch, session_factory, now: datetime | None = None, clients: dic
                     await s.commit()
         finally:
             _inflight.discard(sid)
-    if clients is None:          # worker: controllers continue in the background
-        for i in [x for x in ids if x in wlc_ids]:
-            t = asyncio.create_task(one(i))
+    if not wait:                 # worker: every poll continues in the background (claims never exceed free slots)
+        jobs = [(i, one) for i in ids] + [(i, heavy) for i in w_ids]
+        for i, fn in jobs:
+            (_inflight if fn is one else _inflight_wireless).add(i)   # counted before the task starts: the next call sees the slot taken
+            t = asyncio.create_task(fn(i))
             _background.add(t)
             t.add_done_callback(_background.discard)
-        ids = [x for x in ids if x not in wlc_ids]
+        return {"started": len(ids), "wlc": len(wlc_ids), "wireless": len(w_ids), "in_flight": len(_inflight) + len(_inflight_wireless)}
     await asyncio.gather(*(one(i) for i in ids))
-    return {"polled": len(ids), "background": len(wlc_ids) if clients is None else 0, "failed": sum(1 for r in results.values() if not r.get("ok"))}
+    return {"polled": len(ids), "background": 0, "failed": sum(1 for r in results.values() if not r.get("ok"))}
+
+
+async def release_on_shutdown(session_factory, grace: float = 5.0) -> list[int]:
+    """Stop this process's background polls and hand their devices back. Without this, a restart leaves each in-flight
+    device leased for its whole poll budget (the WLC: 900 s + 60), so no replica can poll it and its data goes stale
+    for up to ~16 minutes after every deploy. An interrupted poll did not record last_poll_at, so the device is due at
+    once for whichever replica claims it next."""
+    ids, w_ids = sorted(_inflight), sorted(_inflight_wireless)
+    for t in list(_background):
+        t.cancel()
+    if _background:
+        await asyncio.wait(list(_background), timeout=grace)
+    if ids or w_ids:
+        try:
+            async with session_factory() as s:
+                if ids:
+                    await s.execute(update(Switch).where(Switch.id.in_(ids)).values(lease_until=None))
+                if w_ids:
+                    await s.execute(update(Switch).where(Switch.id.in_(w_ids)).values(wireless_lease_until=None))
+                await s.commit()
+        except Exception:
+            log.exception("releasing switch leases on shutdown failed; they expire on their own")
+    _inflight.clear()
+    _inflight_wireless.clear()
+    return sorted(set(ids) | set(w_ids))
 
 
 async def housekeeping(s: AsyncSession, now: datetime | None = None) -> None:

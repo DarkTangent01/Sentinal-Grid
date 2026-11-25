@@ -1,0 +1,19 @@
+# Keeps the pinned versions moving (security/DOCKER_HARDENING.md, "Supply chain"): base-image digests, GitHub Actions
+# SHAs and application dependencies get weekly update pull requests, which CI tests and scans before review.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories: ["/backend", "/frontend", "/deploy/ingress", "/deploy/tacacs"]
+    schedule: { interval: weekly }
+  - package-ecosystem: docker-compose
+    directory: "/"
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule: { interval: weekly }

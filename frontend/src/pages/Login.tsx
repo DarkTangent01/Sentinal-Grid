@@ -1,64 +1,83 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { ThemeToggle } from "../lib/theme";
+import { AUTH, AuthShell, Spinner } from "../components/AuthShell";
+import { PRODUCT_TAGLINE, SentinelLogo, SentinelTile } from "../components/Brand";
 
-const POINTS = ["FortiGate, Palo Alto and Windows logs in one place",
-  "Alerts and incidents mapped to MITRE ATT&CK", "Read-only by design: the SIEM never changes firewall config"];
+const EYE = <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
+const EYE_OFF = <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+  <path d="M3 3l18 18M10.6 5.1A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg>;
+const ALERT = <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 mt-0.5">
+  <circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>;
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
+  const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { document.title = "Sign in · Sentinel"; }, []);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setErr("");
     try {
       await api("/auth/login", { method: "POST", body: { username: u, password: p } });
       onLogin();
-    } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
+    } catch (x) { setErr((x as Error).message || "Sign-in failed"); } finally { setBusy(false); }
   }
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState?.("CapsLock") ?? false);
   return (
-    <div className="h-full flex">
-      {/* brand panel: white text on #CB202D→#A81A25 keeps >= 5.6:1 for the small copy */}
-      <aside className="hidden lg:flex w-[44%] max-w-xl flex-col justify-between p-10 text-[#ffffff] bg-gradient-to-br from-[#cb202d] to-[#a81a25] relative overflow-hidden">
-        <div aria-hidden className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[#ffffff]/10" />
-        <div aria-hidden className="absolute -left-16 bottom-10 h-56 w-56 rounded-full bg-[#ffffff]/5" />
-        <div className="relative flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-[#ffffff] text-[#cb202d] flex items-center justify-center">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M8 12h2l1.5-3 2 6 1.5-3h1" />
-            </svg>
-          </div>
-          <span className="text-lg font-extrabold tracking-tight">Sentinel <span className="font-semibold opacity-80">Grid · NMS</span></span>
-        </div>
-        <div className="relative space-y-6">
-          <h1 className="text-4xl font-extrabold leading-tight tracking-tight">Network security,<br />served fresh.</h1>
-          <ul className="space-y-3 text-sm">
-            {POINTS.map((t) => (
-              <li key={t} className="flex gap-3"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ffffff]" aria-hidden />{t}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="relative text-xs">Authorized personnel only. All activity is audited.</div>
-      </aside>
+    <AuthShell>
+      <div className="min-h-screen mx-auto max-w-6xl px-5 sm:px-8 py-8 flex flex-col">
+        <header className="flex items-center"><SentinelLogo size={30} /></header>
+        <div className="flex-1 grid items-center gap-10 lg:grid-cols-[1.1fr_minmax(0,26rem)] py-10">
+          <section className="hidden lg:block max-w-xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#38BDF8]">Sentinel platform</p>
+            <h1 className="mt-3 text-[2.5rem] leading-[1.1] font-semibold tracking-[-0.03em] text-[#F8FAFC]">
+              One view of your network<br />and its security.</h1>
+            <p className="mt-4 text-[15px] leading-relaxed text-[#94A3B8] max-w-md">Monitor infrastructure, traffic and wireless, and detect, investigate
+              and respond to threats — with one sign-in.</p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-2 max-w-lg">
+              {(["nms", "grid"] as const).map((pr) => (
+                <div key={pr} className="rounded-xl border border-[#263449] bg-[#111C2E]/70 p-4">
+                  <div className="flex items-center gap-2.5"><SentinelTile size={30} tone={pr} />
+                    <span className="font-semibold text-[#F1F5F9]">Sentinel <span className={pr === "nms" ? "text-[#38BDF8]" : "text-[#A78BFA]"}>{pr === "nms" ? "NMS" : "Grid"}</span></span></div>
+                  <p className="mt-2 text-xs text-[#94A3B8]">{PRODUCT_TAGLINE[pr]}</p>
+                </div>))}
+            </div>
+          </section>
 
-      <main className="flex-1 flex items-center justify-center p-6 relative">
-        <ThemeToggle className="absolute top-4 right-4" />
-        <form onSubmit={submit} className="card shadow-card p-8 w-full max-w-sm space-y-5">
-          <div className="space-y-1">
-            <div className="lg:hidden text-brand-400 font-extrabold tracking-tight text-lg">Sentinel</div>
-            <h2 className="text-2xl font-bold text-slate-100">Sign in</h2>
-            <div className="text-sm text-muted">One account for Sentinel Grid and Sentinel NMS. <span className="lg:hidden">Activity is audited.</span></div>
-          </div>
-          <div><label className="label" htmlFor="login-user">Username</label>
-            <input id="login-user" className="input w-full py-2.5" value={u} onChange={(e) => setU(e.target.value)} autoFocus autoComplete="username" /></div>
-          <div><label className="label" htmlFor="login-pass">Password</label>
-            <input id="login-pass" className="input w-full py-2.5" type="password" value={p} onChange={(e) => setP(e.target.value)} autoComplete="current-password" /></div>
-          {err && <div role="alert" className="text-sm text-red-400">{err}</div>}
-          <button className="btn btn-primary w-full justify-center py-2.5 text-[15px]" disabled={busy || !u || !p}>{busy ? "Signing in…" : "Sign in"}</button>
-        </form>
-      </main>
-    </div>
+          <form onSubmit={submit} className={`${AUTH.card} p-7 sm:p-8 w-full max-w-md mx-auto lg:mx-0 space-y-5`} aria-describedby={err ? "login-error" : undefined}>
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-[#F8FAFC]">Sign in</h2>
+              <p className="mt-1 text-sm text-[#94A3B8]">One account for Sentinel NMS and Sentinel Grid.</p>
+            </div>
+            <div>
+              <label className={AUTH.label} htmlFor="login-user">Username</label>
+              <input id="login-user" className={AUTH.input} value={u} onChange={(e) => setU(e.target.value)} autoFocus autoComplete="username" spellCheck={false}
+                aria-invalid={!!err} />
+            </div>
+            <div>
+              <label className={AUTH.label} htmlFor="login-pass">Password</label>
+              <div className="relative">
+                <input id="login-pass" className={`${AUTH.input} pr-11`} type={show ? "text" : "password"} value={p} onChange={(e) => setP(e.target.value)}
+                  onKeyUp={onKey} onKeyDown={onKey} autoComplete="current-password" aria-invalid={!!err} />
+                <button type="button" onClick={() => setShow(!show)} aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-[#94A3B8] hover:text-[#F1F5F9] hover:bg-[#162238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8]">
+                  {show ? EYE_OFF : EYE}</button>
+              </div>
+              {caps && <p className="mt-1.5 text-xs text-[#FBBF24]" role="status">Caps Lock is on</p>}
+            </div>
+            {err && <div id="login-error" role="alert" className="flex gap-2 rounded-lg border border-[#EF4444]/40 bg-[#EF4444]/10 px-3 py-2.5 text-sm text-[#FECACA]">{ALERT}{err}</div>}
+            <button type="submit" className={AUTH.primary} disabled={busy || !u || !p}>{busy && <Spinner />}{busy ? "Signing in…" : "Sign in"}</button>
+          </form>
+        </div>
+        <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748B]">
+          <span>Authorized personnel only. All activity is audited.</span>
+          <span>© Sentinel</span>
+        </footer>
+      </div>
+    </AuthShell>
   );
 }

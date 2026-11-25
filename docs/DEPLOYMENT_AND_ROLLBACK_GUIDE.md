@@ -2,6 +2,20 @@
 
 This guide covers deploying the 2026-11-02 changes with the existing `scripts/deploy.sh` (rsync + `docker compose`) to the current host. Nothing in this pass changes published ports, credentials or the database contents.
 
+**What reaches the server (since 2026-11-14).** `scripts/deploy.sh` copies an allowlist only (`scripts/deploy-files.rsync`):
+- `docker-compose.yml` and `.env.example`;
+- the backend image inputs (`app/`, `migrations/`, `rules/`, `requirements.txt`, `alembic.ini`, Dockerfile);
+- the frontend sources and nginx configuration (unit tests excluded);
+- `deploy/clickhouse`, `deploy/ingress` and `deploy/tacacs`;
+- the scripts run on the server: backup / restore, secrets, database roles, syslog conntrack, `scripts/security/docker-security-audit.sh`.
+
+Docs, tests, CI, Kubernetes manifests and dev / lab tooling stay in the repository. The server's own `.env`,
+`secrets/`, `backups/`, certificates and GeoIP files are excluded, so the sync never touches them.
+
+The sync uses plain `--delete`, **never `--delete-excluded`**: macOS ships openrsync, which ignores rsync "protect" rules,
+so `--delete-excluded` would remove the server's secrets and backups. Old `.env` backups are kept in
+`backups/env/` (mode 600).
+
 ## 1. What changes at deploy time
 
 | Change | Effect on the running system | Action needed |

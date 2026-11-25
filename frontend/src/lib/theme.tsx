@@ -8,7 +8,7 @@ export function initialTheme(): Theme {
     const saved = localStorage.getItem(KEY);
     if (saved === "light" || saved === "dark") return saved;
   } catch { /* storage unavailable */ }
-  return "light"; // Zomato theme: day is the default; a saved choice (either way) still wins
+  return "dark"; // Sentinel: night is the primary theme; a saved choice (either way) still wins
 }
 
 export function applyTheme(t: Theme) {

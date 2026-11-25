@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics.filters import ALLOWED, DENIED, EventFilter, build_where, table
+from ..platform.eventquery import ALLOWED, DENIED, EventFilter, build_where, table
 from ..db.ch import ClickHouse
 from ..db.models import Firewall, HardeningPlan, User
 from ..db.pg import get_session

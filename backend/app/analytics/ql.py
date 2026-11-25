@@ -41,6 +41,10 @@ FIELDS: dict[str, tuple[str, object]] = {
     "url": ("text", "url"), "qname": ("text", "dns_qname"), "query": ("text", "dns_qname"), "threat": ("text", "threat"),
     "msg": ("text", "msg"), "raw": ("text", "raw"),
 }
+# Elastic Common Schema names work as aliases of the fields above (ingest/schema_map.py): source.ip:10.0.0.5
+from ..ingest.schema_map import QL_ALIASES as _ECS_ALIASES  # noqa: E402
+
+FIELDS.update({ecs: FIELDS[own] for ecs, own in _ECS_ALIASES.items() if own in FIELDS})
 TOKEN = re.compile(r'\s*(?:(?P<lp>\()|(?P<rp>\))|(?P<str>"(?:[^"\\]|\\.)*")|(?P<op>>=|<=|!=|:|>|<)|(?P<word>[^\s()":<>!=]+(?:[=!][^\s()":<>]+)*))')
 
 
@@ -221,3 +225,11 @@ def compile_ql(q: str, prefix: str = "ql") -> Compiled:
     if p.peek() is not None:
         raise QLError(f"unexpected {p.peek().value!r}", p.peek().pos)
     return Compiled(sql, p.params)
+
+
+def _register() -> None:
+    from ..platform import eventquery
+    eventquery.QL_COMPILER = compile_ql
+
+
+_register()

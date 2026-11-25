@@ -31,7 +31,7 @@ export function SwitchForm({ sw, initial, onClose }: { sw: any | null; initial?:
   const [gi, setGi] = useState<string>(JSON.stringify(sw?.group_intervals || {}));
   const [th, setTh] = useState<string>(JSON.stringify(sw?.thresholds || {}));
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
-  const inp = (k: string, l: string, p: any = {}) => <div><label className="label">{l}</label><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></div>;
+  const inp = (k: string, l: string, p: any = {}) => <label className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></label>;
   const body = () => {
     let g = {}, t = {};
     try { g = JSON.parse(gi || "{}"); t = JSON.parse(th || "{}"); } catch { throw new Error("group intervals / thresholds must be JSON objects"); }
@@ -48,18 +48,18 @@ export function SwitchForm({ sw, initial, onClose }: { sw: any | null; initial?:
   return <Modal wide title={sw ? `Edit ${sw.name}` : wlc ? "Add a wireless controller (Catalyst 9800)" : "Add a switch"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-3">
       {inp("name", "Name", { placeholder: "WH1-ACC-SW01" })}{inp("address", "Management IP", { placeholder: "10.20.0.11" })}
-      <div><label className="label">SNMP credential profile</label>
+      <label className="block min-w-0"><span className="label">SNMP credential profile</span>
         <select className="input w-full" value={f.credential_id} onChange={(e) => setF({ ...f, credential_id: Number(e.target.value) })}>
-          <option value={0}>— choose —</option>{(creds.data?.items || []).map((c: any) => <option key={c.id} value={c.id}>{c.name} ({c.version}{c.version === "v3" ? ` ${c.security_level}` : ""})</option>)}</select></div>
+          <option value={0}>— choose —</option>{(creds.data?.items || []).map((c: any) => <option key={c.id} value={c.id}>{c.name} ({c.version}{c.version === "v3" ? ` ${c.security_level}` : ""})</option>)}</select></label>
       {inp("site", "Site / warehouse")}{inp("building", "Building")}{inp("floor", "Floor")}{inp("rack", "Rack")}{inp("role", "Role", { placeholder: "access / distribution / core" })}
       {inp("port", "SNMP port", { type: "number", min: 1, max: 65535 })}{inp("poll_interval_seconds", "Poll every (seconds)", { type: "number", min: 30, max: 3600 })}
       {inp("timeout_ms", "SNMP timeout (ms)", { type: "number", min: 500, max: 15000 })}{inp("retries", "Retries", { type: "number", min: 0, max: 3 })}
       <div className="sm:col-span-3">{inp("notes", "Notes")}</div>
       <div className="sm:col-span-3 grid gap-2 sm:grid-cols-2">
-        <div><label className="label">Group intervals (JSON, seconds; 0 disables) — groups: {(meta.data?.groups || []).filter((g: any) => g.key !== "system").map((g: any) => g.key).join(", ")}</label>
-          <input className="input w-full font-mono text-xs" value={gi} onChange={(e) => setGi(e.target.value)} placeholder='{"mac_table": 1800, "routing": 0}' /></div>
-        <div><label className="label">Alert threshold overrides (JSON) — e.g. cpu_pct, mem_pct, celsius, util_pct, min_errors</label>
-          <input className="input w-full font-mono text-xs" value={th} onChange={(e) => setTh(e.target.value)} placeholder='{"util_pct": 80}' /></div>
+        <label className="block min-w-0"><span className="label">Group intervals (JSON, seconds; 0 disables) — groups: {(meta.data?.groups || []).filter((g: any) => g.key !== "system").map((g: any) => g.key).join(", ")}</span>
+          <input className="input w-full font-mono text-xs" value={gi} onChange={(e) => setGi(e.target.value)} placeholder='{"mac_table": 1800, "routing": 0}' /></label>
+        <label className="block min-w-0"><span className="label">Alert threshold overrides (JSON) — e.g. cpu_pct, mem_pct, celsius, util_pct, min_errors</span>
+          <input className="input w-full font-mono text-xs" value={th} onChange={(e) => setTh(e.target.value)} placeholder='{"util_pct": 80}' /></label>
       </div>
     </div>
     <p className="text-2xs text-muted mt-2">The address must be inside an authorised management network (Settings). Monitoring is read-only: the SIEM sends SNMP GET / GETNEXT / GETBULK
@@ -149,18 +149,18 @@ function CredentialForm({ c, authProtocols, privProtocols, onClose }: { c: any; 
   const keep = c.id ? "leave empty to keep the stored value" : "";
   return <Modal title={c.id ? `Edit ${c.name}` : "New SNMP credential profile"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-2">
-      <div><label className="label">Name</label><input className="input w-full" value={f.name} onChange={set("name")} /></div>
-      <div><label className="label">SNMP version</label><select className="input w-full" value={f.version} onChange={set("version")}><option value="v3">SNMPv3 (recommended)</option><option value="v2c">SNMPv2c</option></select></div>
+      <label className="block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={set("name")} /></label>
+      <label className="block min-w-0"><span className="label">SNMP version</span><select className="input w-full" value={f.version} onChange={set("version")}><option value="v3">SNMPv3 (recommended)</option><option value="v2c">SNMPv2c</option></select></label>
       {f.version === "v3" ? <>
-        <div><label className="label">User name</label><input className="input w-full" autoComplete="off" value={f.username} onChange={set("username")} /></div>
+        <label className="block min-w-0"><span className="label">User name</span><input className="input w-full" autoComplete="off" value={f.username} onChange={set("username")} /></label>
         <div />
-        <div><label className="label">Authentication protocol</label><select className="input w-full" value={f.auth_protocol} onChange={set("auth_protocol")}>{authProtocols.map((p) => <option key={p}>{p}</option>)}</select></div>
-        <div><label className="label">Authentication passphrase {keep && <span className="text-muted">({keep})</span>}</label><input type="password" autoComplete="new-password" className="input w-full" value={f.auth_key} onChange={set("auth_key")} /></div>
-        <div><label className="label">Privacy protocol</label><select className="input w-full" value={f.priv_protocol} onChange={set("priv_protocol")}>{privProtocols.map((p) => <option key={p}>{p}</option>)}</select></div>
-        <div><label className="label">Privacy passphrase {keep && <span className="text-muted">({keep})</span>}</label><input type="password" autoComplete="new-password" className="input w-full" value={f.priv_key} onChange={set("priv_key")} /></div>
-      </> : <div className="sm:col-span-2"><label className="label">Community {keep && <span className="text-muted">({keep})</span>}</label>
-        <input type="password" autoComplete="new-password" className="input w-full" value={f.community} onChange={set("community")} /></div>}
-      <div className="sm:col-span-2"><label className="label">Description</label><input className="input w-full" value={f.description} onChange={set("description")} /></div>
+        <label className="block min-w-0"><span className="label">Authentication protocol</span><select className="input w-full" value={f.auth_protocol} onChange={set("auth_protocol")}>{authProtocols.map((p) => <option key={p}>{p}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Authentication passphrase {keep && <span className="text-muted">({keep})</span>}</span><input type="password" autoComplete="new-password" className="input w-full" value={f.auth_key} onChange={set("auth_key")} /></label>
+        <label className="block min-w-0"><span className="label">Privacy protocol</span><select className="input w-full" value={f.priv_protocol} onChange={set("priv_protocol")}>{privProtocols.map((p) => <option key={p}>{p}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Privacy passphrase {keep && <span className="text-muted">({keep})</span>}</span><input type="password" autoComplete="new-password" className="input w-full" value={f.priv_key} onChange={set("priv_key")} /></label>
+      </> : <label className="sm:col-span-2 block min-w-0"><span className="label">Community {keep && <span className="text-muted">({keep})</span>}</span>
+        <input type="password" autoComplete="new-password" className="input w-full" value={f.community} onChange={set("community")} /></label>}
+      <label className="sm:col-span-2 block min-w-0"><span className="label">Description</span><input className="input w-full" value={f.description} onChange={set("description")} /></label>
     </div>
     <p className="text-2xs text-muted mt-2">Use a read-only view: e.g. Cisco <code>snmp-server group SIEM v3 priv read SIEM-RO</code> (+ <code>context vlan- match prefix</code> for per-VLAN MAC / STP);
       Ruckus <code>snmp-server user siem-ro &lt;group&gt; v3 auth sha … priv aes …</code> with a read-only group.</p>
@@ -175,31 +175,42 @@ function Discovery() {
   const nets = useQuery({ queryKey: ["switch-nets"], queryFn: () => api<any>("/switches/admin/networks") });
   const creds = useCreds();
   const runs = useQuery({ queryKey: ["switch-disc"], queryFn: () => api<any>("/switches/admin/discovery"), refetchInterval: (q) => (q.state.data?.items || []).some((r: any) => ["queued", "running"].includes(r.status)) ? 3000 : false });
-  const [f, setF] = useState({ network_id: 0, credential_id: 0 });
+  const [f, setF] = useState({ network_id: 0, credential_id: 0, methods: ["snmp"] as string[] });
   const [add, setAdd] = useState<any>(null);
-  const start = useMutation({ mutationFn: () => api("/switches/admin/discovery", { method: "POST", body: f }), onSuccess: () => invalidate(qc) });
+  const body = { network_id: f.network_id, credential_id: f.credential_id || null, methods: f.methods };
+  const start = useMutation({ mutationFn: () => api("/switches/admin/discovery", { method: "POST", body }), onSuccess: () => invalidate(qc) });
   const allowed = (nets.data?.items || []).filter((n: any) => n.allow_discovery);
   const last = runs.data?.items?.[0];
+  const needsCred = f.methods.includes("snmp");
+  const toggle = (m: string) => setF({ ...f, methods: f.methods.includes(m) ? f.methods.filter((x) => x !== m) : [...f.methods, m] });
   return <Card title="Discovery">
-    <p className="text-2xs text-muted mb-2">Sweeps one authorised network that allows discovery: a single SNMP GET (sysDescr / sysObjectID / sysName) per address, 1 s timeout, no retries, bounded concurrency.
-      Nothing is added automatically.</p>
-    <div className="flex flex-wrap gap-2 mb-3">
+    <p className="text-2xs text-muted mb-2">Sweeps one authorised network that allows discovery. <b>SNMP</b>: one GET of sysDescr / sysObjectID / sysName per address.
+      <b> ICMP</b>: one echo per address. <b>TCP</b>: connects to ports 22, 23, 80, 443 and 830. <b>ARP</b>: reads the ARP tables of the devices already monitored,
+      so silent hosts appear with their MAC. Short timeouts, no retries, bounded concurrency. Nothing is added automatically.</p>
+    <div className="flex flex-wrap gap-2 mb-3 items-center">
       <select aria-label="Network" className="input py-1" value={f.network_id} onChange={(e) => setF({ ...f, network_id: Number(e.target.value) })}>
         <option value={0}>— network —</option>{allowed.map((n: any) => <option key={n.id} value={n.id}>{n.cidr} {n.site && `(${n.site})`}</option>)}</select>
-      <select aria-label="Credential" className="input py-1" value={f.credential_id} onChange={(e) => setF({ ...f, credential_id: Number(e.target.value) })}>
-        <option value={0}>— credential profile —</option>{(creds.data?.items || []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-      <button className="btn btn-primary" disabled={!f.network_id || !f.credential_id || start.isPending} onClick={() => start.mutate()}>Start discovery</button>
+      {[["snmp", "SNMP"], ["icmp", "ICMP"], ["tcp", "TCP ports"], ["arp", "ARP tables"]].map(([m, l]) =>
+        <label key={m} className="text-xs flex items-center gap-1"><input type="checkbox" checked={f.methods.includes(m)} onChange={() => toggle(m)} />{l}</label>)}
+      {needsCred && <select aria-label="Credential" className="input py-1" value={f.credential_id} onChange={(e) => setF({ ...f, credential_id: Number(e.target.value) })}>
+        <option value={0}>— SNMP credential profile —</option>{(creds.data?.items || []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+      <button className="btn btn-primary" disabled={!f.network_id || !f.methods.length || (needsCred && !f.credential_id) || start.isPending} onClick={() => start.mutate()}>Start discovery</button>
       {!allowed.length && <span className="text-xs text-muted self-center">Enable "allow discovery" on a network first.</span>}
     </div>
     {start.error && <div role="alert" className="text-sm text-red-400 mb-2">{(start.error as Error).message}</div>}
     {last && <div className="space-y-2">
-      <div className="text-sm">Last run: <span className="font-mono">{last.cidr}</span> · {last.status} · scanned {last.scanned} · found {last.found} · by {last.requested_by} · <Time v={last.finished_at || last.created_at} />
+      <div className="text-sm">Last run: <span className="font-mono">{last.cidr}</span> · {(last.methods || ["snmp"]).join(" + ")} · {last.status} · scanned {last.scanned} · found {last.found} · by {last.requested_by} · <Time v={last.finished_at || last.created_at} />
         {last.error && <span className="text-red-300"> · {last.error}</span>}</div>
-      {!!last.results?.length && <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th>Address</th><th>Status</th><th>sysName</th><th>Vendor</th><th>Model</th><th>Firmware</th><th /></tr></thead>
-        <tbody>{last.results.map((r: any) => <tr key={r.address}><td className="font-mono">{r.address}</td><td className={r.status === "found" ? "" : "text-amber-300"}>{r.status}</td>
-          <td>{r.sys_name || "—"}</td><td>{r.vendor || "—"}</td><td>{r.model || "—"}</td><td className="text-xs">{r.firmware || "—"}</td>
-          <td>{r.already_monitored ? <span className="text-2xs text-muted">monitored</span> : r.status === "found" &&
-            <button className="btn" onClick={() => setAdd({ name: r.sys_name || r.address, address: r.address, credential_id: last.credential_id })}>Add</button>}</td></tr>)}</tbody></table></TableWrap>}
+      {!!last.results?.length && <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th>Address</th><th>Status</th><th>Seen by</th><th>sysName</th><th>Vendor / model</th>
+        <th>Services</th><th>MAC (learned from)</th><th /></tr></thead>
+        <tbody>{last.results.map((r: any) => <tr key={r.address}><td className="font-mono">{r.address}</td>
+          <td className={r.status === "found" ? "" : r.status === "auth_failed" ? "text-red-300" : "text-amber-300"}>{r.status}</td>
+          <td className="text-xs">{(r.methods || ["snmp"]).join(", ")}{r.rtt_ms != null && ` · ${r.rtt_ms} ms`}</td>
+          <td>{r.sys_name || "—"}</td><td className="text-xs">{[r.vendor, r.model].filter(Boolean).join(" ") || "—"}</td>
+          <td className="text-xs">{(r.services || []).join(", ") || "—"}</td>
+          <td className="font-mono text-xs">{r.mac ? `${r.mac} (${r.learned_from})` : "—"}</td>
+          <td>{r.already_monitored ? <span className="text-2xs text-muted">monitored</span> : r.status !== "auth_failed" &&
+            <button className="btn" onClick={() => setAdd({ name: r.sys_name || r.address, address: r.address, credential_id: last.credential_id || undefined })}>Add</button>}</td></tr>)}</tbody></table></TableWrap>}
     </div>}
     {add && <SwitchForm sw={null} initial={add} onClose={() => setAdd(null)} key={add.address} />}
   </Card>;

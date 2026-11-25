@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import icmp, isp
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..config import get_settings
 from ..db.ch import ClickHouse
 from ..db.models import Firewall, IcmpTarget, IspLink, User

@@ -1,7 +1,7 @@
 """Pipeline query language: compilation safety and results against embedded ClickHouse."""
 import pytest
 
-from app.analytics.filters import EventFilter
+from app.platform.eventquery import EventFilter
 from app.analytics.pipeline import PipelineError, compile_pipeline, run_pipeline, watchlist_names
 
 from .test_storage_analytics import _load, traffic

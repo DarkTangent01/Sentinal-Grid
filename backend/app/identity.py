@@ -17,7 +17,14 @@ import ipaddress
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from .vpnmon import _aware, _fw
+from .platform.timeutil import ch_time as _aware
+
+
+def _fw(fw_ids, p) -> str:
+    if not fw_ids:
+        return ""
+    p["fws"] = [int(x) for x in fw_ids]
+    return " AND firewall_id IN {fws:Array(UInt32)}"
 
 ADMIN_LOGIN, ADMIN_FAIL, ADMIN_LOGOUT = "0100032001", "0100032002", "0100032003"
 CFG_LOGIDS = ("0100044544", "0100044545", "0100044546", "0100044547")
@@ -207,6 +214,56 @@ def baseline(events: list[dict]) -> dict[str, dict]:
     return b
 
 
+_DAY_BASELINES: dict[tuple[int, str, tuple], dict] = {}   # (ClickHouse instance, day, firewall filter) -> baseline of that day
+_DAY_CACHE_MAX = 800
+
+
+def merge_baselines(parts: list[dict[str, dict]]) -> dict[str, dict]:
+    """Union of per-period baselines: the same result as baseline() over the concatenated events."""
+    out: dict[str, dict] = {}
+    for b in parts:
+        for k, x in b.items():
+            y = out.setdefault(k, {"logins": 0, "countries": set(), "nets": set(), "devices": set(), "hours": defaultdict(int), "sources": set()})
+            y["logins"] += x["logins"]
+            for f in ("countries", "nets", "devices", "sources"):
+                y[f] |= x[f]
+            for h, n in x["hours"].items():
+                y["hours"][h] += n
+    return out
+
+
+async def cached_baseline(ch, t0: datetime, t1: datetime, fw_ids: list[int] | None = None, now: datetime | None = None) -> dict[str, dict]:
+    """baseline() of [t0, t1), built from per-day pieces. A completed UTC day never changes, so its piece is computed
+    once and kept; each call queries only the partial first and last day. It replaced one query that returned every
+    authentication event of the whole window, sorted, with about 20 regex extracts per row, every alert pass: the
+    query that exceeded ClickHouse's memory. Its LIMIT also applied to the whole window in time order, so once the
+    window held more events the newest were silently left out; it now applies per day."""
+    now = now or datetime.now(timezone.utc)
+    fkey = tuple(sorted(fw_ids or []))
+    first_day = (t0 + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0) if t0 != t0.replace(hour=0, minute=0, second=0, microsecond=0) else t0
+    last_day = t1.replace(hour=0, minute=0, second=0, microsecond=0)
+    parts: list[dict[str, dict]] = []
+    if first_day >= last_day:  # no whole day inside the window
+        return baseline(await auth_events(ch, t0, t1, fw_ids))
+    if t0 < first_day:
+        parts.append(baseline(await auth_events(ch, t0, first_day, fw_ids)))
+    d = first_day
+    while d < last_day:
+        key = (id(ch), d.date().isoformat(), fkey)
+        piece = _DAY_BASELINES.get(key)
+        if piece is None:
+            piece = baseline(await auth_events(ch, d, d + timedelta(days=1), fw_ids))
+            if d + timedelta(days=1) < now - timedelta(hours=1):  # only closed days (late events have arrived) are kept
+                _DAY_BASELINES[key] = piece
+        parts.append(piece)
+        d += timedelta(days=1)
+    if last_day < t1:
+        parts.append(baseline(await auth_events(ch, last_day, t1, fw_ids)))
+    while len(_DAY_BASELINES) > _DAY_CACHE_MAX:  # oldest days first (insertion order follows time)
+        _DAY_BASELINES.pop(next(iter(_DAY_BASELINES)))
+    return merge_baselines(parts)
+
+
 def _net24(ip: str) -> str:
     try:
         a = ipaddress.ip_address(ip)
@@ -353,9 +410,8 @@ async def admin_activity(ch, t0: datetime, t1: datetime, fw_ids: list[int] | Non
 # ------------------------------------------------------------------ overview
 async def overview(ch, t0: datetime, t1: datetime, fw_ids: list[int] | None = None, baseline_days: int = 30) -> dict:
     now = min(t1, datetime.now(timezone.utc))
-    hist = await auth_events(ch, t0 - timedelta(days=baseline_days), t0, fw_ids)
     evs = await auth_events(ch, t0, t1, fw_ids)
-    base = baseline(hist)
+    base = await cached_baseline(ch, t0 - timedelta(days=baseline_days), t0, fw_ids)
     sess = sessions(evs, now)
     anom = anomalies(evs, base)
     fails = failures(evs)

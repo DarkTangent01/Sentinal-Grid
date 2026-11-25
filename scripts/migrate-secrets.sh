@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Existing installation: moves the secrets that older versions kept in .env into ./secrets/<name> files, then removes
-# them from .env (docs/SECRET_MANAGEMENT.md). Idempotent; never prints a value.
+# them from .env (security/SECRETS_MANAGEMENT.md). Idempotent; never prints a value.
 #   ./scripts/migrate-secrets.sh            dry run: which secrets would move
 #   ./scripts/migrate-secrets.sh --apply    write the files, back up .env (mode 600) and strip the secrets from it
 # Then redeploy / `docker compose up -d`: the services read the files. Delete the .env backup once the stack is healthy,
-# and rotate the secrets (docs/CREDENTIAL_ROTATION.md): until then they may still sit in older backups and in the
+# and rotate the secrets (security/CREDENTIAL_ROTATION.md): until then they may still sit in older backups and in the
 # metadata of containers created before the move.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,6 +43,8 @@ if [ "$APPLY" = "--apply" ]; then
   [ -e secrets/token_encryption_key_previous ] || { : > secrets/token_encryption_key_previous; chmod 444 secrets/token_encryption_key_previous; }
   # the services keep using the superuser until scripts/create-app-db-role.sh creates their own role
   [ -s secrets/db_app_password ] || { cp secrets/postgres_password secrets/db_app_password; chmod 444 secrets/db_app_password; }
+  # the services' ClickHouse account: the admin's until scripts/create-clickhouse-app-user.sh creates their own
+  [ -s secrets/clickhouse_app_password ] || { cp secrets/clickhouse_password secrets/clickhouse_app_password; chmod 444 secrets/clickhouse_app_password; }
   if [ "${#moved[@]}" -gt 0 ]; then
     bak=".env.pre-secrets.$(date -u +%Y%m%dT%H%M%SZ).bak"
     cp -p .env "$bak"; chmod 600 "$bak"
@@ -50,7 +52,7 @@ if [ "$APPLY" = "--apply" ]; then
     grep -Ev "^($pattern)=" .env > .env.tmp && mv .env.tmp .env && chmod 600 .env
     echo "[migrate-secrets] removed from .env: ${moved[*]}  (backup: $bak, mode 600; delete it once the stack is healthy)"
   fi
-  echo "[migrate-secrets] done. Now: docker compose up -d   (then rotate the moved secrets: docs/CREDENTIAL_ROTATION.md)"
+  echo "[migrate-secrets] done. Now: docker compose up -d   (then rotate the moved secrets: security/CREDENTIAL_ROTATION.md)"
 else
   echo "[migrate-secrets] dry run; nothing changed. Re-run with --apply."
 fi

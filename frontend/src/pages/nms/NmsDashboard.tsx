@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { fmtNum } from "../../lib/format";
-import { Card, Empty, Kpi, Sev, TableWrap, Time } from "../../components/ui";
+import { Card, Empty, Kpi, rowProps, Sev, TableWrap, Time } from "../../components/ui";
 import { availTone, fmtAvail, scoreTone } from "./nms";
 
 /** Sentinel NMS landing page: one row per network domain, built from each module's own overview API (no new data
@@ -98,17 +98,33 @@ export function NmsDashboard() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Open network alerts" bodyClass="p-0" right={<Link className="link text-xs" to="/alerts?product=nms">All network alerts →</Link>}>
           {alerts.error ? <Empty text={(alerts.error as Error).message} /> : !alerts.data?.items?.length ? <Empty text="No open network alerts." /> :
-            <TableWrap><table className="tbl"><tbody>{alerts.data.items.map((a: any) => <tr key={a.id} className="cursor-pointer hover:bg-white/5" onClick={() => nav(`/alerts?product=nms&id=${a.id}`)}>
+            <TableWrap><table className="tbl"><tbody>{alerts.data.items.map((a: any) => <tr key={a.id} {...rowProps(() => nav(`/alerts?product=nms&id=${a.id}`))}>
               <td><Sev s={a.severity} /></td><td className="font-medium">{a.name}</td><td className="text-xs text-muted"><Time v={a.last_seen} /></td></tr>)}</tbody></table></TableWrap>}
         </Card>
+        <Anomalies />
         <Card title="Open ISP incidents" bodyClass="p-0" right={<Link className="link text-xs" to="/isp?tab=incidents">All network incidents →</Link>}>
           {incs.error ? <Empty text={(incs.error as Error).message} /> : !incs.data?.items?.length ? <Empty text="No open ISP incidents." /> :
-            <TableWrap><table className="tbl"><tbody>{incs.data.items.map((i: any) => <tr key={i.id} className="cursor-pointer hover:bg-white/5" onClick={() => nav(`/isp?tab=incidents&id=${i.id}`)}>
+            <TableWrap><table className="tbl"><tbody>{incs.data.items.map((i: any) => <tr key={i.id} {...rowProps(() => nav(`/isp?tab=incidents&id=${i.id}`))}>
               <td><Sev s={i.severity} /></td><td className="font-medium">{i.title}</td><td className="text-xs text-muted"><Time v={i.first_seen} /></td></tr>)}</tbody></table></TableWrap>}
         </Card>
       </div>
     </div>
   );
+}
+
+const ANOMALY_RULES = ["wireless_ssid_clients_anomaly", "wireless_ap_zero_clients", "switch_if_util_anomaly"];
+
+/** Open alerts of the seasonal anomaly rules (nms/anomaly.py): observed vs the usual value for this time of the week. */
+function Anomalies() {
+  const nav = useNavigate();
+  const q = useQuery({ queryKey: ["nms-dash", "anomalies"], refetchInterval: 120_000, retry: 1,
+    queryFn: async () => (await Promise.all(ANOMALY_RULES.map((rule_key) => api<any>("/alerts", { params: { rule_key, status: ["new", "investigating"], size: 20 } }))))
+      .flatMap((r) => r.items || []).sort((a: any, b: any) => String(b.last_seen).localeCompare(String(a.last_seen))) });
+  return <Card title="Anomalies (vs the usual for this time of week)" bodyClass="p-0">
+    {q.error ? <Empty text={(q.error as Error).message} /> : !q.data?.length ? <Empty text="Nothing unusual right now. Baselines need 3 weeks of history before they alert." /> :
+      <TableWrap><table className="tbl"><tbody>{q.data.map((a: any) => <tr key={a.id} {...rowProps(() => nav(`/alerts?product=nms&id=${a.id}`))}>
+        <td><Sev s={a.severity} /></td><td className="text-xs">{a.explanation || a.name}</td><td className="text-xs text-muted whitespace-nowrap"><Time v={a.last_seen} /></td></tr>)}</tbody></table></TableWrap>}
+  </Card>;
 }
 
 function useOverview(key: string, path: string, params: Record<string, any> = { range: "24h" }) {

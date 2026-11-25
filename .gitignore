@@ -3,6 +3,8 @@
 .venv/
 node_modules/
 frontend/dist/
+frontend/dist-grid/
+frontend/dist-nms/
 backups/
 deploy/certs/*.key
 deploy/certs/*.crt
@@ -27,6 +29,6 @@ frontend/tsconfig.tsbuildinfo
 # internal findings about this deployment (not excluded from the server copy's own docs)
 docs/SECURITY_AUDIT_REPORT.md
 
-# secret files (docs/SECRET_MANAGEMENT.md): never committed
+# secret files (security/SECRETS_MANAGEMENT.md): never committed
 secrets/
 .env.pre-secrets.*

@@ -4,25 +4,23 @@
 #   ./scripts/deploy.sh --apply    backup on the server, sync, docker compose build, nginx -t, up -d
 #   SKIP_BACKUP=1 ./scripts/deploy.sh --apply    same, without the backup (only right after a completed one)
 # Override the target with DEPLOY_REMOTE=user@host DEPLOY_PATH=/path.
-# The server keeps its own .env, ./secrets, certificates, GeoIP files and backups: they are excluded, so --delete never
-# touches them. Secrets are never copied from here (docs/SECRET_MANAGEMENT.md).
+# Only production files are copied (scripts/deploy-files.rsync). Secrets are never copied from here
+# (security/SECRETS_MANAGEMENT.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REMOTE="${DEPLOY_REMOTE:-siem@10.200.64.58}"
 DEST="${DEPLOY_PATH:-/home/siem/fortisiem}"
-EXCLUDES=(
-  --exclude='.env' --exclude='.env.bak*' --exclude='.env.*.bak' --exclude='/secrets/' --exclude='.git/' --exclude='.github/' --exclude='.venv/' --exclude='node_modules/' --exclude='frontend/dist/' --exclude='backups/'
-  --exclude='.dev/' --exclude='*.db' --exclude='__pycache__/' --exclude='.pytest_cache/' --exclude='.ruff_cache/'
-  --exclude='.claude/' --exclude='.DS_Store' --exclude='frontend/tsconfig.tsbuildinfo'
-  --exclude='deploy/certs/*.key' --exclude='deploy/certs/*.crt' --exclude='deploy/certs/fortigate-ca/*.pem'
-  --exclude='deploy/geoip/*.mmdb' --exclude='docs/SECURITY_AUDIT_REPORT.md'
-)
+# What the server receives: an allowlist (scripts/deploy-files.rsync) of what the stack needs to build and run plus the
+# operational scripts. Docs, tests, CI, Kubernetes manifests and dev / lab tooling are never copied. The server keeps its
+# own .env, ./secrets, backups, certificates and GeoIP files: they are excluded, so --delete never touches them
+# (plain --delete only: never --delete-excluded, see the filter file).
+FILTER=(--filter="merge scripts/deploy-files.rsync")
 SSH=(ssh -n -o BatchMode=yes "$REMOTE")   # -n: remote commands must not swallow the answers piped to the prompts
 
 sync() {  # $1: extra rsync flags
   # shellcheck disable=SC2086
-  rsync -az --delete --itemize-changes $1 "${EXCLUDES[@]}" ./ "$REMOTE:$DEST/"
+  rsync -az --delete --itemize-changes $1 "${FILTER[@]}" ./ "$REMOTE:$DEST/"
 }
 
 if [ "${1:-}" != "--apply" ]; then
@@ -30,6 +28,17 @@ if [ "${1:-}" != "--apply" ]; then
   sync -n
   echo "[deploy] review the list above, then run: ./scripts/deploy.sh --apply"
   exit 0
+fi
+
+# Security gate (security/PRODUCTION_DEPLOYMENT.md): the static container / secrets policy tests must pass before anything
+# leaves this machine: no secret in a service's environment or the images, scoped secret mounts, no privileged or
+# socket-mounting container, no published database port, network segmentation. CI runs the full scanners as well.
+if [ -x .venv/bin/python ]; then
+  (cd backend && ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_secret_files.py >/dev/null) \
+    || { echo "[deploy] container / secrets policy checks failed (cd backend && ../.venv/bin/python -m pytest tests/test_secret_files.py): not deploying" >&2; exit 1; }
+  echo "[deploy] container / secrets policy checks passed"
+else
+  echo "[deploy] WARNING: .venv not found, policy checks skipped (create it as in README, Development)" >&2
 fi
 
 read -r -p "[deploy] sync to $REMOTE:$DEST and restart the SIEM there? type yes: " ok
@@ -63,6 +72,10 @@ sync ""
 # secrets live in ./secrets on the server (file-mounted, never environment variables). First deploy after that change:
 # move them out of the server's .env (scripts/migrate-secrets.sh), with consent.
 SECRET_KEYS='^(POSTGRES_PASSWORD|CLICKHOUSE_PASSWORD|SECRET_KEY|TOKEN_ENCRYPTION_KEY|BOOTSTRAP_ADMIN_PASSWORD|ANTHROPIC_API_KEY)=.'
+# a secret file added by a newer version (e.g. clickhouse_app_password) is derived from the existing ones; never printed
+if "${SSH[@]}" "cd '$DEST' && test -s secrets/token_encryption_key && test -s secrets/db_app_password && ! test -s secrets/clickhouse_app_password"; then
+  "${SSH[@]}" "cd '$DEST' && ./scripts/migrate-secrets.sh --apply" | grep -v ' -> \| keeping ' || true
+fi
 if ! "${SSH[@]}" "cd '$DEST' && test -s secrets/token_encryption_key && test -s secrets/db_app_password"; then
   echo "[deploy] the server has no ./secrets yet: its secrets are still in .env (visible via docker inspect)."
   "${SSH[@]}" "cd '$DEST' && ./scripts/migrate-secrets.sh"
@@ -75,6 +88,8 @@ if "${SSH[@]}" "grep -Eq '$SECRET_KEYS' '$DEST/.env'"; then
   echo "         run on the server: ./scripts/migrate-secrets.sh --apply"
   exit 1
 fi
+# nginx runs as the owner of the TLS key (docker-compose.yml, web.user): record that uid once, never loosen the key's mode
+"${SSH[@]}" "cd '$DEST' && { grep -q '^WEB_UID=' .env || echo \"WEB_UID=\$(stat -c %u deploy/certs/siem.key)\" >> .env; }"
 echo "[deploy] building and restarting"
 # One-time cutover to the syslog ingress: the old syslog container still publishes port 514, so it must release the port
 # before the ingress can bind it. Later deploys leave the ingress running (its image does not change), which is what

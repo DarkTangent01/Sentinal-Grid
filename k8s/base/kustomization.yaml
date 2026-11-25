@@ -1,0 +1,20 @@
+# Sentinel Grid + Sentinel NMS on Kubernetes: everything except per-environment values (k8s/overlays) and Secrets
+# (created out of band, k8s/README.md). Build: kubectl kustomize k8s/overlays/<env>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sentinel
+labels:
+  - pairs: { app.kubernetes.io/managed-by: kustomize }
+resources:
+  - ../namespaces
+  - ../security/service-accounts
+  - ../security/rbac
+  - ../security/network-policies
+  - configmaps/backend-config.yaml
+  - ../storage
+  - ../databases/postgres
+  - ../databases/clickhouse
+  - ../applications/backend
+  - ../applications/frontend
+  - ../applications/integrations
+  - ../ingress

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, Loading, Modal, TableWrap, Tabs, Time } from "../components/ui";
+import { Card, Empty, Loading, Modal, Pager, TableWrap, Tabs, Time } from "../components/ui";
 
 interface Action { type: string; [k: string]: any }
 interface Rule { id?: number; name: string; description: string; enabled: boolean; priority: number; trigger: string; conditions: Record<string, any>;
@@ -122,18 +122,18 @@ function Editor({ r, onClose }: { r: Rule; onClose: () => void }) {
       <Loading q={meta} />
       {m && <div className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-4">
-          <div className="sm:col-span-2"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-          <div><label className="label">Trigger</label><select className="input w-full" value={f.trigger} onChange={(e) => setF({ ...f, trigger: e.target.value })}>
-            {m.triggers.map((t) => <option key={t} value={t}>{TRIGGER_LABEL[t] || t}</option>)}</select></div>
-          <div><label className="label">Order (lower runs first)</label><input type="number" min={0} className="input w-full" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) })} /></div>
-          <div className="sm:col-span-4"><label className="label">Description</label><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
+          <label className="sm:col-span-2 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label className="block min-w-0"><span className="label">Trigger</span><select className="input w-full" value={f.trigger} onChange={(e) => setF({ ...f, trigger: e.target.value })}>
+            {m.triggers.map((t) => <option key={t} value={t}>{TRIGGER_LABEL[t] || t}</option>)}</select></label>
+          <label className="block min-w-0"><span className="label">Order (lower runs first)</span><input type="number" min={0} className="input w-full" value={f.priority} onChange={(e) => setF({ ...f, priority: Number(e.target.value) })} /></label>
+          <label className="sm:col-span-4 block min-w-0"><span className="label">Description</span><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
         </div>
         <fieldset className="border border-line rounded-lg p-3">
           <legend className="text-xs font-semibold px-1">Conditions (all must match; empty = any)</legend>
           <div className="grid gap-3 sm:grid-cols-3">
-            <div><label className="label">Minimum severity</label><select className="input w-full" value={c.min_severity || ""} onChange={(e) => setC("min_severity", e.target.value)}>
-              <option value="">any</option>{SEV.map((s) => <option key={s}>{s}</option>)}</select></div>
-            <div><label className="label">Title contains</label><input className="input w-full" value={c.title_contains || ""} onChange={(e) => setC("title_contains", e.target.value)} /></div>
+            <label className="block min-w-0"><span className="label">Minimum severity</span><select className="input w-full" value={c.min_severity || ""} onChange={(e) => setC("min_severity", e.target.value)}>
+              <option value="">any</option>{SEV.map((s) => <option key={s}>{s}</option>)}</select></label>
+            <label className="block min-w-0"><span className="label">Title contains</span><input className="input w-full" value={c.title_contains || ""} onChange={(e) => setC("title_contains", e.target.value)} /></label>
             <MultiCheck label="Entity type" options={[["ip", "IP"], ["user", "User"], ["firewall", "Firewall"], ["other", "Other"]]} value={c.entity_types} onChange={(v) => setC("entity_types", v)} />
             <MultiCheck label="Detection rule" options={m.rules.map((x) => [x.key, x.name])} value={c.rule_keys} onChange={(v) => setC("rule_keys", v)} />
             <MultiCheck label="ATT&CK tactic" options={m.tactics.map((t) => [t.id, `${t.id} ${t.name}`])} value={c.tactics} onChange={(v) => setC("tactics", v)} />
@@ -221,8 +221,8 @@ function TestModal({ r, onClose }: { r: Rule; onClose: () => void }) {
     <Modal title={`Test: ${r.name}`} onClose={onClose}>
       <p className="text-xs text-muted mb-2">A dry run shows whether the conditions match and what each action would do, without changing anything.</p>
       <div className="flex flex-wrap gap-2 items-end">
-        <div><label className="label">Target</label><select className="input" value={t.target_type} onChange={(e) => setT({ ...t, target_type: e.target.value })}><option value="incident">Incident</option><option value="alert">Alert</option></select></div>
-        <div><label className="label">ID</label><input className="input w-28" inputMode="numeric" value={t.target_id} onChange={(e) => setT({ ...t, target_id: e.target.value.replace(/\D/g, "") })} /></div>
+        <label className="block min-w-0"><span className="label">Target</span><select className="input" value={t.target_type} onChange={(e) => setT({ ...t, target_type: e.target.value })}><option value="incident">Incident</option><option value="alert">Alert</option></select></label>
+        <label className="block min-w-0"><span className="label">ID</span><input className="input w-28" inputMode="numeric" value={t.target_id} onChange={(e) => setT({ ...t, target_id: e.target.value.replace(/\D/g, "") })} /></label>
         <button className="btn" disabled={!t.target_id || m.isPending} onClick={() => m.mutate(false)}>Dry run</button>
         <button className="btn btn-primary" disabled={!t.target_id || m.isPending} onClick={() => confirm("Run the actions for real on this target?") && m.mutate(true)}>Run for real</button>
       </div>
@@ -239,11 +239,9 @@ function Runs() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const q = useQuery({ queryKey: ["automation-runs", page], queryFn: () => api<any>("/automation/runs", { params: { page, size: 50 } }), refetchInterval: 30_000, placeholderData: (p) => p });
-  const pages = q.data ? Math.max(1, Math.ceil(q.data.total / 50)) : 1;
   const STATUS: Record<string, string> = { ok: "bg-emerald-500/15 text-emerald-300", partial: "bg-amber-500/15 text-amber-300", error: "bg-red-500/15 text-red-300" };
   return (
-    <Card title="Run history" right={<><button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button><span className="text-muted text-sm">{page}/{pages}</span>
-      <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>›</button></>}>
+    <Card title="Run history" right={<Pager className="" page={page} size={50} total={q.data?.total} onPage={setPage} />}>
       <Loading q={q} />
       {q.data && !q.data.items.length && <Empty text="No automation runs yet." />}
       {!!q.data?.items.length && <TableWrap><table className="tbl"><thead><tr><th>When</th><th>Rule</th><th>Trigger</th><th>Target</th><th>Status</th><th className="w-full">Results</th></tr></thead>

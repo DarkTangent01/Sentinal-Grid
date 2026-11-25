@@ -1,0 +1,103 @@
+# Representative log lines per parser and the normalized fields each must produce (tests/test_parsers.py).
+# Add a sample here when a new device or format variant shows up: the test fails until the parser handles it.
+# All addresses are documentation ranges (RFC 5737) or private; nothing here is production telemetry.
+- name: zeek conn
+  kind: zeek
+  line: '{"_path":"conn","ts":1794650000.123,"uid":"CHhAvVGS1DHFjwGM9","id.orig_h":"10.20.1.15","id.orig_p":51514,"id.resp_h":"203.0.113.9","id.resp_p":443,"proto":"tcp","service":"ssl","duration":12.4,"orig_bytes":1200,"resp_bytes":48211,"conn_state":"SF","history":"ShADadFf","orig_pkts":14,"resp_pkts":40}'
+  expect: {category: zeek, event_type: zeek, event_subtype: conn, src_ip: 10.20.1.15, dst_ip: 203.0.113.9, dst_port: 443, proto: 6, sent_bytes: 1200, rcvd_bytes: 48211, duration: 12, orig_action: SF, log_id: CHhAvVGS1DHFjwGM9, parser_version: zeek-json-1.0, severity: informational}
+- name: zeek dns
+  kind: zeek
+  line: '{"_path":"dns","ts":"2026-11-14T10:00:00.500000Z","uid":"CHhAvVGS1DHFjwGM9","id.orig_h":"10.20.1.15","id.orig_p":40000,"id.resp_h":"10.20.0.53","id.resp_p":53,"proto":"udp","query":"Updates.Example.COM.","qtype_name":"A","rcode_name":"NOERROR","answers":["198.51.100.7","cdn.example.com"],"rtt":0.012}'
+  expect: {event_subtype: dns, dns_qname: updates.example.com, dns_qtype: A, dns_rcode: NOERROR, dns_resolved: [198.51.100.7], dns_latency_ms: 12.0, proto: 17, log_id: CHhAvVGS1DHFjwGM9}
+- name: zeek http (no _path, inferred from fields)
+  kind: zeek
+  line: '{"ts":1794650001.0,"uid":"C1","id.orig_h":"10.20.1.15","id.orig_p":50000,"id.resp_h":"198.51.100.7","id.resp_p":80,"method":"GET","host":"example.com","uri":"/a?b=1","status_code":200,"user_agent":"curl/8.0","request_body_len":0,"response_body_len":512}'
+  expect: {event_subtype: http, hostname: example.com, url: "example.com/a?b=1", http_method: GET, orig_action: "200", rcvd_bytes: 512}
+- name: zeek ssl with a failed validation
+  kind: zeek
+  line: '{"_path":"ssl","ts":1794650002.0,"uid":"C2","id.orig_h":"10.20.1.15","id.orig_p":50001,"id.resp_h":"198.51.100.8","id.resp_p":443,"version":"TLSv12","cipher":"TLS_AES_128_GCM_SHA256","server_name":"bad.example.net","established":true,"validation_status":"self signed certificate"}'
+  expect: {event_subtype: ssl, hostname: bad.example.net, threat: "certificate validation: self signed certificate", severity: low, action: established}
+- name: zeek x509 self-signed
+  kind: zeek
+  line: '{"_path":"x509","ts":1794650003.0,"fingerprint":"ab12cd34","certificate.subject":"CN=box.local","certificate.issuer":"CN=box.local","certificate.not_valid_after":1900000000.0,"san.dns":["box.local"]}'
+  expect: {event_subtype: x509, threat: self-signed certificate, log_id: ab12cd34, hostname: box.local}
+- name: zeek notice
+  kind: zeek
+  line: '{"_path":"notice","ts":1794650004.0,"uid":"C3","id.orig_h":"10.20.1.99","id.resp_h":"10.20.2.1","id.resp_p":22,"note":"Scan::Port_Scan","msg":"10.20.1.99 scanned at least 15 unique ports of host 10.20.2.1 in 0m5s","sub":"local"}'
+  expect: {event_subtype: notice, threat: "Scan::Port_Scan", severity: medium, src_ip: 10.20.1.99, dst_ip: 10.20.2.1}
+- name: zeek files
+  kind: zeek
+  line: '{"_path":"files","ts":1794650005.0,"fuid":"FQ1","uid":"C4","tx_hosts":["198.51.100.7"],"rx_hosts":["10.20.1.15"],"source":"HTTP","mime_type":"application/x-dosexec","filename":"setup.exe","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","total_bytes":1024}'
+  expect: {event_subtype: files, src_ip: 198.51.100.7, dst_ip: 10.20.1.15, app: HTTP, hostname: setup.exe, log_id: C4}
+- name: zeek dhcp
+  kind: zeek
+  line: '{"_path":"dhcp","ts":1794650006.0,"uids":["C5"],"client_addr":"10.20.3.44","server_addr":"10.20.0.1","mac":"00:11:22:AA:BB:CC","host_name":"LAPTOP-7","assigned_addr":"10.20.3.44","lease_time":86400.0,"msg_types":["REQUEST","ACK"]}'
+  expect: {event_subtype: dhcp, src_ip: 10.20.3.44, src_mac: "00:11:22:aa:bb:cc", src_name: LAPTOP-7}
+- name: zeek ssh failed
+  kind: zeek
+  line: '{"_path":"ssh","ts":1794650007.0,"uid":"C6","id.orig_h":"203.0.113.50","id.orig_p":40022,"id.resp_h":"10.20.5.5","id.resp_p":22,"auth_success":false,"auth_attempts":6,"client":"SSH-2.0-libssh","server":"SSH-2.0-OpenSSH_9.6"}'
+  expect: {event_subtype: ssh, action: logon-fail, src_ip: 203.0.113.50, dst_port: 22}
+- name: zeek weird
+  kind: zeek
+  line: '{"_path":"weird","ts":1794650008.0,"uid":"C7","id.orig_h":"10.20.1.15","id.orig_p":1,"id.resp_h":"10.20.1.16","id.resp_p":2,"name":"bad_TCP_checksum","addl":"","notice":false}'
+  expect: {event_subtype: weird, threat: bad_TCP_checksum, severity: low}
+- name: json ECS authentication failure
+  kind: json
+  line: '{"@timestamp":"2026-11-14T10:00:00Z","event":{"category":"authentication","action":"user_login","outcome":"failure","severity":5},"source":{"ip":"203.0.113.77","port":51000},"user":{"name":"alice"},"host":{"name":"portal-1"},"message":"login failed"}'
+  expect: {category: system, event_type: json, event_subtype: auth, action: logon-fail, user: alice, src_ip: 203.0.113.77, src_port: 51000, hostname: portal-1, severity: medium, msg: login failed}
+- name: json flat traffic
+  kind: json
+  line: '{"time":1794650000,"src_ip":"10.1.1.5","dst_ip":"198.51.100.20","dst_port":8443,"protocol":"tcp","action":"blocked","bytes_sent":10,"level":"warning"}'
+  expect: {category: traffic, action: deny, orig_action: blocked, dst_port: 8443, proto: 6, sent_bytes: 10, severity: medium}
+- name: json AWS CloudTrail console login failure
+  kind: json
+  line: '{"eventTime":"2026-11-14T09:59:00Z","eventSource":"signin.amazonaws.com","eventName":"ConsoleLogin","awsRegion":"ap-south-1","sourceIPAddress":"203.0.113.80","userIdentity":{"type":"IAMUser","userName":"deploy"},"errorMessage":"Failed authentication","eventID":"3f1e"}'
+  expect: {event_subtype: auth, action: logon-fail, user: deploy, src_ip: 203.0.113.80, log_id: 3f1e, orig_action: ConsoleLogin}
+- name: LEEF 1.0 (tab separated)
+  kind: leef
+  line: "<13>Nov 14 10:00:00 qradar-src LEEF:1.0|Vendor|Gateway|2.1|PolicyDeny|src=10.1.1.9\tdst=198.51.100.30\tsrcPort=40000\tdstPort=25\tproto=tcp\taction=deny\tusrName=bob\tsev=7"
+  expect: {category: traffic, event_type: leef, event_subtype: Vendor/Gateway, action: deny, src_ip: 10.1.1.9, dst_port: 25, user: bob, severity: high, log_id: leef-PolicyDeny}
+- name: LEEF 2.0 with a caret delimiter
+  kind: leef
+  line: 'LEEF:2.0|Vendor|Proxy|1.0|AuthFailure|^|src=10.1.1.10^usrName=carol^cat=Authentication^devTime=1794650000'
+  expect: {event_subtype: Vendor/Proxy, action: logon-fail, user: carol, src_ip: 10.1.1.10}
+- name: linux sshd failed password (RFC 3164)
+  kind: linux
+  line: '<38>Nov 14 10:00:01 web-1 sshd[2211]: Failed password for invalid user admin from 203.0.113.90 port 52100 ssh2'
+  expect: {event_type: linux, event_subtype: sshd, action: logon-fail, user: admin, src_ip: 203.0.113.90, src_port: 52100, hostname: web-1, severity: low}
+- name: linux sshd accepted publickey (RFC 5424)
+  kind: linux
+  line: '<38>1 2026-11-14T10:00:02+05:30 web-1 sshd 2212 - - Accepted publickey for deploy from 10.1.1.20 port 40100 ssh2: ED25519 SHA256:abc'
+  expect: {action: logon, user: deploy, src_ip: 10.1.1.20, hostname: web-1}
+- name: linux sudo command
+  kind: linux
+  line: '<85>Nov 14 10:00:03 web-1 sudo:   deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx'
+  expect: {action: sudo, user: deploy, app: "/usr/bin/systemctl restart nginx", event_subtype: sudo}
+- name: linux sudo denied
+  kind: linux
+  line: '<85>Nov 14 10:00:04 web-1 sudo:   mallory : user NOT in sudoers ; TTY=pts/1 ; PWD=/tmp ; USER=root ; COMMAND=/bin/bash'
+  expect: {action: sudo-fail, user: mallory, severity: medium}
+- name: linux message that is not an auth event stays plain syslog with its header
+  kind: linux
+  line: '<30>Nov 14 10:00:05 web-1 systemd[1]: Started Daily apt download activities.'
+  expect: {event_type: syslog, hostname: web-1, app: systemd, msg: "Started Daily apt download activities.", severity: informational}
+- name: juniper commit on a netdev source
+  kind: netdev
+  line: "<189>Nov 14 10:00:06 edge-mx mgd[4411]: UI_COMMIT: User 'netops' requested 'commit' operation (comment: none)"
+  expect: {event_type: netdev, event_subtype: config_change, action: config, user: netops, hostname: edge-mx, log_id: UI_COMMIT, parser_version: junos-1.0}
+- name: juniper bgp state change auto-detected on a plain syslog source
+  kind: syslog
+  line: '<28>Nov 14 10:00:07 edge-mx rpd[2001]: RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 192.0.2.1 (External AS 64500) changed state from Established to Idle (event RecvNotify)'
+  expect: {event_subtype: bgp, src_ip: 192.0.2.1, severity: medium}
+- name: aruba user authentication
+  kind: netdev
+  line: '<141>Nov 14 10:00:08 aruba-mc authmgr[3500]: <522008> <NOTI> <aruba-mc 10.0.0.5>  User Authentication Successful: username=dave MAC=aa:bb:cc:00:11:22 IP=10.30.1.7 role=employee'
+  expect: {event_subtype: login, action: logon, user: dave, src_ip: 10.30.1.7, src_mac: "aa:bb:cc:00:11:22", log_id: aruba-522008, severity: low}
+- name: plain RFC 5424 keeps host, program, msgid and severity
+  kind: syslog
+  line: '<11>1 2026-11-14T10:00:09Z app-7 billing 991 ID47 [meta seq="1"] payment worker crashed'
+  expect: {event_type: syslog, hostname: app-7, app: billing, log_id: ID47, severity: high, msg: payment worker crashed}
+- name: CEF auto-detected on a plain syslog source
+  kind: syslog
+  line: 'CEF:0|Vendor|IDS|1.0|100|Port scan|8|src=10.1.1.30 dst=10.1.2.1 dpt=22 proto=TCP'
+  expect: {event_type: cef, category: security, severity: high, src_ip: 10.1.1.30}

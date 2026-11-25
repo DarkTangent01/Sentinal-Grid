@@ -1,4 +1,4 @@
-"""Re-encrypt every stored credential with the current TOKEN_ENCRYPTION_KEY (docs/CREDENTIAL_ROTATION.md).
+"""Re-encrypt every stored credential with the current TOKEN_ENCRYPTION_KEY (security/CREDENTIAL_ROTATION.md).
 
     1. put the new key in the token_encryption_key secret file and the old one in token_encryption_key_previous
     2. restart the services, then:  python -m app.rotate_keys            (dry run: counts only)
@@ -17,6 +17,7 @@ from sqlalchemy import text
 # (table, primary key, ciphertext column) — every Fernet-encrypted column in the schema
 COLUMNS = [
     ("firewalls", "id", "token_ciphertext"),
+    ("ti_feeds", "id", "auth_ciphertext"),
     ("notification_channels", "id", "secret_ciphertext"),
     ("iac_backups", "id", "full_config_ciphertext"),
     ("switch_credentials", "id", "secret_ciphertext"),

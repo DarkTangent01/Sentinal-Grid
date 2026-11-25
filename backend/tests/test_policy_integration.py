@@ -207,3 +207,131 @@ async def test_server_mode_naive_datetimes_do_not_crash(db, clean_ch, fw):
     u = usage[1]
     assert u["assessment"]["state"] == "in_use" and u["counters"]["hits"] == 30  # 0→10→20 snapshots + 30 from the sync
     assert u["log_coverage_since"].endswith("+00:00")
+
+
+# ------------------------------------------------------------------ policy usage rollup (ClickHouse migration 16)
+def _traffic_at(fw_id, t: datetime, pid, uuid, action="accept", vdom="root", sent=100, rcvd=50, sid=0):
+    from app.ingest.normalize import normalize
+    return normalize({"type": "traffic", "subtype": "forward", "devid": "x", "eventtime": str(int(t.timestamp() * 1e9)), "logid": "13",
+                      "srcip": "10.0.0.5", "dstip": "203.0.113.5", "dstport": "443", "proto": "6", "action": action, "policyid": str(pid),
+                      "poluuid": uuid, "sessionid": str(sid), "vd": vdom, "sentbyte": str(sent), "rcvdbyte": str(rcvd)},
+                     source="syslog", firewall={"id": fw_id, "name": "fw1", "site": "Lab"})
+
+
+def _raw_usage(ch, fw, vdom, t0, t1, extra=""):
+    """The query the assessment ran before the rollup (30 days of raw events): the reference result."""
+    from app.db.ch import ClickHouse  # noqa: F401
+    rows = ch.query(f"""SELECT policy_id, policy_uuid, count() AS n, max(event_time) AS last, min(event_time) AS first,
+                               sum(sent_bytes + rcvd_bytes) AS bytes, countIf(action IN ('deny','block')) AS denied
+                        FROM events WHERE category = 'traffic' AND firewall_id = {{fw:UInt32}} AND (vdom = {{vd:String}} OR vdom = '')
+                          AND event_time >= {{t0:DateTime64(3)}} AND event_time < {{t1:DateTime64(3)}} AND policy_id IS NOT NULL{extra}
+                        GROUP BY policy_id, policy_uuid""", {"fw": fw, "vd": vdom, "t0": t0, "t1": t1})
+    return _norm(rows)
+
+
+def _norm(rows):
+    from app.policy.store import to_utc
+    return {(int(r["policy_id"]), r["policy_uuid"]): (int(r["n"]), int(r["bytes"]), int(r["denied"]), to_utc(r["first"]), to_utc(r["last"]))
+            for r in rows}
+
+
+def _usage_events(fw_id):
+    base = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
+    evs, sid = [], 0
+    for h in range(7):                      # 6 whole hours plus the current one
+        for m in (0, 7, 31, 59):            # including both edges of every hour
+            for pid, uuid, action, vdom in ((1, "u-1", "deny", "root"), (2, "u-2", "accept", "root"), (2, "", "accept", "root"),
+                                            (3, "u-3", "accept", "other")):
+                sid += 1
+                evs.append(_traffic_at(fw_id, base + timedelta(hours=h, minutes=m, seconds=sid % 50, milliseconds=sid * 7 % 1000),
+                                       pid, uuid, action, vdom, sent=sid, rcvd=2 * sid, sid=sid))
+    return base, evs
+
+
+async def test_policy_usage_rollup_equals_the_raw_scan(clean_ch):
+    from app.policy import store as ST
+    ST._seam.clear()
+    """Regression: the assessment scanned 30 days of raw traffic per firewall (up to 550 million rows, 14-60 s, timeouts).
+    Whole hours now come from policy_usage_hourly and the edge hours from raw events: same result, exact to the ms."""
+    from app.db.ch_schema import EVENT_COLUMNS
+    from app.policy.store import policy_usage
+    base, evs = _usage_events(7)
+    clean_ch.insert("events", evs, EVENT_COLUMNS)
+    assert clean_ch.query("SELECT count() AS n FROM policy_usage_hourly")[0]["n"] > 0  # filled by the materialized view
+    windows = [(base, base + timedelta(hours=7)),                                                 # hour-aligned
+               (base + timedelta(minutes=13, seconds=5, milliseconds=321), base + timedelta(hours=5, minutes=40, milliseconds=1)),
+               (base + timedelta(hours=2, minutes=5), base + timedelta(hours=2, minutes=45)),        # shorter than an hour
+               (base + timedelta(hours=1, minutes=59), base + timedelta(hours=2, minutes=1)),        # straddles one boundary
+               (base - timedelta(days=30), datetime.now(timezone.utc) + timedelta(minutes=1))]       # the assessment's window
+    for t0, t1 in windows:
+        got = _norm(await policy_usage(clean_ch, 7, "root", t0, t1))
+        assert got == _raw_usage(clean_ch, 7, "root", t0, t1), (t0, t1)
+    t0, t1 = base + timedelta(minutes=30), base + timedelta(hours=4, minutes=30)
+    got = _norm(await policy_usage(clean_ch, 7, "root", t0, t1, policy_id=2, uuid_empty=True))
+    assert got == _raw_usage(clean_ch, 7, "root", t0, t1, " AND policy_id = 2 AND policy_uuid = ''") and len(got) == 1
+    assert all(k[0] != 3 for k in got)  # other vdom excluded
+
+
+async def test_policy_usage_backfill_copies_rows_ingested_before_the_view(clean_ch):
+    import time as _t
+    from app.db import ch_schema as CS
+    from app.db.ch_schema import EVENT_COLUMNS
+    from app.policy.store import policy_usage
+    from app.policy import store as ST
+    clean_ch.command("DROP VIEW IF EXISTS policy_usage_hourly_mv")
+    base, evs = _usage_events(8)
+    seam_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    clean_ch.insert("events", evs[:60], EVENT_COLUMNS)          # before the view exists: only the backfill can count them
+    in_flight = [e for e in evs[60:] if e["event_time"] >= seam_hour]  # parsed before the view, inserted after it
+    cut = datetime.now(timezone.utc)
+    _t.sleep(0.05)
+    clean_ch.command(CS.POLICY_USAGE_VIEW)
+    clean_ch.insert("events", in_flight, EVENT_COLUMNS)
+    _, late = _usage_events(8)                                   # parsed after the view existed (incl. late, old event times)
+    clean_ch.insert("events", [e for e in late[60:] if e["event_time"] < seam_hour], EVENT_COLUMNS)
+    CS.backfill_policy_usage(clean_ch, cut)
+    ST._seam.clear()
+    t0, t1 = base - timedelta(days=1), datetime.now(timezone.utc) + timedelta(minutes=1)
+    assert _norm(await policy_usage(clean_ch, 8, "root", t0, t1)) == _raw_usage(clean_ch, 8, "root", t0, t1)
+
+
+@respx.mock
+async def test_failed_assessment_keeps_the_sync_and_does_not_crash(db, clean_ch, fw, monkeypatch):
+    """Regression: a ClickHouse timeout in the assessment was caught, but the rollback expired the status row and the
+    next attribute read raised MissingGreenlet: the sync became 'error' (losing policies / counters / analysis) and the
+    worker's policy loop aborted the remaining firewalls."""
+    from app.policy import collector as C
+    mock_fgt([P(1), P(2)], counters=[{"policyid": 1, "uuid": "u-1", "hit_count": 3, "bytes": 30, "packets": 3}])
+
+    async def boom(*a, **kw):
+        raise RuntimeError("Code: 159. Timeout exceeded: elapsed 60 seconds")
+    monkeypatch.setattr(C, "refresh_assessments", boom)
+    st = await sync_firewall(db, clean_ch, fw)
+    assert st.status == "partial" and "Timeout exceeded" in (st.error or "") and st.policies == 2
+    assert "assessment_error" in st.details and st.details.get("analysis_run")
+    assert len((await db.execute(select(FirewallPolicy).where(FirewallPolicy.firewall_id == fw.id))).scalars().all()) == 2
+
+
+async def test_policy_loop_keeps_going_after_one_firewall_fails(db, monkeypatch):
+    import asyncio
+    from app import worker as W
+    from app.policy import collector as C
+    a = Firewall(name="fwa", host="a.test.local", https_port=443, vdom="root", site="Lab", token_ciphertext=TokenCipher().encrypt("t-1234567890"),
+                 tags=[], syslog_source_ips=[], capabilities={}, health={}, api_log_cursor={})
+    b = Firewall(name="fwb", host="b.test.local", https_port=443, vdom="root", site="Lab", token_ciphertext=TokenCipher().encrypt("t-1234567890"),
+                 tags=[], syslog_source_ips=[], capabilities={}, health={}, api_log_cursor={})
+    db.add_all([a, b])
+    await db.commit()
+    stop, seen = asyncio.Event(), []
+
+    async def fake_sync(s, ch, f, vdom=None):
+        seen.append(f.name)
+        if f.name == "fwa":
+            raise RuntimeError("boom")
+        stop.set()
+        from app.db.models import PolicySync
+        return PolicySync(firewall_id=f.id, vdom="root", status="ok", policies=0, counters_supported=False)
+    monkeypatch.setattr(C, "sync_firewall", fake_sync)
+    monkeypatch.setattr(W, "get_ch", lambda: None)
+    await asyncio.wait_for(W.policy_loop(stop), 10)
+    assert seen == ["fwa", "fwb"]  # the failure of fwa did not skip fwb

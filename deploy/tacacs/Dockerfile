@@ -3,7 +3,7 @@
 #
 # Upstream describes tac_plus-ng as work in progress: test in a lab before pointing production devices at it, and keep
 # device-local emergency access configured.
-FROM debian:12.7-slim AS build
+FROM debian:12.15-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS build
 ARG TAC_PLUS_NG_COMMIT=dc3ce306f0a9753c2ae8cb4cc761d8c8a33b7b6b
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git make clang perl libpcre2-dev libssl-dev libc-ares-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -12,20 +12,24 @@ RUN git clone https://github.com/MarcJHuber/event-driven-servers /src && cd /src
     && test -x /usr/local/sbin/tac_plus-ng && ls /usr/local/sbin /usr/local/lib/mavis
 # upstream's install ignores DESTDIR, so it installs into this stage's (otherwise empty) /usr/local, copied below
 
-FROM debian:12.7-slim
+FROM debian:12.15-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
 ARG TAC_PLUS_NG_COMMIT=dc3ce306f0a9753c2ae8cb4cc761d8c8a33b7b6b
 ENV TAC_PLUS_NG_COMMIT=$TAC_PLUS_NG_COMMIT
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 perl libpcre2-8-0 libssl3 libc-ares2 \
-        libnet-ldap-perl libio-socket-ssl-perl libcap2-bin util-linux \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates python3 perl libpcre2-8-0 libssl3 libc-ares2 \
+        libnet-ldap-perl libio-socket-ssl-perl util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10050 tacshare \
     && useradd --system --uid 10003 --gid tacshare --home /nonexistent --shell /usr/sbin/nologin tacacs
 COPY --from=build /usr/local /usr/local
 # bind TCP/49 without running as root
-RUN setcap cap_net_bind_service=+ep /usr/local/sbin/tac_plus-ng && ldconfig
+# no file capability: port 49 is bound through the container's namespaced sysctl net.ipv4.ip_unprivileged_port_start
+# (docker-compose.yml, k8s), so the process needs no privilege and no-new-privileges can stay on
+RUN ldconfig \
+    && mkdir -p /tacacs/config /tacacs/logs && chown tacacs:tacshare /tacacs/config /tacacs/logs && chmod 2770 /tacacs/config /tacacs/logs
 COPY agent.py /opt/tacagent/agent.py
 COPY entrypoint.sh /opt/tacagent/entrypoint.sh
 COPY bootstrap.cfg /opt/tacagent/bootstrap.cfg
 RUN chmod 0555 /opt/tacagent/entrypoint.sh /opt/tacagent/agent.py
+USER 10003:10050
 EXPOSE 49/tcp
 ENTRYPOINT ["/opt/tacagent/entrypoint.sh"]

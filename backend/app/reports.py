@@ -1,22 +1,47 @@
-"""Scheduled HTML reports (printable; emailed through notification channels)."""
+"""Scheduled HTML reports (printable; emailed through notification channels).
+
+Report framework: renders the sections the products register (analytics/report_sections.py for Sentinel Grid,
+nms/report_sections.py for Sentinel NMS); it holds no product sections itself."""
 from __future__ import annotations
 
 import html as h
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .analytics import queries as Q
-from .analytics.filters import EventFilter
-from .analytics.ngen import ti_summary, vpn_summary
-from .compliance import compliance_status
 from .db.ch import ClickHouse
-from .db.models import Alert, Incident, ReportDefinition, ReportRun
+from .db.models import ReportDefinition, ReportRun
 
-SECTIONS = ["summary", "alerts", "incidents", "threats", "threat_intel", "vpn", "policy_hygiene", "compliance", "isp_sla",
-            "firewall_health", "vpn_tunnels", "bgp"]
+SECTIONS: list[str] = []   # filled by the products' registrations, in registration order
+RENDERERS: dict = {}       # section key -> async (s, ch, start, end, sections, summary) -> list of HTML parts
+PRODUCT_OF: dict[str, str] = {}
+PDF_MAX_BYTES = 8 * 1024 * 1024
+
+
+def register(product: str, renderers: dict) -> None:
+    for key, fn in renderers.items():
+        if key not in RENDERERS:
+            SECTIONS.append(key)
+        RENDERERS[key] = fn
+        PRODUCT_OF[key] = product
+
+
+def _no_fetch(url: str, *a, **k):
+    """WeasyPrint URL fetcher: reports are self-contained; nothing (images, fonts, stylesheets) is fetched from anywhere."""
+    raise ValueError(f"external resource refused: {url[:80]}")
+
+
+def pdf_of(doc: str) -> bytes | None:
+    """The report as PDF (WeasyPrint), or None when the PDF engine is unavailable; the HTML report is never blocked by it."""
+    try:
+        from weasyprint import HTML
+        return HTML(string=doc, url_fetcher=_no_fetch).write_pdf()
+    except Exception:
+        import logging
+        logging.getLogger("reports").warning("PDF rendering failed; the report is kept as HTML only", exc_info=True)
+        return None
 
 
 def _fmt(n) -> str:
@@ -35,114 +60,12 @@ def _table(headers: list[str], rows: list[list]) -> str:
 
 
 async def generate(s: AsyncSession, ch: ClickHouse, name: str, start: datetime, end: datetime, sections: list[str]) -> tuple[str, dict]:
-    f = EventFilter(start=start, end=end)
-    parts, summary = [], {}
-    if "summary" in sections:
-        k = await Q.kpis(ch, f)
-        summary["kpis"] = {x: k.get(x) for x in ("traffic_events", "denied_events", "dns_queries", "url_blocks", "security_events", "unique_src")}
-        parts.append("<h2>Summary</h2>" + _table(["Metric", "Value"], [
-            ["Traffic events", _fmt(k.get("traffic_events"))], ["Denied events", _fmt(k.get("denied_events"))],
-            ["Data transferred (bytes)", _fmt(k.get("bytes_total"))], ["DNS queries", _fmt(k.get("dns_queries"))],
-            ["URL filtering blocks", _fmt(k.get("url_blocks"))], ["Security events", _fmt(k.get("security_events"))],
-            ["Unique source IPs", _fmt(k.get("unique_src"))]]))
-    if "alerts" in sections:
-        rows = (await s.execute(select(Alert.rule_key, Alert.name, Alert.severity, func.count(Alert.id)).where(
-            Alert.last_seen >= start, Alert.first_seen < end).group_by(Alert.rule_key, Alert.name, Alert.severity)
-            .order_by(func.count(Alert.id).desc()).limit(25))).all()
-        summary["alerts"] = sum(r[3] for r in rows)
-        parts.append(f"<h2>Alerts ({summary['alerts']})</h2>" + _table(["Detection", "Severity", "Alerts"], [[r[1], r[2], r[3]] for r in rows]))
-    if "incidents" in sections:
-        incs = (await s.execute(select(Incident).where(Incident.category == "security", Incident.last_seen >= start, Incident.first_seen < end)
-                                .order_by(Incident.score.desc()).limit(25))).scalars().all()
-        closed = [i for i in incs if i.resolved_at]
-        mttr = (sum(((i.resolved_at - i.created_at).total_seconds() for i in closed), 0) / len(closed) / 3600) if closed else None
-        summary["incidents"] = {"total": len(incs), "closed": len(closed), "mttr_hours": round(mttr, 1) if mttr else None}
-        parts.append(f"<h2>Incidents ({len(incs)}, closed {len(closed)}{f', MTTR {mttr:.1f} h' if mttr else ''})</h2>" +
-                     _table(["#", "Title", "Severity", "Status", "Alerts", "Tactics"],
-                            [[i.id, i.title, i.severity, i.status, i.alert_count, ", ".join(i.tactics)] for i in incs]))
-    if "threats" in sections:
-        sec = await Q.security_summary(ch, f)
-        parts.append("<h2>Top threats / signatures</h2>" + _table(["Threat", "Type", "Severity", "Events", "Sources"],
-                     [[r["threat"], r["event_subtype"], r["severity"], _fmt(r["events"]), _fmt(r["sources"])] for r in sec["top_threats"][:15]]))
-    if "threat_intel" in sections:
-        ti = await ti_summary(ch, f)
-        summary["ti_events"] = ti["totals"].get("events")
-        parts.append(f"<h2>Threat-intel matches ({_fmt(ti['totals'].get('events', 0))} events)</h2>" + _table(
-            ["Indicator", "Feed", "Category", "Events", "Hosts"],
-            [[r["indicator"], r["feed"], r["category"], _fmt(r["events"]), _fmt(r["hosts"])] for r in ti["indicators"][:20]]))
-    if "vpn" in sections:
-        v = await vpn_summary(ch, f)
-        t = v["totals"]
-        parts.append("<h2>VPN</h2>" + _table(["Logins", "Failures", "Users", "Impossible travel"],
-                     [[_fmt(t.get("logins")), _fmt(t.get("failures")), _fmt(t.get("users")), len(v["impossible_travel"])]]))
-    if "policy_hygiene" in sections:
-        from .api.policies import _rows
-        try:
-            rows = await _rows(s, ch, 30)
-        except Exception:
-            rows = []
-        bad = [r for r in rows if r["assessment"]["state"] in ("potentially_unused", "no_observed_hits") or r["analysis"].get("worst")]
-        parts.append(f"<h2>Firewall policy hygiene (30-day window, {len(rows)} policies)</h2>" + _table(
-            ["Firewall", "Policy", "Name", "Usage", "Shadow", "Logging"],
-            [[r["firewall"], r["policyid"], r["name"], r["assessment"]["state"], r["analysis"].get("worst") or "—", r["logtraffic"]] for r in bad[:40]]))
-    if "compliance" in sections:
-        c = await compliance_status(s)
-        summary["compliance"] = c["counts"]
-        parts.append("<h2>Compliance evidence</h2>" + _table(["Framework", "Control", "Status"],
-                     [[fw["framework"], f"{x['id']} {x['title']}", x["status"]] for fw in c["frameworks"] for x in fw["controls"]]) +
-                     f"<p class='muted'>{h.escape(c['disclaimer'])}</p>")
-    if "isp_sla" in sections:
-        from .isp import report as isp_report
-        r = await isp_report(ch, s, start, end)
-        summary["isp"] = [{"isp": i["isp_name"], "availability": i["availability"], "outages": i["outages"], "sla_met": i["sla_met"]} for i in r["isps"]]
-
-        def d(sec):
-            return f"{sec / 3600:.1f} h" if sec >= 3600 else f"{sec / 60:.0f} min" if sec else "0"
-        parts.append("<h2>ISP availability vs SLA</h2>" + _table(
-            ["Provider", "Sites", "Availability", "Target", "SLA", "Outages", "Downtime", "Longest", "MTTR", "Latency ms", "Loss %", "SLA breaches"],
-            [[i["isp_name"], ", ".join(i["sites"]), f"{i['availability']:.3f}%" if i["availability"] is not None else "—", f"{i['target_availability']}%",
-              "met" if i["sla_met"] else "MISSED", i["outages"], d(i["downtime_s"]), d(i["longest_s"]), d(i["mttr_s"]),
-              i["latency_ms"] if i["latency_ms"] is not None else "—", i["packet_loss_pct"] if i["packet_loss_pct"] is not None else "—",
-              i["sla_breach_total"]] for i in r["isps"]]) +
-            "<h3 style='font-size:13px'>Outage log</h3>" + _table(["Provider", "Firewall", "Interface", "Start (UTC)", "End (UTC)", "Minutes"],
-            [[o["isp_name"], o["firewall_name"], o["interface"], o["start"][:19].replace("T", " "), o["end"][:19].replace("T", " "),
-              round(o["duration_s"] / 60, 1)] for o in r["timeline"]]))
-    if "firewall_health" in sections:
-        from .fwhealth import overview as fw_overview
-        o = await fw_overview(ch, s, start, end)
-        parts.append("<h2>Firewall health</h2>" + _table(
-            ["Firewall", "Member", "CPU avg / max", "Memory avg / max", "Sessions max", "Reboots", "FortiAnalyzer disconnects", "Log-feed gaps now"],
-            [[f["firewall_name"], m["member"], f"{m['cpu_stats']['avg']} / {m['cpu_stats']['max']}", f"{m['mem_stats']['avg']} / {m['mem_stats']['max']}",
-              _fmt(m["sessions_stats"]["max"]), sum(1 for b in f["reboots"] if b["member"] == m["member"]), (f["faz"] or {}).get("disconnects", 0),
-              ", ".join(f["feed_gaps"]) or "none"] for f in o["firewalls"] for m in f["members"]]))
-    if "vpn_tunnels" in sections:
-        from .vpnmon import overview as vpn_overview
-        v = await vpn_overview(ch, start, end)
-        parts.append("<h2>Site-to-site VPN tunnels</h2>" + _table(
-            ["Firewall", "Tunnel", "Peer", "Availability", "Down events", "Downtime (min)", "Status at end"],
-            [[t["firewall_name"], t["tunnel"], t["remote_ip"], f"{t['availability']:.3f}%" if t["availability"] is not None else "—", t["downs"],
-              round(t["downtime_s"] / 60, 1), t["status"]] for t in v["tunnels"]]) +
-            f"<p class='muted'>{_fmt(v['totals']['phase1_errors'])} IKE phase-1 failures from {v['totals']['failing_peers']} peer(s).</p>")
-    if "bgp" in sections:
-        from .bgp import report as bgp_report
-        from .bgp import audit_report as bgp_audit
-
-        def dur(sec):
-            return "—" if sec is None else f"{sec / 3600:.1f} h" if sec >= 3600 else f"{sec / 60:.0f} min"
-        r = await bgp_report(ch, s, start, end, correlate=True)
-        drops = [d for x in r["peers"] for d in x["down_periods"]]
-        verdicts: dict = {}
-        for d in drops:
-            verdicts[d.get("verdict") or "unknown"] = verdicts.get(d.get("verdict") or "unknown", 0) + 1
-        a = await bgp_audit(s)
-        summary["bgp"] = {"neighbors": r["totals"]["peers"], "drops": r["totals"]["flaps"], "down_at_end": r["totals"]["down"]}
-        parts.append("<h2>BGP neighbors</h2>" + _table(
-            ["Firewall", "Neighbor", "Tunnel", "Availability", "Drops", "Downtime", "MTBF", "MTTR", "Longest", "Status at end"],
-            [[x["firewall_name"], x["peer"], x["interface"] or "—", f"{x['availability']:.3f}%" if x["availability"] is not None else "—", x["flaps"],
-              dur(x["downtime_s"]), dur(x["mtbf_s"]), dur(x["mttr_s"]), dur(x["longest_s"]), x["status"]] for x in r["peers"]]) +
-            "<h3 style='font-size:13px'>Likely causes of neighbor drops</h3>" +
-            _table(["Cause", "Drops"], [[k, v] for k, v in sorted(verdicts.items(), key=lambda kv: -kv[1])]) +
-            f"<p class='muted'>Configuration audit: {', '.join(f'{v} {k}' for k, v in a['by_severity'].items()) or 'no findings'}.</p>")
+    parts, summary, done = [], {}, set()
+    for key in SECTIONS:   # registration order; a renderer shared by several keys runs once
+        fn = RENDERERS[key]
+        if key in sections and fn not in done:
+            done.add(fn)
+            parts += await fn(s, ch, start, end, sections, summary)
     doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>{h.escape(name)}</title><style>
 body{{font:13px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;margin:24px;max-width:1000px}}
 h1{{font-size:20px;margin:0}} h2{{font-size:15px;margin:22px 0 6px;border-bottom:1px solid #e2e8f0;padding-bottom:4px}}
@@ -157,7 +80,8 @@ async def run_definition(s: AsyncSession, ch: ClickHouse, d: ReportDefinition, n
     now = now or datetime.now(timezone.utc)
     start, end = period_window(d.period, now)
     html_doc, summary = await generate(s, ch, d.name, start, end, d.sections or SECTIONS)
-    run = ReportRun(definition_id=d.id, name=d.name, generated_at=now, period_start=start, period_end=end, html=html_doc, summary=summary)
+    pdf = pdf_of(html_doc)
+    run = ReportRun(definition_id=d.id, name=d.name, generated_at=now, period_start=start, period_end=end, html=html_doc, summary=summary, pdf=pdf)
     s.add(run)
     d.last_run = now
     await s.flush()
@@ -165,7 +89,10 @@ async def run_definition(s: AsyncSession, ch: ClickHouse, d: ReportDefinition, n
         from .notify import _link, enqueue
         await enqueue(s, "report.ready", {"title": f"Report: {d.name}", "subject": f"Sentinel Grid report: {d.name}",
                                           "text": f"{d.period.title()} report generated.", "html": html_doc,
-                                          "url": _link(f"/api/reports/runs/{run.id}.html")},
+                                          "url": _link(f"/api/reports/runs/{run.id}.html"),
+                                          **({"attachments": [{"filename": f"{d.name}-{now:%Y%m%d}.pdf".replace("/", "_"), "mime": "application/pdf",
+                                                               "content_b64": __import__("base64").b64encode(pdf).decode()}]}
+                                             if pdf and len(pdf) <= PDF_MAX_BYTES else {})},
                       severity="informational", dedupe_key=f"report:{run.id}", channel_ids=list(d.channel_ids))
     await s.commit()
     return run
@@ -192,10 +119,24 @@ def is_due(d: ReportDefinition, now: datetime) -> bool:
     return last is None or now - last >= gap
 
 
-async def run_due(s: AsyncSession, ch: ClickHouse, now: datetime | None = None) -> dict:
+def runs_here(d: ReportDefinition, product: str) -> bool:
+    """Which product process runs a definition when the products run apart (until definitions are split per product,
+    phase 6): Sentinel NMS runs definitions made only of NMS sections; Sentinel Grid runs every other definition (with a
+    mix, the NMS sections are left out of the Grid report). A process only knows its own product's sections, so each
+    side decides from the sections it registered."""
+    secs = d.sections or []
+    if product == "nms":
+        return bool(secs) and all(PRODUCT_OF.get(x) == "nms" for x in secs)
+    return not secs or any(PRODUCT_OF.get(x) == "grid" for x in secs)
+
+
+async def run_due(s: AsyncSession, ch: ClickHouse, now: datetime | None = None, product: str | None = None) -> dict:
+    """product: run only that product's definitions (runs_here); None runs all (combined deployment)."""
     now = now or datetime.now(timezone.utc)
     out = {}
     for d in (await s.execute(select(ReportDefinition).where(ReportDefinition.enabled.is_(True)))).scalars().all():
+        if product and not runs_here(d, product):
+            continue
         if is_due(d, now):
             out[d.name] = (await run_definition(s, ch, d, now)).id
     return out

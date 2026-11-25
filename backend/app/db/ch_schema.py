@@ -1,5 +1,7 @@
 """Versioned ClickHouse migrations (applied by `python -m app.migrate`)."""
 import logging
+import re
+from datetime import datetime, timezone
 
 from .ch import ClickHouse
 
@@ -34,6 +36,109 @@ def _backfill_rollup(ch: ClickHouse) -> None:
         GROUP BY minute, category, firewall_id, site, action, source""")
 
 
+POLICY_USAGE_SELECT = """
+    SELECT toStartOfHour(event_time) AS hour, firewall_id, vdom, assumeNotNull(policy_id) AS policy_id, policy_uuid,
+           count() AS n, sum(sent_bytes + rcvd_bytes) AS bytes, countIf(action IN ('deny', 'block')) AS denied,
+           min(event_time) AS first, max(event_time) AS last
+    FROM events WHERE category = 'traffic' AND policy_id IS NOT NULL"""
+POLICY_USAGE_GROUP = " GROUP BY hour, firewall_id, vdom, policy_id, policy_uuid"
+
+
+def policy_usage_seam(ch: ClickHouse):
+    """The hour in which policy_usage_hourly_mv was created. Rows ingested in that hour may be in the view, the backfill
+    or neither (a batch parsed before the view existed but inserted after it), so readers always take that one hour from
+    raw events; every other hour is exact in the rollup. None when the view does not exist."""
+    c = _view_created("policy_usage_hourly_mv", ch)
+    return c.replace(minute=0, second=0, microsecond=0) if c else None
+
+
+def _view_created(name: str, ch: ClickHouse):
+    """Creation time of a view as aware UTC. Read as a Unix timestamp: metadata_modification_time is a DateTime in the
+    server's time zone, which made the cut-off hours off on a server that is not on UTC."""
+    r = ch.query("SELECT toUnixTimestamp(max(metadata_modification_time)) AS c, count() AS n FROM system.tables "
+                 "WHERE database = currentDatabase() AND name = {n:String}", {"n": name})
+    if not r or not int(r[0]["n"]):
+        return None
+    return datetime.fromtimestamp(int(r[0]["c"]), timezone.utc)
+
+
+POLICY_USAGE_VIEW = "CREATE MATERIALIZED VIEW IF NOT EXISTS policy_usage_hourly_mv TO policy_usage_hourly AS" + POLICY_USAGE_SELECT + POLICY_USAGE_GROUP
+
+
+def _create_policy_usage_view(ch: ClickHouse) -> None:
+    """Create the view, then backfill with a cut-off taken (to the millisecond) just before it existed. Restartable: a
+    run that failed half-way (the migration is recorded only on success) starts again from an empty rollup."""
+    ch.command("DROP VIEW IF EXISTS policy_usage_hourly_mv")
+    ch.command("TRUNCATE TABLE IF EXISTS policy_usage_hourly")
+    cut = ch.query("SELECT toUnixTimestamp64Milli(now64(3)) AS c")[0]["c"]
+    ch.command(POLICY_USAGE_VIEW)
+    backfill_policy_usage(ch, datetime.fromtimestamp(int(cut) / 1000, timezone.utc))
+
+
+def backfill_policy_usage(ch: ClickHouse, cut: datetime) -> None:
+    """Copy traffic logs from before the seam hour (see policy_usage_seam), one day at a time: a 30-day pass over raw
+    events is what timed out; one day of the busiest firewall takes about 1.5 s, well inside the client's 60 s limit.
+    Only rows parsed before `cut` (the view's creation): later ones, including late arrivals for old hours, are the
+    view's."""
+    seam = policy_usage_seam(ch)
+    # days from the partition list (events are partitioned by (category, day)): no scan of the raw rows
+    try:
+        parts = ch.query("SELECT DISTINCT partition AS p FROM system.parts WHERE database = currentDatabase() AND table = 'events' AND active")
+        days = sorted({f"{m[1][:4]}-{m[1][4:6]}-{m[1][6:]}" for r in parts if (m := re.match(r"^\('traffic',\s*(\d{8})\)$", str(r["p"])))})
+    except Exception:  # an engine without system.parts: ask the table
+        days = [str(r["d"]) for r in ch.query("SELECT DISTINCT toDate(event_time) AS d FROM events WHERE category = 'traffic' ORDER BY d")]
+    days = [d for d in days if d <= seam.date().isoformat()]
+    for d in days:
+        ch.command("INSERT INTO policy_usage_hourly" + POLICY_USAGE_SELECT +
+                   " AND toDate(event_time) = {d:Date} AND event_time < {seam:DateTime64(3)} AND ingest_time < {c:DateTime64(3)}"
+                   + POLICY_USAGE_GROUP, {"d": d, "seam": seam, "c": cut})
+    log.info("policy usage rollup backfilled for %d day(s) before %s", len(days), seam.isoformat())
+
+
+def view_seam(ch: ClickHouse, view: str):
+    """The hour in which a rollup's materialized view was created (see policy_usage_seam): readers take that hour from
+    raw events. None when the view does not exist (then readers use raw events only)."""
+    c = _view_created(view, ch)
+    return c.replace(minute=0, second=0, microsecond=0) if c else None
+
+
+def _traffic_days(ch: ClickHouse) -> list[str]:
+    """Days that hold traffic, from the partition list (events are partitioned by (category, day)): no row scan."""
+    try:
+        parts = ch.query("SELECT DISTINCT partition AS p FROM system.parts WHERE database = currentDatabase() AND table = 'events' AND active")
+        return sorted({f"{m[1][:4]}-{m[1][4:6]}-{m[1][6:]}" for r in parts if (m := re.match(r"^\('traffic',\s*(\d{8})\)$", str(r["p"])))})
+    except Exception:  # an engine without system.parts: ask the table
+        return [str(r["d"]) for r in ch.query("SELECT DISTINCT toDate(event_time) AS d FROM events WHERE category = 'traffic' ORDER BY d")]
+
+
+def _rollup_creator(view: str, table: str, select: str, group: str):
+    """Migration step for an hourly traffic rollup: create the view with a millisecond cut-off, then backfill the
+    hours before its seam hour one day at a time (each day well inside the client's 60 s limit). Restartable."""
+    def create(ch: ClickHouse) -> None:
+        ch.command(f"DROP VIEW IF EXISTS {view}")
+        ch.command(f"TRUNCATE TABLE IF EXISTS {table}")
+        cut = datetime.fromtimestamp(int(ch.query("SELECT toUnixTimestamp64Milli(now64(3)) AS c")[0]["c"]) / 1000, timezone.utc)
+        ch.command(f"CREATE MATERIALIZED VIEW IF NOT EXISTS {view} TO {table} AS" + select + group)
+        seam = view_seam(ch, view)
+        days = [d for d in _traffic_days(ch) if d <= seam.date().isoformat()]
+        for d in days:
+            ch.command(f"INSERT INTO {table}" + select + " AND toDate(event_time) = {d:Date} AND event_time < {seam:DateTime64(3)}"
+                       " AND ingest_time < {c:DateTime64(3)}" + group, {"d": d, "seam": seam, "c": cut})
+        log.info("%s backfilled for %d day(s) before %s", table, len(days), seam.isoformat())
+    return create
+
+
+# baselines of the "first seen" alert rules (new_country, new_port): they rescanned 30 days of raw traffic every pass
+# (1.28 billion and 579 million rows). Distinct values per hour; duplicates within an hour collapse on merge.
+COUNTRY_HOURLY_SELECT = """
+    SELECT toStartOfHour(event_time) AS hour, dst_country FROM events WHERE category = 'traffic' AND dst_country != ''"""
+COUNTRY_HOURLY_GROUP = " GROUP BY hour, dst_country"
+PORT_HOURLY_SELECT = """
+    SELECT toStartOfHour(event_time) AS hour, src_ip, assumeNotNull(dst_port) AS dst_port FROM events
+    WHERE category = 'traffic' AND dst_port IS NOT NULL AND src_ip != ''"""
+PORT_HOURLY_GROUP = " GROUP BY hour, src_ip, dst_port"
+
+
 def _backfill_src_hourly(ch: ClickHouse) -> None:
     """Seed 14 days of per-source history from events ingested before the view existed (same cut-off approach as v4)."""
     cut = ch.query("SELECT max(metadata_modification_time) AS c FROM system.tables "
@@ -44,6 +149,28 @@ def _backfill_src_hourly(ch: ClickHouse) -> None:
         FROM events WHERE category = 'traffic' AND src_ip != '' AND event_time >= now() - INTERVAL 14 DAY
           AND ingest_time < toDateTime64('{cut}', 3, 'UTC')
         GROUP BY hour, firewall_id, src_ip""")
+
+
+_CONV_SELECT = """
+    SELECT toStartOfHour(ts) AS hour, exporter, src_ip, dst_ip, proto,
+           if(src_port != 0 AND (dst_port = 0 OR src_port < dst_port), src_port, dst_port) AS port, toUInt8(dst_port = port) AS server_is_dst,
+           vlan, l7,
+           sum(bytes) AS bytes, sum(packets) AS packets, count() AS flows,
+           countIf(proto = 6 AND bitAnd(tcp_flags, 18) = 2) AS syn_flows, max(sampling) AS sampling, min(ts) AS first, max(ts) AS last
+    FROM flows {where} GROUP BY hour, exporter, src_ip, dst_ip, proto, port, server_is_dst, vlan, l7"""
+
+
+def _conv_view_and_backfill(ch: ClickHouse) -> None:
+    """The view first, then the records stored before it (up to the moment the view was created): none counted twice."""
+    from datetime import datetime, timezone
+    existed = ch.query("SELECT count() AS n FROM system.tables WHERE database = currentDatabase() AND name = 'flows_conv_hourly_mv'")
+    if existed and int(existed[0]["n"]):
+        return                       # a retried migration: the view already feeds the rollup, a second backfill would double-count
+    t = datetime.now(timezone.utc).replace(microsecond=0)
+    ch.command("CREATE MATERIALIZED VIEW IF NOT EXISTS flows_conv_hourly_mv TO flows_conv_hourly AS " + _CONV_SELECT.format(where=""))
+    ch.command("INSERT INTO flows_conv_hourly " + _CONV_SELECT.format(
+        where="WHERE ts < {t:DateTime64(3)} AND ts >= {t:DateTime64(3)} - INTERVAL 35 DAY"), {"t": t})
+
 
 
 MIGRATIONS: list[tuple[int, str, list]] = [
@@ -539,6 +666,226 @@ MIGRATIONS: list[tuple[int, str, list]] = [
         ORDER BY (switch_id, ts)
         TTL ts + INTERVAL 180 DAY
         """,
+    ]),
+    (16, "policy usage per hour: policy-usage assessment reads this instead of 30 days of raw traffic logs", [
+        # the assessment query scanned up to 550 million raw rows per firewall every few minutes and hit the 60 s limit
+        """
+        CREATE TABLE IF NOT EXISTS policy_usage_hourly (
+            hour DateTime('UTC'),
+            firewall_id UInt32,
+            vdom LowCardinality(String),
+            policy_id UInt32,
+            policy_uuid String,
+            n SimpleAggregateFunction(sum, UInt64),
+            bytes SimpleAggregateFunction(sum, UInt64),
+            denied SimpleAggregateFunction(sum, UInt64),
+            first SimpleAggregateFunction(min, DateTime64(3, 'UTC')),
+            last SimpleAggregateFunction(max, DateTime64(3, 'UTC'))
+        ) ENGINE = AggregatingMergeTree
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (firewall_id, vdom, policy_id, policy_uuid, hour)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        _create_policy_usage_view,
+    ]),
+    (17, "first-seen baselines per hour: destination countries and (source, destination port) of traffic", [
+        """
+        CREATE TABLE IF NOT EXISTS traffic_country_hourly (
+            hour DateTime('UTC'),
+            dst_country LowCardinality(String)
+        ) ENGINE = ReplacingMergeTree
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (hour, dst_country)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS traffic_port_hourly (
+            hour DateTime('UTC'),
+            src_ip String,
+            dst_port UInt16
+        ) ENGINE = ReplacingMergeTree
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (src_ip, dst_port, hour)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        _rollup_creator("traffic_country_hourly_mv", "traffic_country_hourly", COUNTRY_HOURLY_SELECT, COUNTRY_HOURLY_GROUP),
+        _rollup_creator("traffic_port_hourly_mv", "traffic_port_hourly", PORT_HOURLY_SELECT, PORT_HOURLY_GROUP),
+    ]),
+    (18, "wireless client history: association events and 30-minute client rollups (unique clients, 5-minute concurrency)", [
+        # one row per client association change detected by the poller (connect / disconnect / roam / band_change /
+        # ssid_change). ReplacingMergeTree: a repeated insert of the same change collapses on merge (and under FINAL).
+        """
+        CREATE TABLE IF NOT EXISTS wireless_client_events (
+            ts DateTime64(3, 'UTC'),
+            wlc_id UInt32,
+            mac String,
+            kind LowCardinality(String),
+            session_id UInt64 DEFAULT 0,
+            ssid LowCardinality(String) DEFAULT '',
+            ap_id UInt32 DEFAULT 0,
+            from_ap_id UInt32 DEFAULT 0,
+            band LowCardinality(String) DEFAULT '',
+            from_band LowCardinality(String) DEFAULT '',
+            from_ssid LowCardinality(String) DEFAULT '',
+            vlan UInt32 DEFAULT 0,
+            reason LowCardinality(String) DEFAULT '',
+            precision LowCardinality(String) DEFAULT ''
+        ) ENGINE = ReplacingMergeTree
+        PARTITION BY toYYYYMM(ts)
+        ORDER BY (wlc_id, kind, ts, mac)
+        TTL toDateTime(ts) + INTERVAL 400 DAY
+        """,
+        # 30-minute slots (a whole number of slots per day in every whole- and half-hour timezone, e.g. UTC+05:30).
+        # clients: the set of client MACs seen in the slot; conc: {5-minute bucket: clients}, each client counted once per
+        # bucket on the AP / SSID / band where it was last seen, so merging rows of any filter sums to exact concurrency.
+        # Rebuilt for recent slots by the aggregation job (higher version wins).
+        """
+        CREATE TABLE IF NOT EXISTS wireless_client_slots (
+            slot DateTime('UTC'),
+            wlc_id UInt32,
+            ssid LowCardinality(String),
+            ap_id UInt32,
+            band LowCardinality(String),
+            clients AggregateFunction(uniqExact, String),
+            conc AggregateFunction(sumMap, Array(DateTime('UTC')), Array(UInt64)),
+            version UInt64
+        ) ENGINE = ReplacingMergeTree(version)
+        PARTITION BY toYYYYMM(slot)
+        ORDER BY (slot, wlc_id, ssid, ap_id, band)
+        TTL slot + INTERVAL 400 DAY
+        """,
+    ]),
+    (19, "flow records (NetFlow / IPFIX / sFlow) and hourly rollups per interface / service and per talker pair", [
+        """
+        CREATE TABLE IF NOT EXISTS flows (
+            ts DateTime('UTC'),
+            exporter LowCardinality(String),
+            device_id UInt32,
+            version LowCardinality(String),
+            in_if UInt32,
+            out_if UInt32,
+            src_ip String,
+            dst_ip String,
+            src_port UInt16,
+            dst_port UInt16,
+            proto UInt8,
+            bytes UInt64,
+            packets UInt64,
+            vlan UInt16,
+            sampling UInt32
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (exporter, ts)
+        TTL ts + INTERVAL 30 DAY
+        """,
+        # service port: the lower non-zero port of the two (the server side for almost all TCP / UDP services)
+        """
+        CREATE TABLE IF NOT EXISTS flows_if_hourly (
+            hour DateTime('UTC'),
+            exporter LowCardinality(String),
+            device_id UInt32,
+            in_if UInt32,
+            out_if UInt32,
+            vlan UInt16,
+            proto UInt8,
+            port UInt16,
+            bytes UInt64,
+            packets UInt64,
+            flows UInt64
+        ) ENGINE = SummingMergeTree((bytes, packets, flows))
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (hour, exporter, device_id, in_if, out_if, vlan, proto, port)
+        TTL hour + INTERVAL 400 DAY
+        """,
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS flows_if_hourly_mv TO flows_if_hourly AS
+        SELECT toStartOfHour(ts) AS hour, exporter, device_id, in_if, out_if, vlan, proto,
+               if(src_port != 0 AND (dst_port = 0 OR src_port < dst_port), src_port, dst_port) AS port,
+               sum(bytes) AS bytes, sum(packets) AS packets, count() AS flows
+        FROM flows GROUP BY hour, exporter, device_id, in_if, out_if, vlan, proto, port
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS flows_talkers_hourly (
+            hour DateTime('UTC'),
+            exporter LowCardinality(String),
+            src_ip String,
+            dst_ip String,
+            bytes UInt64,
+            packets UInt64,
+            flows UInt64
+        ) ENGINE = SummingMergeTree((bytes, packets, flows))
+        PARTITION BY toYYYYMM(hour)
+        ORDER BY (hour, exporter, src_ip, dst_ip)
+        TTL hour + INTERVAL 90 DAY
+        """,
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS flows_talkers_hourly_mv TO flows_talkers_hourly AS
+        SELECT toStartOfHour(ts) AS hour, exporter, src_ip, dst_ip, sum(bytes) AS bytes, sum(packets) AS packets, count() AS flows
+        FROM flows GROUP BY hour, exporter, src_ip, dst_ip
+        """,
+    ]),
+    (20, "NMS self-monitoring: each worker / poller process's own health figures, once a minute", [
+        """
+        CREATE TABLE IF NOT EXISTS nms_self_metrics (
+            ts DateTime('UTC'),
+            service LowCardinality(String),
+            instance LowCardinality(String),
+            metric LowCardinality(String),
+            value Float64
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (service, instance, metric, ts)
+        TTL ts + INTERVAL 30 DAY
+        """,
+    ]),
+    (21, "ingestion accounting: what was not stored as an event, per sender and reason (rejects, duplicates, bad timestamps)", [
+        """
+        CREATE TABLE IF NOT EXISTS ingest_rejects (
+            ts DateTime('UTC'),
+            reason LowCardinality(String),
+            sender String,
+            source_name LowCardinality(String),
+            transport LowCardinality(String),
+            count UInt32,
+            sample String CODEC(ZSTD(3))
+        ) ENGINE = MergeTree
+        PARTITION BY toYYYYMMDD(ts)
+        ORDER BY (reason, sender, ts)
+        TTL ts + INTERVAL 30 DAY
+        """,
+    ]),
+    (22, "application & protocol intelligence: MACs, TCP flags and destination VLAN on flow records, hourly conversations", [
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS src_mac String DEFAULT ''",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS dst_mac String DEFAULT ''",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS tcp_flags UInt8 DEFAULT 0",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS dst_vlan UInt16 DEFAULT 0",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS l7 LowCardinality(String) DEFAULT ''",
+        # one row per hour, exporter, conversation (source, destination, protocol, service port) and VLAN; first / last
+        # observed and the largest sampling rate are kept, so sampled estimates stay distinguishable from exact counts
+        """
+        CREATE TABLE IF NOT EXISTS flows_conv_hourly (
+            hour DateTime('UTC'),
+            exporter LowCardinality(String),
+            src_ip String,
+            dst_ip String,
+            proto UInt8,
+            port UInt16,
+            server_is_dst UInt8,
+            vlan UInt16,
+            l7 LowCardinality(String),
+            bytes SimpleAggregateFunction(sum, UInt64),
+            packets SimpleAggregateFunction(sum, UInt64),
+            flows SimpleAggregateFunction(sum, UInt64),
+            syn_flows SimpleAggregateFunction(sum, UInt64),
+            sampling SimpleAggregateFunction(max, UInt32),
+            first SimpleAggregateFunction(min, DateTime('UTC')),
+            last SimpleAggregateFunction(max, DateTime('UTC'))
+        ) ENGINE = AggregatingMergeTree
+        PARTITION BY toYYYYMMDD(hour)
+        ORDER BY (hour, src_ip, dst_ip, proto, port, server_is_dst, exporter, vlan, l7)
+        TTL hour + INTERVAL 35 DAY
+        """,
+        _conv_view_and_backfill,
     ]),
 ]
 

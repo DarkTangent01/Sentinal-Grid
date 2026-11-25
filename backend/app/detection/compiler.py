@@ -118,44 +118,60 @@ def compile_rule(rule: Rule, *, t0: datetime, t1: datetime, cidrs: list[str], th
     p.values.update(source_params or {})
     cidrs_ref = p.add(list(cidrs), "Array(String)")
     d, c = rule.detection, rule.detection.condition
-    where = [f"`category` = {p.add(rule.log_source.category, 'String')}",
-             f"`event_time` >= {p.add(t0, 'DateTime64(3)')}",
-             f"`event_time` < {p.add(t1, 'DateTime64(3)')}"]
+    where = [f"`event_time` >= {p.add(t0, 'DateTime64(3)')}", f"`event_time` < {p.add(t1, 'DateTime64(3)')}"]
+    a = [f"`category` = {p.add(rule.log_source.category, 'String')}"]      # what the condition counts
     if rule.log_source.event_type:
-        where.append(f"`event_type` = {p.add(rule.log_source.event_type, 'String')}")
+        a.append(f"`event_type` = {p.add(rule.log_source.event_type, 'String')}")
     sel = _block(d.selection, p, cidrs_ref)
     if sel:
-        where.append(sel)
+        a.append(sel)
     flt = _block(d.filter, p, cidrs_ref)
     if flt:
-        where.append(f"NOT {flt}")
+        a.append(f"NOT {flt}")
     for fname, vals in rule.allowlist.items():
         if fname in IP_FIELDS:
             nets = [str(v) for v in vals]
-            where.append(f"NOT arrayExists(c -> isIPAddressInRange({_ipexpr(_col(fname))}, c), {p.add(nets, 'Array(String)')})")
+            a.append(f"NOT arrayExists(c -> isIPAddressInRange({_ipexpr(_col(fname))}, c), {p.add(nets, 'Array(String)')})")
         else:
-            where.append(f"NOT {_clause(fname, {'in': vals}, p, cidrs_ref)}")
+            a.append(f"NOT {_clause(fname, {'in': vals}, p, cidrs_ref)}")
     if d.outside_hours:
         oh = d.outside_hours
         tz = p.add(oh.timezone, "String")
         mod = f"(toHour(`event_time`, {tz}) * 60 + toMinute(`event_time`, {tz}))"
         days = p.add([WEEKDAYS[x] for x in oh.days], "Array(UInt8)")
         s, e = p.add(oh.minutes("start"), "UInt16"), p.add(oh.minutes("end"), "UInt16")
-        where.append(f"NOT (has({days}, toDayOfWeek(`event_time`, 0, {tz})) AND {mod} >= {s} AND {mod} < {e})")
+        a.append(f"NOT (has({days}, toDayOfWeek(`event_time`, 0, {tz})) AND {mod} >= {s} AND {mod} < {e})")
+    fb = d.followed_by
+    if fb is None:
+        where += a
+        iff, having_seq = (lambda agg, arg="": f"{agg}({arg})"), ""
+    else:
+        # Sequence: scan the condition's events and the follow-up step's events together, count only the former, and
+        # require (ClickHouse sequenceMatch) a follow-up event within `within` after one of them, per group.
+        is_a = "(" + " AND ".join(a) + ")"
+        b = [f"`category` = {p.add(fb.category or rule.log_source.category, 'String')}"]
+        if fb.event_type or (fb.category is None and rule.log_source.event_type):
+            b.append(f"`event_type` = {p.add(fb.event_type or rule.log_source.event_type, 'String')}")
+        b.append(_block(fb.selection, p, cidrs_ref))  # type: ignore[arg-type]
+        is_b = "(" + " AND ".join(b) + ")"
+        where.append(f"({is_a} OR {is_b})")
+        iff = lambda agg, arg="": f"{agg}If({arg + ', ' if arg else ''}{is_a})"  # noqa: E731
+        having_seq = (f" AND sequenceMatch({p.add(f'(?1)(?t<={int(fb.within)})(?2)', 'String')})"
+                      f"(toDateTime(`event_time`), {is_a}, {is_b} AND NOT {is_a})")
     if c.count is not None:
-        metric, sample = "count()", "groupUniqArray(5)(`msg`)"
+        metric, sample = iff("count"), "groupUniqArray(5)(`msg`)"
     elif c.distinct_count:
         col = _col(c.distinct_count.field)
-        metric, sample = f"uniqExact({col})", f"arraySlice(groupUniqArray(50)(toString({col})), 1, 20)"
+        metric, sample = iff("uniqExact", col), f"arraySlice(groupUniqArray(50)(toString({col})), 1, 20)"
     else:
         col = _col(c.sum.field)  # type: ignore[union-attr]
-        metric, sample = f"sum({col})", "groupUniqArray(5)(`dst_ip`)"
+        metric, sample = iff("sum", col), "groupUniqArray(5)(`dst_ip`)"
     groups = ", ".join(_col(g) for g in c.group_by)
     thr = p.add(float(threshold if threshold is not None else c.threshold), "Float64")
     sql = (f"SELECT {', '.join(f'toString({_col(g)}) AS `g_{g}`' for g in c.group_by)}, toFloat64({metric}) AS metric, count() AS events, "
            f"min(`event_time`) AS first_seen, max(`event_time`) AS last_seen, {sample} AS samples, "
            f"arraySlice(groupUniqArray(10)(`firewall_id`), 1, 10) AS firewall_ids, arraySlice(groupUniqArray(10)(`site`), 1, 10) AS sites "
-           f"FROM {source} WHERE {' AND '.join(where)} GROUP BY {groups} HAVING metric >= {thr} "
+           f"FROM {source} WHERE {' AND '.join(where)} GROUP BY {groups} HAVING metric >= {thr}{having_seq} "
            f"ORDER BY metric DESC LIMIT {int(limit)}")
     return Compiled(sql, p.values)
 

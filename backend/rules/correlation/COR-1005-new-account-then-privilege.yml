@@ -1,0 +1,37 @@
+id: COR-1005
+name: New account gains privileges soon after creation
+description: >
+  An account was created and, within the hour, was added to a group or used with elevated privileges.
+  Attackers create an account and make it an administrator to keep access.
+version: 1
+severity: high
+confidence: medium
+category: persistence
+author: sentinel
+log_source: {category: system}
+detection:
+  selection: {action: user-created, user: {exists: true}}
+  condition: {group_by: [user], count: 1, timeframe: 60m}
+  followed_by:
+    selection: {action: [group-add, privileged-logon, sudo]}
+    within: 60m
+explanation: "Account {user} was created and then gained or used privileges within the hour"
+data_sources: [Windows Security events (4720, 4728 / 4732 / 4756, 4672), Linux auth logs (useradd, usermod, sudo)]
+falsepositives:
+  - Normal provisioning of a new administrator by the help desk
+investigation:
+  - Who created the account, and from which host?
+  - Is there a change ticket for it? If not, disable the account and review the creator's session
+mitre: {tactic: TA0003, techniques: [T1136, T1098]}
+tests:
+  - name: created then added to a group
+    events:
+      - {action: user-created, user: svc-new, at: "-40m"}
+      - {action: group-add, user: svc-new, app: Administrators, at: "-30m"}
+    expect_alerts: 1
+  - name: created only
+    events: [{action: user-created, user: svc-new, at: "-40m"}]
+    expect_alerts: 0
+  - name: privilege change of an existing account
+    events: [{action: group-add, user: old-admin, at: "-30m"}]
+    expect_alerts: 0

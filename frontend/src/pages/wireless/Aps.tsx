@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { fmtNum, fmtTime } from "../../lib/format";
-import { Card, Drawer, Empty, Kpi, Loading, TableWrap, Tabs, Time, useDebounced } from "../../components/ui";
+import { Card, Drawer, Empty, Kpi, Loading, rowProps, TableWrap, Tabs, Time, useDebounced } from "../../components/ui";
 import { SeriesChart } from "../switches/common";
 import { Pager, SortTh } from "../wan/common";
 import { Band, RfFlags, Score, WState, bytes, dash, dbm, dur, pctv, useWlGo, useWlMeta } from "./common";
@@ -44,7 +44,7 @@ export function ApsTab() {
         <TableWrap><table className="tbl"><thead><tr>{S("state", "State")}{S("name", "AP")}<th>Model</th>{S("ip", "IP")}{S("site", "Site")}<th>Controller</th>
           {S("clients", "Clients", "num")}<th className="num">Radios</th><th>Bands</th>{S("max_util", "Max util.", "num")}{S("cpu_pct", "CPU", "num")}{S("uptime_s", "Uptime", "num")}
           <th>Uplink (CDP)</th>{S("last_seen", "Last seen")}<th className="num">Alerts</th></tr></thead>
-          <tbody>{d.items.map((a: any) => <tr key={a.id} className="cursor-pointer hover:bg-white/5" onClick={() => open(a.id)}>
+          <tbody>{d.items.map((a: any) => <tr key={a.id} {...rowProps(() => open(a.id))}>
             <td><WState s={a.state} /></td><td className="font-medium">{a.name}<div className="text-2xs text-muted font-mono">{a.mac}</div></td><td className="text-xs">{a.model || "—"}</td>
             <td className="font-mono text-xs">{a.ip || "—"}</td><td className="text-xs">{a.site || "—"}</td><td className="text-xs">{a.wlc}</td><td className="num">{dash(a.clients)}</td>
             <td className="num">{a.radios_total ? `${a.radios_up}/${a.radios_total}` : "—"}</td><td><span className="inline-flex gap-1">{a.bands.map((b: string) => <Band key={b} b={b} />)}</span></td>
@@ -145,7 +145,7 @@ function ClientMini({ rows }: { rows: any[] }) {
   if (!rows.length) return <Empty text="No associated clients." />;
   return <TableWrap><table className="tbl"><thead><tr><th>Client</th><th>SSID</th><th>Band</th><th className="num">RSSI</th><th className="num">SNR</th><th className="num">Rate</th>
     <th className="num">Connected</th><th>Experience</th></tr></thead>
-    <tbody>{rows.map((c) => <tr key={c.mac} className="cursor-pointer hover:bg-white/5" onClick={() => go("clients", { client: c.mac })}>
+    <tbody>{rows.map((c) => <tr key={c.mac} {...rowProps(() => go("clients", { client: c.mac }))}>
       <td className="font-mono text-xs">{c.mac}<div className="text-muted">{c.ip}</div></td><td>{c.ssid}</td><td><Band b={c.band} /></td><td className="num">{dbm(c.rssi_dbm)}</td>
       <td className="num">{dash(c.snr_db, " dB")}</td><td className="num">{dash(c.tx_rate_mbps, " Mb/s")}</td><td className="num">{dur(c.session_s)}</td><td><Score e={c.experience} /></td></tr>)}</tbody></table></TableWrap>;
 }

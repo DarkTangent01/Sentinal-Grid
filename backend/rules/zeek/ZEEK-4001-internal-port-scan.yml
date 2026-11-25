@@ -1,0 +1,34 @@
+id: ZEEK-4001
+name: Internal port scan seen by the Zeek sensor
+description: >
+  An internal address attempted connections to many ports of internal hosts and most were never answered or were
+  refused (Zeek connection states S0, REJ, RSTO, RSTR, RSTOS0). East-west traffic often does not cross a firewall,
+  so the sensor is the only place this shows.
+version: 1
+severity: medium
+confidence: medium
+category: network_reconnaissance
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection: {event_subtype: conn, action: [S0, REJ, RSTO, RSTR, RSTOS0], src_ip: {internal: true}, dst_ip: {internal: true}}
+  condition: {group_by: [src_ip], distinct_count: {field: dst_port, threshold: 50}, timeframe: 5m}
+explanation: "{src_ip}: unanswered or refused connections to {metric} ports of internal hosts in {timeframe} (Zeek conn.log)"
+data_sources: [Zeek conn.log from a sensor that sees internal traffic]
+falsepositives:
+  - Vulnerability scanners, asset discovery and monitoring systems (allowlist their addresses)
+  - A host retrying a service that is down on many ports (rare)
+investigation:
+  - Is the source a known scanner? If not, which user and process on it started the scan?
+  - Look at connections from the source that did complete (state SF) after the scan
+mitre: {tactic: TA0007, techniques: [T1046]}
+tests:
+  - name: sixty refused ports
+    events: [{event_subtype: conn, action: REJ, src_ip: 10.20.1.99, dst_ip: 10.20.2.1, dst_port: {seq: [1, 60]}}]
+    expect_alerts: 1
+  - name: completed connections are not a scan
+    events: [{event_subtype: conn, action: SF, src_ip: 10.20.1.99, dst_ip: 10.20.2.1, dst_port: {seq: [1, 60]}}]
+    expect_alerts: 0
+  - name: external source is not this rule
+    events: [{event_subtype: conn, action: S0, src_ip: 203.0.113.9, dst_ip: 10.20.2.1, dst_port: {seq: [1, 60]}}]
+    expect_alerts: 0

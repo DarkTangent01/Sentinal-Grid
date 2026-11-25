@@ -8,13 +8,13 @@ from sqlalchemy import select
 
 from app.alerts.engine import ensure_default_rules, run_rules
 from app.analytics import queries as Q
-from app.analytics.filters import EventFilter
+from app.platform.eventquery import EventFilter
 from app.config import get_settings
 from app.db.models import (Alert, AlertRule, Asset, Firewall, Incident, NotificationChannel, NotificationOutbox, NotificationRule,
                            TiFeed, TiIndicator, User)
 from app.enrich.enricher import Enricher
 from app.enrich.feeds import ensure_default_feeds, fetch_feed
-from app.enrich.geo import GeoResolver
+from app.platform.geoip import GeoResolver
 from app.ingest.normalize import normalize
 from app.ingest.pipeline import DeviceRegistry, EventSink
 from app.main import create_app

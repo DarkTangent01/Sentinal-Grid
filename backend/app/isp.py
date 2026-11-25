@@ -334,7 +334,7 @@ def _asn_org(ip: str) -> str:
     global _geo
     if _geo is None:
         from .config import get_settings
-        from .enrich.geo import GeoResolver
+        from .platform.geoip import GeoResolver
         _geo = GeoResolver(get_settings().geoip_dir)
     return _geo.lookup(ip).get("as_org", "") if _geo.available else ""
 

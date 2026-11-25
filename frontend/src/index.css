@@ -1,106 +1,190 @@
+@import "@fontsource-variable/inter/wght.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ---- Design tokens (RGB triplets so Tailwind opacity modifiers work) ----
-   Zomato theme: white/neutral surfaces, #1C1C1C ink, Zomato red (#E23744 brand, #CB202D for text and buttons so
-   small text keeps >= 4.5:1). Night is the same system on charcoal, not an inverted copy. */
+/* ---- Sentinel design tokens (docs/design-system.md) ----
+   RGB triplets so Tailwind opacity modifiers work. Night (default) uses the Sentinel navy foundation; day is the same
+   system on light surfaces. The product accent (brand-* scale, solid-*) follows <html data-product>: Sentinel NMS
+   sky, Sentinel Grid violet. Status colours have one meaning everywhere. */
 :root {
-  --bg: 18 18 18;
-  --surface: 28 28 28;
-  --surface-2: 23 23 23;
-  --border: 46 46 46;
-  --text: 240 240 240;
-  --text-muted: 163 163 163;   /* 7.4:1 on surface */
-  --accent: 239 79 95;          /* #EF4F5F, 4.9:1 on surface */
-  --ok: 74 222 128;
-  --warn: 251 191 36;
-  --bad: 248 113 113;
+  --bg: 11 18 32;              /* #0B1220 primary background */
+  --surface-2: 15 23 42;       /* #0F172A secondary background (sidebar, header, table heads) */
+  --surface: 17 28 46;         /* #111C2E surface (cards) */
+  --surface-3: 22 34 56;       /* #162238 elevated (menus, drawers, tooltips) */
+  --border: 38 52 73;          /* #263449 */
+  --text: 241 245 249;         /* #F1F5F9 */
+  --text-muted: 148 163 184;   /* #94A3B8 secondary text, 7.0:1 on surface */
+  --text-subtle: 100 116 139;  /* #64748B muted (labels, placeholders, disabled) */
+  --accent: 56 189 248;        /* #38BDF8 Sentinel / NMS accent */
+  --solid-brand: 56 189 248;   /* primary button fill: #38BDF8 with #0B1220 text = 9.1:1 */
+  --solid-brand-hover: 14 165 233;
+  --solid-on: 11 18 32;
+  --ok: 34 197 94;             /* #22C55E healthy / operational */
+  --warn: 245 158 11;          /* #F59E0B warning / degraded */
+  --bad: 239 68 68;            /* #EF4444 critical / down */
+  --info: 56 189 248;          /* #38BDF8 informational */
+  --unknown: 100 116 139;      /* #64748B unknown / disabled */
   --sev-critical: 239 68 68;
   --sev-high: 249 115 22;
   --sev-medium: 245 158 11;
   --sev-low: 56 189 248;
-  --sev-info: 163 163 163;
-  --space-card: 0.75rem;
-  --sidebar-w: 13rem;
-  /* chart theme (read by components/Chart.tsx) */
-  --chart-text: 163 163 163;
-  --chart-strong: 240 240 240;
-  --chart-axis: 64 64 64;
-  --chart-split: 38 38 38;
-  --chart-tooltip: 28 28 28;
+  --sev-info: 100 116 139;
+  --shadow: 2 6 23;
+  --scrim: 2 6 23;             /* overlay behind dialogs / the mobile drawer */
+  --grid-line: 148 163 184;
+  --sidebar-w: 15rem;
+  /* chart chrome (components/Chart.tsx reads --chart-primary for the product's own series) */
+  --chart-primary: 56 189 248;
+  --chart-text: 148 163 184;
+  --chart-strong: 241 245 249;
+  --chart-axis: 38 52 73;
+  --chart-split: 26 38 58;
+  --chart-tooltip: 22 34 56;
   color-scheme: dark;
 }
+:root[data-product="grid"] {
+  --accent: 167 139 250;       /* #A78BFA Sentinel Grid accent */
+  --solid-brand: 167 139 250;  /* #A78BFA with #0B1220 text = 7.6:1 */
+  --solid-brand-hover: 139 92 246;
+  --chart-primary: 167 139 250;
+}
 
-/* Day theme (default): semantic tokens. Tailwind hue palettes are mirrored in tailwind.config.js. */
 :root.light {
-  --bg: 248 248 248;            /* #F8F8F8 */
+  --bg: 244 246 250;           /* #F4F6FA */
+  --surface-2: 248 250 252;    /* #F8FAFC */
   --surface: 255 255 255;
-  --surface-2: 250 250 250;
-  --border: 232 232 232;        /* #E8E8E8 */
-  --text: 28 28 28;             /* #1C1C1C */
-  --text-muted: 105 105 105;    /* #696969, 5.5:1 on white */
-  --accent: 203 32 45;          /* #CB202D, 5.6:1 on white */
-  --ok: 26 127 52;              /* Zomato green, darkened to 5.2:1 */
-  --warn: 180 83 9;
-  --bad: 203 32 45;
-  --sev-critical: 203 32 45;
+  --surface-3: 255 255 255;
+  --border: 226 232 240;       /* #E2E8F0 */
+  --text: 15 23 42;            /* #0F172A */
+  --text-muted: 71 85 105;     /* #475569, 7.6:1 on white */
+  --text-subtle: 100 116 139;  /* #64748B, 4.8:1 */
+  --accent: 3 105 161;         /* #0369A1, 5.9:1 on white */
+  --solid-brand: 2 132 199;    /* #0284C7 fill with white text: buttons use 600 → 700 hover */
+  --solid-brand-hover: 3 105 161;
+  --solid-on: 255 255 255;
+  --ok: 21 128 61;             /* #15803D, AA on white */
+  --warn: 180 83 9;            /* #B45309 */
+  --bad: 185 28 28;            /* #B91C1C */
+  --info: 3 105 161;
+  --unknown: 100 116 139;
+  --sev-critical: 220 38 38;
   --sev-high: 234 88 12;
-  --sev-medium: 202 138 4;
+  --sev-medium: 217 119 6;
   --sev-low: 2 132 199;
-  --sev-info: 105 105 105;
-  --chart-text: 105 105 105;
-  --chart-strong: 28 28 28;
-  --chart-axis: 214 214 214;
-  --chart-split: 240 240 240;
+  --sev-info: 100 116 139;
+  --shadow: 15 23 42;
+  --scrim: 15 23 42;
+  --chart-primary: 2 132 199;
+  --chart-text: 71 85 105;
+  --chart-strong: 15 23 42;
+  --chart-axis: 203 213 225;
+  --chart-split: 238 242 247;
   --chart-tooltip: 255 255 255;
   color-scheme: light;
 }
+:root.light[data-product="grid"] {
+  --accent: 109 40 217;        /* #6D28D9, 7.1:1 on white */
+  --solid-brand: 124 58 237;   /* #7C3AED with white text = 5.7:1 */
+  --solid-brand-hover: 109 40 217;
+  --chart-primary: 124 58 237;
+}
 
 @layer base {
-  body { @apply bg-bg text-slate-200 antialiased font-sans; font-size: 14px; line-height: 1.45; transition: background-color .15s ease; }
-  ::selection { background: rgb(226 55 68 / 0.22); }
-  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+  html { font-feature-settings: "cv02", "cv03", "cv04", "cv11"; }   /* Inter: open digits, single-storey a off — clearer at small sizes */
+  body { @apply bg-bg text-slate-200 antialiased font-sans; font-size: 13.5px; line-height: 1.5; transition: background-color .15s ease; }
+  ::selection { background: rgb(var(--accent) / 0.25); }
+  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 4px; }
+  h1, h2, h3 { letter-spacing: -0.01em; }
+  code, kbd, samp, pre, .font-mono { font-feature-settings: normal; }
+  /* numbers that line up in tables, counters, timestamps */
+  .tabular-nums, time { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
-  /* Cards are grid/flex children: min-w-0 stops wide content (tables, canvases) from stretching the track. */
-  .card { @apply bg-panel border border-line rounded-card min-w-0 flex flex-col; }
-  :root.light .card { @apply shadow-card border-[#eeeeee]; }
-  .card-h { @apply px-4 py-2.5 border-b border-line text-[0.9rem] font-semibold text-slate-200 flex flex-wrap items-center justify-between gap-2 min-w-0; }
+  /* ---- typography ---- */
+  .page-title { @apply text-2xl font-semibold tracking-tight text-slate-100; }
+  .section-title { @apply text-lg font-semibold text-slate-100; }
+  .eyebrow { @apply text-2xs font-semibold uppercase tracking-[0.08em] text-subtle; }
+  .metric { @apply text-xl sm:text-2xl xl:text-[1.625rem] leading-tight font-semibold tracking-tight tabular-nums; }
+
+  /* ---- cards (grid/flex children: min-w-0 keeps wide tables and canvases inside their track) ---- */
+  .card { @apply bg-panel border border-line rounded-card min-w-0 flex flex-col shadow-card; }
+  .card-h { @apply px-4 py-2.5 border-b border-line text-sm font-semibold text-slate-100 flex flex-wrap items-center justify-between gap-2 min-w-0; }
   .card-b { @apply p-4 min-w-0 flex-1; }
-  /* items-start: a card keeps its own content height instead of stretching to the tallest card in the row
-     (a long table used to stretch neighbouring chart cards into tall empty panels). */
+  .card-interactive { @apply transition-[border-color,box-shadow,transform] duration-150 hover:border-brand-500/50 hover:shadow-pop; }
   .grid-cards { @apply grid gap-4 min-w-0 items-start; }
   .grid-cards > * { min-width: 0; }
-  /* KPI rows: responsive column count instead of fixed counts that clip the last card. */
-  .kpi-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); }
-  .btn { @apply inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium border border-line bg-panel hover:bg-slate-800 disabled:opacity-50 whitespace-nowrap transition-colors; }
-  /* Zomato red in both themes; white on #CB202D = 5.6:1 (the lighter #E23744 would fall below 4.5:1 for button text) */
-  .btn-primary { @apply bg-[#cb202d] border-[#cb202d] text-[#ffffff] hover:bg-[#a81a25] hover:border-[#a81a25] shadow-sm; }
-  .btn-danger { @apply bg-red-700/40 border-red-700 text-red-200 hover:bg-red-700/60; }
-  .input { @apply bg-panel border border-line rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 placeholder:text-slate-500 min-w-0 max-w-full transition-shadow; }
-  .label { @apply block text-xs text-muted mb-1; }
-  /* Tables scroll inside their own wrapper; the page never scrolls sideways. */
+  .kpi-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr)); }
+
+  /* ---- buttons: default = secondary; primary, ghost, danger, icon ---- */
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium border border-line bg-panel2 text-slate-200
+                 hover:bg-elevated hover:border-slate-600 active:translate-y-px disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap
+                 transition-[background-color,border-color,color,box-shadow] duration-150; }
+  .btn-primary { @apply bg-solid-brand border-solid-brand text-solid-on font-semibold hover:bg-solid-brand-hover hover:border-solid-brand-hover shadow-sm; }
+  .btn-ghost { @apply bg-transparent border-transparent text-slate-300 hover:bg-slate-800/60 hover:border-transparent; }
+  .btn-danger { @apply bg-red-600/15 border-red-500/40 text-red-300 hover:bg-red-600/25 hover:border-red-500/60; }
+  .btn-icon { @apply px-2 py-1.5; }
+  .btn-sm { @apply px-2 py-1 text-xs rounded-md; }
+
+  /* ---- forms ---- */
+  .input { @apply bg-panel2 border border-line rounded-lg px-2.5 py-1.5 text-[13px] text-slate-100 focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/20
+                   placeholder:text-subtle min-w-0 max-w-full transition-[border-color,box-shadow] duration-150 disabled:opacity-60; }
+  select.input { @apply pr-7; }
+  input[type="checkbox"], input[type="radio"] { accent-color: rgb(var(--accent)); }
+  .label { @apply block text-xs font-medium text-muted mb-1; }
+  .help { @apply text-2xs text-subtle mt-1; }
+  .field-error { @apply text-2xs text-red-300 mt-1; }
+
+  /* ---- tables: compact rows, sticky heads inside .tbl-wrap / TableWrap ---- */
   .tbl-wrap { @apply w-full overflow-x-auto; }
-  .tbl { @apply w-full text-sm border-collapse; }
-  .tbl th { @apply text-left text-2xs font-medium text-muted uppercase tracking-wide px-2.5 py-2 border-b border-line whitespace-nowrap align-bottom; }
-  .tbl td { @apply px-2.5 py-1.5 border-b border-line/60 align-top; }
+  .tbl { @apply w-full text-[13px] border-collapse; }
+  .tbl th { @apply text-left text-2xs font-semibold text-subtle uppercase tracking-[0.06em] px-3 py-2 border-b border-line whitespace-nowrap align-bottom bg-panel2; }
+  .tbl td { @apply px-3 py-1.5 border-b border-line/60 align-top; }
   .tbl td.num, .tbl th.num { @apply text-right tabular-nums whitespace-nowrap; }
   .tbl td.nowrap { @apply whitespace-nowrap; }
-  .tbl tbody tr:hover { @apply bg-brand-500/[0.04]; }
+  @media (max-width: 639px) { .tbl td:not(.cell-wrap) { white-space: nowrap; } }
+  .tbl tbody tr { @apply transition-colors duration-100; }
+  .tbl tbody tr:hover { @apply bg-brand-500/[0.05]; }
+  .tbl tbody tr:last-child td { @apply border-b-0; }
   .tbl tbody tr[tabindex] { @apply cursor-pointer; }
-  /* wrap long tokens only where needed (never break-all, which splits ordinary words mid-character) */
+  .tbl tbody tr[tabindex]:focus-visible { outline-offset: -2px; }
   .cell-wrap { @apply [overflow-wrap:anywhere]; }
   .cell-trunc { @apply block truncate; }
-  .link { @apply text-brand-400 hover:underline cursor-pointer bg-transparent p-0 border-0 text-left; }
-  .pill { @apply inline-block rounded-md px-1.5 py-0.5 text-2xs font-medium whitespace-nowrap; }
-  .sev-critical { @apply bg-sev-critical/25 text-red-200 ring-1 ring-sev-critical/40; }
-  .sev-high { @apply bg-sev-high/25 text-orange-200 ring-1 ring-sev-high/40; }
-  .sev-medium { @apply bg-sev-medium/20 text-amber-200 ring-1 ring-sev-medium/40; }
-  .sev-low { @apply bg-sev-low/20 text-sky-200 ring-1 ring-sev-low/40; }
-  .sev-informational { @apply bg-sev-info/20 text-slate-200 ring-1 ring-sev-info/30; }
+  /* technical identifiers: IPs, MACs, ports, IDs, hashes */
+  .mono { @apply font-mono text-[12px] tabular-nums; }
+
+  .link { @apply text-brand-400 hover:text-brand-300 hover:underline underline-offset-2 cursor-pointer bg-transparent p-0 border-0 text-left; }
+  .pill { @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium whitespace-nowrap; }
+  .sev-critical { @apply bg-sev-critical/15 text-red-300 ring-1 ring-inset ring-sev-critical/35; }
+  .sev-high { @apply bg-sev-high/15 text-orange-300 ring-1 ring-inset ring-sev-high/35; }
+  .sev-medium { @apply bg-sev-medium/15 text-amber-300 ring-1 ring-inset ring-sev-medium/35; }
+  .sev-low { @apply bg-sev-low/15 text-sky-300 ring-1 ring-inset ring-sev-low/35; }
+  .sev-informational { @apply bg-sev-info/15 text-slate-300 ring-1 ring-inset ring-sev-info/30; }
+
+  /* ---- status dot (always beside a text label: colour is never the only cue) ---- */
+  .dot { @apply inline-block h-2 w-2 rounded-full shrink-0; }
+  .dot-ok { @apply bg-ok; } .dot-warn { @apply bg-warn; } .dot-bad { @apply bg-bad; } .dot-info { @apply bg-info; } .dot-unknown { background: rgb(var(--unknown)); }
+
+  /* ---- loading skeleton ---- */
+  .skeleton { @apply rounded-md animate-shimmer; background: linear-gradient(90deg, rgb(var(--border) / 0.35) 25%, rgb(var(--border) / 0.7) 50%, rgb(var(--border) / 0.35) 75%);
+              background-size: 200% 100%; }
+
+  /* ---- tooltip (hover and keyboard focus; text in aria-label / data-tip) ---- */
+  .tip { @apply relative; }
+  .tip[data-tip]:hover::after, .tip[data-tip]:focus-visible::after {
+    content: attr(data-tip); @apply absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 whitespace-nowrap rounded-md border border-line bg-elevated px-2 py-1 text-xs
+      font-medium text-slate-100 shadow-pop pointer-events-none animate-fade-in;
+  }
 }
+
 html, body, #root { height: 100%; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 4px; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 6px; border: 2px solid rgb(var(--bg)); }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-subtle)); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

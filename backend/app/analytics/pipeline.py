@@ -827,7 +827,7 @@ def _jsonable(v):
 
 async def run_pipeline(ch, q: str, f, watchlists: dict[str, dict] | None = None, max_rows: int | None = None) -> dict:
     """Execute a pipeline over the events selected by EventFilter f (time window, firewalls, ...)."""
-    from .filters import bucket_seconds, build_where
+    from ..platform.eventquery import bucket_seconds, build_where
     plan = compile_pipeline(q, watchlists, max_rows)
     f.ql = plan.search or None
     where, wparams = build_where(f)

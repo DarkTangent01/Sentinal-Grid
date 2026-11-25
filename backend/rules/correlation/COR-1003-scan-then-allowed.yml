@@ -1,0 +1,47 @@
+id: COR-1003
+name: External scan followed by an allowed connection
+description: >
+  An external address was denied on many ports of internal hosts (a scan) and then had a connection allowed:
+  the scan found something open. This turns hundreds of deny events and one accept into a single finding.
+version: 1
+severity: high
+confidence: medium
+category: network_intrusion
+author: sentinel
+log_source: {category: traffic}
+detection:
+  selection: {action: [deny, block], src_ip: {internal: false}, dst_ip: {internal: true}}
+  condition: {group_by: [src_ip], distinct_count: {field: dst_port, threshold: 30}, timeframe: 10m}
+  followed_by:
+    selection: {action: [accept, close], dst_ip: {internal: true}, rcvd_bytes: {gt: 0}}
+    within: 30m
+explanation: "{src_ip} was denied on {metric} ports in {timeframe}, then an inbound connection from it was allowed and answered"
+data_sources: [Firewall traffic logs, allowed and denied (FortiGate, Palo Alto, CEF / LEEF / JSON firewalls)]
+falsepositives:
+  - Internet scanners hitting a published service among closed ports (the accept is the public service)
+  - Authorised external vulnerability scans
+investigation:
+  - Which internal host and port answered, and is that service meant to be public?
+  - Look for IPS detections and outbound connections from that host afterwards
+  - Check the source's threat-intel and geo context
+mitre: {tactic: TA0001, techniques: [T1190, T1595]}
+tests:
+  - name: scan then an answered accept
+    events:
+      - {src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 40]}, action: deny, at: "-20m"}
+      - {src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: 8443, action: accept, rcvd_bytes: 5000, at: "-5m"}
+    expect_alerts: 1
+    expect_groups: [{src_ip: 203.0.113.9}]
+  - name: scan only
+    events: [{src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 40]}, action: deny, at: "-20m"}]
+    expect_alerts: 0
+  - name: accept with no reply bytes does not count
+    events:
+      - {src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: {seq: [1, 40]}, action: deny, at: "-20m"}
+      - {src_ip: 203.0.113.9, dst_ip: 10.1.1.10, dst_port: 8443, action: accept, rcvd_bytes: 0, at: "-5m"}
+    expect_alerts: 0
+  - name: internal scanner is another rule
+    events:
+      - {src_ip: 10.1.1.5, dst_ip: 10.1.1.10, dst_port: {seq: [1, 40]}, action: deny, at: "-20m"}
+      - {src_ip: 10.1.1.5, dst_ip: 10.1.1.10, dst_port: 22, action: accept, rcvd_bytes: 10, at: "-5m"}
+    expect_alerts: 0

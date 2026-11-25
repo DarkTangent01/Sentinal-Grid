@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import ssl
+import struct
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -28,6 +29,9 @@ CATEGORY_HELP = {
     "backend_unavailable": "The identity backend (LDAP / AD / PAM) did not answer: check the identity source test.",
     "protocol_error": "The reply could not be decoded: usually a shared-secret mismatch between the client and the server.",
     "server_error": "The server returned an error status.",
+    "reset": "The server closed the connection without answering: the SIEM's source address is not a device the active configuration "
+             "knows (check the tester address under Settings: container addresses change when containers are recreated; a subnet "
+             "avoids that), or no version has been deployed yet (the bootstrap configuration rejects every connection).",
     "not_configured": "The tester device is not configured: set the tester address in TACACS+ → Settings and deploy a version.",
     "blocked": "The destination is not allowed by the outbound guard.",
     "ldap_bind": "The directory rejected the bind DN or password.",
@@ -63,6 +67,24 @@ async def tcp(host: str, port: int, timeout: float) -> dict:
         return _step(f"TCP {host}:{port}", False, t0, e.strerror or type(e).__name__, "timeout")
 
 
+# RFC 8907 reply status codes; anything else means the body was decrypted with the wrong key (pseudo-pad mismatch)
+AUTHEN_STATUSES = {1, 2, 3, 4, 5, 6, 7, 0x21}
+ACCT_STATUSES = {1, 2, 0x21}
+
+
+def _failure(name: str, t0: float, e: BaseException, timeout: float) -> dict:
+    """Classify a transport / protocol exception from the tacacs_plus client (messages never include credentials)."""
+    if isinstance(e, (asyncio.TimeoutError, socket.timeout, TimeoutError)):
+        return _step(name, False, t0, f"no reply within {timeout:g}s", "timeout")
+    if isinstance(e, ConnectionRefusedError):
+        return _step(name, False, t0, "connection refused", "refused")
+    if isinstance(e, socket.gaierror):
+        return _step(name, False, t0, f"name does not resolve ({e.strerror or 'DNS error'})", "dns")
+    if isinstance(e, (ConnectionResetError, BrokenPipeError, EOFError, struct.error)):  # struct.error: short read of the reply header
+        return _step(name, False, t0, "connection closed by the server without a reply", "reset")
+    return _step(name, False, t0, f"reply could not be decoded ({type(e).__name__})", "protocol_error")
+
+
 def _client(host: str, port: int, key: str, timeout: float):
     from tacacs_plus.client import TACACSClient
     fam = socket.AF_INET6 if ":" in host else socket.AF_INET
@@ -82,12 +104,10 @@ async def authenticate(host: str, port: int, key: str, username: str, password: 
                                                               rem_addr="sentinel-grid", port="aaa-test")
     try:
         r = await asyncio.wait_for(asyncio.to_thread(run), timeout + 2)
-    except (asyncio.TimeoutError, socket.timeout, TimeoutError):
-        return _step("authentication", False, t0, f"no reply within {timeout:g}s", "timeout")
-    except ConnectionRefusedError:
-        return _step("authentication", False, t0, "connection refused", "refused")
-    except Exception as e:  # undecodable reply (wrong key) or protocol violation; message never includes the password
-        return _step("authentication", False, t0, f"reply could not be decoded ({type(e).__name__})", "protocol_error")
+    except Exception as e:  # never includes the password
+        return _failure("authentication", t0, e, timeout)
+    if r.status not in AUTHEN_STATUSES or r.flags not in (0, 1):  # only NOECHO is defined: anything else is a wrong-key decode
+        return _step("authentication", False, t0, f"undecodable reply (status byte {r.status})", "protocol_error")
     if r.status == TAC_PLUS_AUTHEN_STATUS_PASS:
         return _step("authentication", True, t0, "PASS")
     if r.status == TAC_PLUS_AUTHEN_STATUS_FAIL:
@@ -96,7 +116,7 @@ async def authenticate(host: str, port: int, key: str, username: str, password: 
 
 
 async def account(host: str, port: int, key: str, username: str, task_id: str, timeout: float) -> dict:
-    from tacacs_plus.flags import TAC_PLUS_ACCT_FLAG_START
+    from tacacs_plus.flags import TAC_PLUS_ACCT_FLAG_START, TAC_PLUS_ACCT_FLAG_STOP
     t0 = time.time()
     try:
         await acheck_host(host, port)
@@ -104,19 +124,21 @@ async def account(host: str, port: int, key: str, username: str, task_id: str, t
         return _step("accounting record", False, t0, str(e), "blocked")
 
     def run():
-        return _client(host, port, key, timeout).account(username, TAC_PLUS_ACCT_FLAG_START,
-                                                          arguments=[b"service=shell", f"task_id={task_id}".encode(), b"cmd=sentinel-grid-accounting-check"],
+        args = [b"service=shell", f"task_id={task_id}".encode(), b"cmd=sentinel-grid-accounting-check"]
+        r = _client(host, port, key, timeout).account(username, TAC_PLUS_ACCT_FLAG_START, arguments=args, rem_addr="sentinel-grid", port="aaa-test")
+        if getattr(r, "valid", False):  # close the record so the check never shows up as a session left open
+            r = _client(host, port, key, timeout).account(username, TAC_PLUS_ACCT_FLAG_STOP, arguments=args + [b"elapsed_time=0"],
                                                           rem_addr="sentinel-grid", port="aaa-test")
+        return r
     try:
         r = await asyncio.wait_for(asyncio.to_thread(run), timeout + 2)
-    except (asyncio.TimeoutError, socket.timeout, TimeoutError):
-        return _step("accounting record", False, t0, f"no reply within {timeout:g}s", "timeout")
-    except ConnectionRefusedError:
-        return _step("accounting record", False, t0, "connection refused", "refused")
     except Exception as e:
-        return _step("accounting record", False, t0, f"reply could not be decoded ({type(e).__name__})", "protocol_error")
-    return _step("accounting record", bool(getattr(r, "valid", False)), t0, "accepted" if getattr(r, "valid", False) else f"status {r.status}",
-                 "" if getattr(r, "valid", False) else "server_error")
+        return _failure("accounting record", t0, e, timeout)
+    if getattr(r, "valid", False):
+        return _step("accounting record", True, t0, "accepted")
+    if r.status not in ACCT_STATUSES:
+        return _step("accounting record", False, t0, f"undecodable reply (status byte {r.status})", "protocol_error")
+    return _step("accounting record", False, t0, f"status {r.status}", "server_error")
 
 
 async def correlate_auth(ch, server_id: int, username: str, since: datetime, wait: float = 12.0) -> dict | None:

@@ -91,7 +91,9 @@ async def ingest(s: AsyncSession, ch, server: TacServer, log_dir: str | None = N
     log_dir = log_dir or _dirs()[1]
     cfg = await tac_settings(s)
     rules = compile_redactions(cfg.get("redaction_rules"))
-    clients = {c.address: c for c in (await s.execute(select(TacClient))).scalars()}
+    all_clients = (await s.execute(select(TacClient))).scalars().all()
+    clients = {c.address: c for c in all_clients}
+    by_name = {c.name: c for c in all_clients}  # ranges (address "10.0.0.0/28") never equal a device address: tac_plus-ng logs the device name
     seen = _seen.setdefault(server.id, OrderedDict())
     probes = probe_addresses()
     state = dict(server.ingestion or {})
@@ -114,7 +116,7 @@ async def ingest(s: AsyncSession, ch, server: TacServer, log_dir: str | None = N
             if not ev["parse_ok"]:
                 errs += 1
                 cur["last_parse_error"] = {"at": datetime.now(timezone.utc).isoformat(), "reason": ev["parse_error"], "line": ev["raw"][:300]}
-            c = clients.get(ev.get("device_address", ""))
+            c = clients.get(ev.get("device_address", "")) or by_name.get(ev.get("device_name") or "")
             if kind == "conn" and c is None and ev.get("event_type", "").startswith("conn_") and ev.get("device_address") in probes:
                 ev.update(event_type="conn_probe", result="health_check")
             ev.update(client_id=c.id if c else 0, vendor=c.vendor if c else "", site=c.site if c else "",
@@ -192,9 +194,11 @@ async def health(s: AsyncSession, server: TacServer, now: datetime | None = None
         else:
             server.agent = st
             server.version = f"tac_plus-ng {st.get('commit', '')[:12]}".strip()
-            agent_ok = st["age_s"] < 60 and st.get("running") and st.get("listening")
+            agent_ok = st["age_s"] < 60 and st.get("running") and st.get("listening") and st.get("logs_writable", True) is not False
             if not agent_ok:
                 detail = (detail + "; " if detail else "") + f"agent: running={st.get('running')} listening={st.get('listening')} age={st['age_s']}s"
+                if st.get("logs_writable") is False:
+                    detail += "; tac_plus-ng cannot write /tacacs/logs (volume ownership): AAA works but nothing is logged or ingested"
             if st.get("active_sha256"):
                 server.deployed_sha256 = st["active_sha256"]
     status = "up" if ok and agent_ok is not False else "degraded" if ok or agent_ok else "down"
@@ -213,6 +217,16 @@ async def health(s: AsyncSession, server: TacServer, now: datetime | None = None
 
 
 # ------------------------------------------------------------------ deployments
+def _share(path: str, config_dir: str) -> None:
+    """Give a file written for the agent the shared volume's group (tacshare), so the agent can read it through 0640.
+
+    The entrypoint's setgid bit on the volume directories cannot be relied on: without CAP_FSETID the kernel clears it
+    (root is not in tacshare), and new files then get the worker's own group, which the agent cannot read."""
+    gid = os.stat(config_dir).st_gid
+    if os.stat(path).st_gid != gid:
+        os.chown(path, -1, gid)  # allowed: the worker owns the file and is a member of the group (group_add)
+
+
 async def run_job(s: AsyncSession, job: TacDeployJob, *, config_dir: str | None = None, timeout: float | None = None) -> TacDeployJob:
     config_dir = config_dir or _dirs()[0]
     timeout = timeout or get_settings().tacacs_deploy_timeout_seconds
@@ -220,17 +234,20 @@ async def run_job(s: AsyncSession, job: TacDeployJob, *, config_dir: str | None 
     server = await s.get(TacServer, job.server_id)
     job.status, job.started_at = "running", datetime.now(timezone.utc)
     await s.commit()
+    cand = os.path.join(config_dir, "candidates", f"{job.id}.cfg")
     try:
         full = unseal(ver.content_ciphertext)
-        cand = os.path.join(config_dir, "candidates", f"{job.id}.cfg")
         tmp = cand + ".tmp"
-        with open(tmp, "w") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)  # holds device keys: never world-readable, not even briefly
+        with os.fdopen(fd, "w") as f:
             f.write(full)
         os.chmod(tmp, 0o640)
+        _share(tmp, config_dir)
         os.replace(tmp, cand)
         req = os.path.join(config_dir, "requests", f"{job.id}.json")
         with open(req + ".tmp", "w") as f:
             json.dump({"id": job.id, "action": job.action, "sha256": ver.sha256}, f)
+        _share(req + ".tmp", config_dir)
         os.replace(req + ".tmp", req)
         res_path = os.path.join(config_dir, "results", f"{job.id}.json")
         deadline = time.monotonic() + timeout
@@ -252,12 +269,14 @@ async def run_job(s: AsyncSession, job: TacDeployJob, *, config_dir: str | None 
                 server.deployed_version_id, server.deployed_sha256, server.last_deploy_at = ver.id, ver.sha256, datetime.now(timezone.utc)
                 names = {c["name"] for c in (ver.model or {}).get("clients", [])}
                 await s.execute(update(TacClient).where(TacClient.name.in_(names or {""})).values(sync_status="in_sync"))
-            try:
-                os.remove(cand)
-            except OSError:
-                pass
     except OSError as e:
         job.status, job.result = "failed", {"reason": f"cannot write to the shared configuration volume: {e.strerror}"}
+    finally:
+        for leftover in (cand, cand + ".tmp"):  # the candidate holds every device key: never leave it behind
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
     job.finished_at = datetime.now(timezone.utc)
     await s.commit()
     return job

@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from .platform.timeutil import ch_time
+
 UP_DOWN, STATS, P1_ERR = "0101037138", "0101037141", "0101037124"
 BASE = "category = 'system' AND event_subtype = 'vpn'"
 STALE = timedelta(minutes=25)  # > 2 missed statistics intervals
@@ -21,10 +23,7 @@ def _kv(name: str) -> str:
     return f"extract(raw, '{name}=\"?([^\" ]*)')"
 
 
-def _aware(v) -> datetime:
-    if isinstance(v, datetime):
-        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
-    return datetime.fromisoformat(str(v).replace("Z", "")).replace(tzinfo=timezone.utc)
+_aware = ch_time                     # kept under its old name for this module's callers
 
 
 DIALUP = f"({_kv('xauthuser')} NOT IN ('', 'N/A') OR match(extract(raw, 'vpntunnel=\"([^\"]*)\"'), '_[0-9]+$'))"

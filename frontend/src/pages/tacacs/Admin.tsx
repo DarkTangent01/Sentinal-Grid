@@ -97,7 +97,7 @@ export function SettingsTab() {
           onChange={(e) => setF({ ...f, client_networks: e.target.value })} disabled={!can("policy_admin")} /></Field>
         <Field label="Extra redaction rules (Python regex, one per line; applied before storage)"><textarea className="input w-full font-mono text-xs h-28" value={f.redaction_rules}
           onChange={(e) => setF({ ...f, redaction_rules: e.target.value })} disabled={!can("policy_admin")} /></Field>
-        <Field label="Tester source address (the SIEM worker's IP as seen by the TACACS+ server)"><input className="input w-full font-mono" value={f.tester_address}
+        <Field label="Tester source address: the api container's IP on the aaa network as the TACACS+ server sees it, or that network's subnet (/24 or narrower)"><input className="input w-full font-mono" value={f.tester_address}
           onChange={(e) => setF({ ...f, tester_address: e.target.value })} disabled={!can("policy_admin")} placeholder="172.18.0.5" /></Field>
         <Field label="Address ranges wider than this prefix need a justification"><input type="number" className="input w-full" value={f.max_prefix_without_approval}
           onChange={(e) => setF({ ...f, max_prefix_without_approval: e.target.value })} disabled={!can("policy_admin")} /></Field>

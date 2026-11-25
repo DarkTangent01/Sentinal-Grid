@@ -5,10 +5,11 @@ import { api } from "../../lib/api";
 import { useTheme } from "../../lib/theme";
 import { fmtNum } from "../../lib/format";
 import { Chart, PALETTES, axisStyle } from "../../components/Chart";
-import { Card, Drawer, Empty, Kpi, Loading, Sev, TableWrap, Time, useDebounced } from "../../components/ui";
+import { Card, Drawer, Empty, Kpi, Loading, rowProps, Sev, TableWrap, Time, useDebounced } from "../../components/ui";
 import { SeriesChart } from "../switches/common";
 import { Pager, SortTh } from "../wan/common";
 import { Band, Score, WState, bytes, dash, dbm, dur, useWlGo, useWlMeta } from "./common";
+import { ClientAnalytics, ClientHistory } from "./ClientAnalytics";
 
 const PROBLEMS: [string, string][] = [["", "All clients"], ["poor_score", "Poor experience score"], ["poor_rssi", "Poor RSSI"], ["low_snr", "Low SNR"], ["low_rate", "Low data rate"],
   ["disconnects", "Repeated disconnects"], ["roaming", "Frequent roaming"]];
@@ -49,7 +50,7 @@ export function ClientsTab() {
       {!d.items.length ? <Empty text="No clients match." /> : <>
         <TableWrap><table className="tbl"><thead><tr>{S("mac", "Client", "")}{S("username", "User", "")}{S("ap", "AP", "")}{S("ssid", "SSID", "")}<th>Band</th>
           {S("rssi_dbm", "RSSI")}{S("snr_db", "SNR")}{S("tx_rate_mbps", "Rate")}{S("session_s", "Connected")}{S("roams", "Roams")}{S("disconnects", "Drops")}{S("score", "Experience")}</tr></thead>
-          <tbody>{d.items.map((c: any) => <tr key={`${c.wlc_id}${c.mac}`} className="cursor-pointer hover:bg-white/5" onClick={() => open(c.mac)}>
+          <tbody>{d.items.map((c: any) => <tr key={`${c.wlc_id}${c.mac}`} {...rowProps(() => open(c.mac))}>
             <td className="font-mono text-xs">{c.mac}<div className="text-muted">{c.ip || "—"}{c.vlan != null && ` · VLAN ${c.vlan}`}</div></td><td className="text-xs">{c.username || "—"}</td>
             <td className="text-xs">{c.ap || "—"}</td><td className="text-xs">{c.ssid || "—"}</td><td><Band b={c.band} /></td><td className="num">{dbm(c.rssi_dbm)}</td>
             <td className="num">{dash(c.snr_db, " dB")}</td><td className="num">{dash(c.tx_rate_mbps, " Mb/s")}</td><td className="num">{dur(c.session_s)}</td>
@@ -89,7 +90,8 @@ function ClientDrawer({ mac, onClose }: { mac: string; onClose: () => void }) {
           {d.roaming.rows?.[0]?.flags?.length > 0 && <span className="text-amber-300"> Flags: {d.roaming.rows[0].flags.join(", ").replace(/_/g, " ")}</span>}</p>
         {!d.events.length ? <Empty text="No association events recorded." /> : <TableWrap maxH="max-h-80"><table className="tbl"><tbody>{d.events.map((e: any) =>
           <tr key={e.id}><td className="text-xs whitespace-nowrap"><Time v={e.at} /></td><td className="text-xs">{e.kind.replace("client_", "").replace(/_/g, " ")}</td>
-            <td className="text-xs">{e.detail}</td></tr>)}</tbody></table></TableWrap>}</Card>
+            <td className="text-xs cell-wrap min-w-[14rem]">{e.detail}</td></tr>)}</tbody></table></TableWrap>}</Card>
+      <ClientHistory mac={mac} />
       <div className="text-2xs text-muted">Sources: {c.sources.join(", ") || "—"}</div>
     </div>}
   </Drawer>;
@@ -118,13 +120,14 @@ export function WlansTab() {
     {d && <>
       <Card bodyClass="p-0">{!d.items.length ? <Empty text="No WLANs reported." /> : <TableWrap><table className="tbl"><thead><tr><th>ID</th><th>SSID</th><th>Profile</th><th>Controller</th><th>State</th>
         <th>Security</th><th className="num">Clients</th><th className="num">APs / radios</th><th>Bands</th><th className="num">Avg RSSI</th><th className="num">Traffic (rx / tx)</th><th>Top APs</th></tr></thead>
-        <tbody>{d.items.map((w: any) => <tr key={w.id} className="cursor-pointer hover:bg-white/5" onClick={() => go("clients", { ssid: w.ssid })}><td>{w.wlan_id}</td>
+        <tbody>{d.items.map((w: any) => <tr key={w.id} {...rowProps(() => go("clients", { ssid: w.ssid }))}><td>{w.wlan_id}</td>
           <td className="font-medium">{w.ssid}</td><td className="text-xs">{w.profile}</td><td className="text-xs">{w.wlc}</td><td><WState s={!w.present ? "unknown" : w.enabled ? "up" : "disabled"} /></td>
           <td className="text-xs">{w.security || "—"}</td><td className="num">{dash(w.clients)}</td><td className="num">{dash(w.aps)} / {dash(w.radios)}</td>
           <td className="text-xs">{Object.entries(w.bands).map(([b, n]) => `${b}: ${n}`).join(" · ") || "—"}</td><td className="num">{dbm(w.avg_rssi_dbm)}</td>
           <td className="num text-xs">{bytes(w.rx_bytes)} / {bytes(w.tx_bytes)}</td><td className="text-xs">{w.top_aps.map(([a, n]: any) => `${a} (${n})`).join(", ") || "—"}</td></tr>)}</tbody></table></TableWrap>}</Card>
       <Card title="Clients per SSID over time">{trend ? <Chart height={260} option={trend} ariaLabel="Clients per SSID" /> : <Empty text="No client-count history in this range." />}</Card>
     </>}
+    <ClientAnalytics />
   </div>;
 }
 
@@ -142,7 +145,7 @@ export function RoamingTab() {
         <Kpi label="Clients with anomalies" value={fmtNum(d.anomalies)} tone={d.anomalies ? "warn" : "ok"} /><Kpi label="Excessive-roaming threshold" value={`${d.threshold_roams} roams`} sub={`in ${d.window_hours} h`} /></div>
       <Card bodyClass="p-0">{!d.rows.length ? <Empty text="No roams observed in this window." /> : <TableWrap><table className="tbl"><thead><tr><th>Client</th><th className="num">Roams</th>
         <th className="num">Ping-pong</th><th className="num">Drop after roam</th><th>Flags</th><th>APs visited</th><th>Last</th></tr></thead>
-        <tbody>{d.rows.map((r: any) => <tr key={r.mac} className="cursor-pointer hover:bg-white/5" onClick={() => go("clients", { client: r.mac })}><td className="font-mono text-xs">{r.mac}</td>
+        <tbody>{d.rows.map((r: any) => <tr key={r.mac} {...rowProps(() => go("clients", { client: r.mac }))}><td className="font-mono text-xs">{r.mac}</td>
           <td className="num">{r.roams}</td><td className="num">{r.ping_pong}</td><td className="num">{r.disconnect_after_roam}</td>
           <td>{r.flags.map((f: string) => <span key={f} className="pill bg-amber-500/15 text-amber-300 mr-1">{f.replace(/_/g, " ")}</span>)}</td>
           <td className="text-xs font-mono">{r.aps.join(", ")}</td><td className="text-xs"><Time v={r.last} /></td></tr>)}</tbody></table></TableWrap>}</Card>
@@ -171,7 +174,7 @@ export function EventsTab() {
     {d && <Card bodyClass="p-0">{!d.items.length ? <Empty text="No events." /> : <>
       <TableWrap><table className="tbl"><thead><tr><th>Time</th><th>Event</th><th>Severity</th><th>AP</th><th>Client</th><th className="w-full">Detail</th></tr></thead>
         <tbody>{d.items.map((e: any) => <tr key={e.id}><td className="text-xs whitespace-nowrap"><Time v={e.at} /></td><td className="text-xs">{e.kind.replace(/_/g, " ")}</td><td><Sev s={e.severity} /></td>
-          <td className="text-xs">{e.ap || "—"}</td><td className="font-mono text-xs">{e.client_mac || "—"}</td><td className="text-xs">{e.detail}</td></tr>)}</tbody></table></TableWrap>
+          <td className="text-xs">{e.ap || "—"}</td><td className="font-mono text-xs">{e.client_mac || "—"}</td><td className="text-xs cell-wrap min-w-[14rem]">{e.detail}</td></tr>)}</tbody></table></TableWrap>
       <Pager page={page} size={100} total={d.total} onPage={setPage} /></>}</Card>}
   </div>;
 }
@@ -190,12 +193,12 @@ export function TroubleshootTab() {
     <p className="text-xs text-muted">Rule-based checks over what the controller and switch monitoring report. Results list the evidence behind each finding; probable causes are correlations, not a
       determined root cause. Nothing is changed on any device.</p>
     <Card><div className="grid gap-2 sm:grid-cols-4">
-      <div><label className="label">Scenario</label><select className="input w-full" value={scenario} onChange={(e) => setScenario(e.target.value)}>
-        {Object.entries(meta.data?.scenarios || {}).map(([k, l]) => <option key={k} value={k}>{l as string}</option>)}</select></div>
-      <div><label className="label">Access point</label><select className="input w-full" value={ap} onChange={(e) => setAp(e.target.value)}><option value="">—</option>
-        {(aps.data?.items || []).map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.state})</option>)}</select></div>
-      <div><label className="label">Client MAC</label><input className="input w-full font-mono" value={mac} onChange={(e) => setMac(e.target.value)} placeholder="aa:bb:cc:dd:ee:ff" /></div>
-      <div><label className="label">SSID</label><input className="input w-full" value={ssid} onChange={(e) => setSsid(e.target.value)} placeholder="for “client cannot connect”" /></div>
+      <label className="block min-w-0"><span className="label">Scenario</span><select className="input w-full" value={scenario} onChange={(e) => setScenario(e.target.value)}>
+        {Object.entries(meta.data?.scenarios || {}).map(([k, l]) => <option key={k} value={k}>{l as string}</option>)}</select></label>
+      <label className="block min-w-0"><span className="label">Access point</span><select className="input w-full" value={ap} onChange={(e) => setAp(e.target.value)}><option value="">—</option>
+        {(aps.data?.items || []).map((a: any) => <option key={a.id} value={a.id}>{a.name} ({a.state})</option>)}</select></label>
+      <label className="block min-w-0"><span className="label">Client MAC</span><input className="input w-full font-mono" value={mac} onChange={(e) => setMac(e.target.value)} placeholder="aa:bb:cc:dd:ee:ff" /></label>
+      <label className="block min-w-0"><span className="label">SSID</span><input className="input w-full" value={ssid} onChange={(e) => setSsid(e.target.value)} placeholder="for “client cannot connect”" /></label>
     </div>
       {run.error && <div role="alert" className="text-sm text-red-400 mt-2">{(run.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={run.isPending} onClick={() => run.mutate()}>{run.isPending ? "Analysing…" : "Analyse"}</button></Card>

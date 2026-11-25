@@ -2,7 +2,7 @@
 (function () {
   try {
     var t = localStorage.getItem("siem.theme");
-    if (t !== "light" && t !== "dark") t = "light"; // Zomato theme: day by default
+    if (t !== "light" && t !== "dark") t = "dark"; // Sentinel: night is the primary theme
     document.documentElement.className = t;
   } catch (e) {}
 })();

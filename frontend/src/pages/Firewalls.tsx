@@ -111,7 +111,7 @@ function FirewallForm({ fw, onClose }: { fw: any; onClose: () => void }) {
   });
   const del = useMutation({ mutationFn: () => api(`/firewalls/${fw.id}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["firewalls"] }); onClose(); } });
   const pan = f.vendor === "paloalto";
-  const inp = (k: string, l: string, p: any = {}) => <div><label className="label">{l}</label><input className="input w-full" value={f[k]} onChange={set(k)} {...p} /></div>;
+  const inp = (k: string, l: string, p: any = {}) => <label className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k]} onChange={set(k)} {...p} /></label>;
   return (
     <Modal title={isNew && !fw.id ? `Register ${pan ? "Palo Alto firewall" : "FortiGate"}` : `Edit ${f.name}`} onClose={onClose} wide>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -119,11 +119,11 @@ function FirewallForm({ fw, onClose }: { fw: any; onClose: () => void }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {inp("name", "Firewall name")}{inp("site", "Site / warehouse / branch")}
             {inp("host", "Management IP or hostname")}{inp("https_port", "HTTPS port", { type: "number" })}
-            {pan ? <div><label className="label">Log time zone (PAN-OS logs local time)</label>
-                <input className="input w-full" list="tz-list" value={f.log_tz} onChange={set("log_tz")} /><datalist id="tz-list">{ZONES.map((z) => <option key={z} value={z} />)}</datalist></div>
+            {pan ? <label className="block min-w-0"><span className="label">Log time zone (PAN-OS logs local time)</span>
+                <input className="input w-full" list="tz-list" value={f.log_tz} onChange={set("log_tz")} /><datalist id="tz-list">{ZONES.map((z) => <option key={z} value={z} />)}</datalist></label>
               : inp("fortios_version", "FortiOS version (declared)", { placeholder: "7.4.4" })}
             {inp("vdom", pan ? "Virtual system (vsys)" : "VDOM")}
-            <div><label className="label">API access method</label><select className="input w-full" value="token" disabled><option value="token">{pan ? "XML API key (X-PAN-KEY header)" : "REST API token (Bearer header)"}</option></select></div>
+            <label className="block min-w-0"><span className="label">API access method</span><select className="input w-full" value="token" disabled><option value="token">{pan ? "XML API key (X-PAN-KEY header)" : "REST API token (Bearer header)"}</option></select></label>
             {inp("api_token", isNew ? (pan ? "API key" : "API token") : `${pan ? "API key" : "API token"} (leave blank to keep; required when host or port changes)`, { type: "password", autoComplete: "new-password" })}
             {inp("poll_interval_seconds", "Polling interval (s)", { type: "number", min: 15 })}{inp("tags", "Tags (comma-separated)")}
             {inp("ca_bundle_path", "CA bundle path (server-side, optional)", { placeholder: "/certs/fortigate-ca.pem" })}

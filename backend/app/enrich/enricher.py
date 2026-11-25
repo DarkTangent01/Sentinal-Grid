@@ -4,10 +4,12 @@ from __future__ import annotations
 import logging
 import time
 
-from sqlalchemy import func, select
+from datetime import datetime, timezone
+
+from sqlalchemy import func, or_, select
 
 from ..config import get_settings
-from .geo import GeoResolver
+from ..platform.geoip import GeoResolver
 from .ti import IndicatorSet
 
 log = logging.getLogger("enrich")
@@ -36,7 +38,10 @@ class Enricher:
             if version == self._ti_version and not force:
                 return
             rows = (await s.execute(select(TiIndicator.indicator, TiIndicator.type, TiFeed.name, TiFeed.category)
-                                    .join(TiFeed, TiFeed.id == TiIndicator.feed_id).where(TiFeed.enabled.is_(True)))).all()
+                                    .join(TiFeed, TiFeed.id == TiIndicator.feed_id)
+                                    # not matched: analyst-marked false positives and expired indicators
+                                    .where(TiFeed.enabled.is_(True), TiIndicator.false_positive.is_(False),
+                                           or_(TiIndicator.expires_at.is_(None), TiIndicator.expires_at > datetime.now(timezone.utc))))).all()
         self.ti = IndicatorSet([tuple(r) for r in rows])
         self._ti_version = version
         log.info("threat intel loaded: %d indicators", len(self.ti))

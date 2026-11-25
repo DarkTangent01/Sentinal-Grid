@@ -326,6 +326,62 @@ async def switch_port(s: AsyncSession, a: WirelessAp) -> dict | None:
     return out
 
 
+# ------------------------------------------------------------------ per-floor client experience SLA
+async def floors(s: AsyncSession, ch=None, *, target_pct: float = 80.0, days: int = 7, site: str | None = None, now: datetime | None = None) -> dict:
+    """Client experience per site / building / floor (from the AP each client is on).
+
+    SLA = share of scored clients whose Client Experience Score is good (≥ 75) right now, against target_pct. The trend is
+    the daily share of client readings with usable signal (RSSI above the poor threshold and SNR above the poor threshold)
+    from the per-poll client samples (kept 14 days) — a related but simpler measure, labelled as such."""
+    now = now or datetime.now(timezone.utc)
+    wlcs = {w.id: w for w in await controllers(s)}
+    aps = {a.id: a for a in (await s.execute(select(WirelessAp).where(WirelessAp.wlc_id.in_(list(wlcs) or [0])))).scalars()
+           if not site or a.site == site}
+    radios = {(r.ap_id, r.slot): r for r in (await s.execute(select(WirelessRadio).where(WirelessRadio.wlc_id.in_(list(wlcs) or [0])))).scalars()}
+    cl = (await s.execute(select(WirelessClient).where(WirelessClient.present.is_(True), WirelessClient.ap_id.in_(list(aps) or [0])))).scalars().all()
+    key = lambda a: (a.site or "", a.building or "", a.floor or "")  # noqa: E731
+    out: dict[tuple, dict] = {}
+    for c in cl:
+        a = aps[c.ap_id]
+        f = out.setdefault(key(a), {"site": a.site or "", "building": a.building or "", "floor": a.floor or "", "aps": set(), "clients": 0,
+                                    "scored": 0, "good": 0, "score_sum": 0.0})
+        f["aps"].add(a.id)
+        f["clients"] += 1
+        sc = client_score(c, radios.get((c.ap_id, c.slot)), thresholds(wlcs.get(c.wlc_id)))
+        if sc["score"] is not None:
+            f["scored"] += 1
+            f["score_sum"] += sc["score"]
+            f["good"] += sc["grade"] == "good"
+    trend: dict[tuple, list] = {}
+    if ch is not None and aps:
+        t = thresholds(None)
+        rows = await ch.aquery("SELECT toDate(ts) AS d, ap_id, count() AS n, countIf(rssi_dbm >= {r:Float32} AND snr_db >= {sn:Float32}) AS ok "
+                               "FROM wireless_client_samples WHERE ts >= {t0:DateTime64(3)} AND ap_id IN {a:Array(UInt32)} AND rssi_dbm IS NOT NULL "
+                               "GROUP BY d, ap_id ORDER BY d", {"r": t["rssi_poor_dbm"], "sn": t["snr_poor_db"], "t0": now - timedelta(days=days),
+                                                                 "a": list(aps)})
+        acc: dict[tuple, dict] = {}
+        for r in rows:
+            a = aps.get(int(r["ap_id"]))
+            if a is None:
+                continue
+            d = acc.setdefault((key(a), str(r["d"])[:10]), {"n": 0, "ok": 0})
+            d["n"] += int(r["n"])
+            d["ok"] += int(r["ok"])
+        for (k, day), v in sorted(acc.items(), key=lambda x: x[0][1]):
+            trend.setdefault(k, []).append({"day": day, "signal_ok_pct": round(100 * v["ok"] / v["n"], 1) if v["n"] else None, "readings": v["n"]})
+    items = []
+    for k, f in out.items():
+        good_pct = round(100 * f["good"] / f["scored"], 1) if f["scored"] else None
+        items.append({"site": f["site"], "building": f["building"], "floor": f["floor"], "aps": len(f["aps"]), "clients": f["clients"],
+                      "scored": f["scored"], "good_pct": good_pct, "avg_score": round(f["score_sum"] / f["scored"], 1) if f["scored"] else None,
+                      "target_pct": target_pct, "sla": None if good_pct is None else ("met" if good_pct >= target_pct else "breach"),
+                      "trend": trend.get(k, [])})
+    items.sort(key=lambda x: (x["sla"] != "breach", x["good_pct"] if x["good_pct"] is not None else 101, x["site"], x["building"], x["floor"]))
+    return {"items": items, "target_pct": target_pct,
+            "note": "Floors come from each AP's building / floor (controller location or an administrator override). The SLA is the share of "
+                    "scored clients with a good experience score now; the trend is the daily share of readings with usable RSSI and SNR."}
+
+
 # ------------------------------------------------------------------ troubleshooting
 SCENARIOS = {"poor_performance": "Poor wireless performance", "ap_offline": "AP offline", "client_cannot_connect": "Client cannot connect",
              "frequent_disconnects": "Frequent disconnections", "high_load": "High client load"}

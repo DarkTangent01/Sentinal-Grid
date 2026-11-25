@@ -11,7 +11,7 @@ from __future__ import annotations
 import ipaddress
 import math
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { fmtNum } from "../../lib/format";
-import { Card, Empty, Kpi, Loading, Modal, Sev, TableWrap, Tabs, Time } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, Modal, rowProps, Sev, TableWrap, Tabs, Time } from "../../components/ui";
 import { StateDot } from "../switches/common";
 import { CELL, CONFIDENCE, VENDOR_LABEL, matrixCounts, pctTone, vendorKey } from "./snmp";
 
@@ -81,10 +81,10 @@ function ProfileForm({ d, onClose }: { d: any; onClose: () => void }) {
     <p className="text-xs text-muted mb-2">Detected: {d.vendor} {d.product_line || ""} ({CONFIDENCE[d.id_confidence] || "not identified yet"}). {d.identity?.matched_by}.
       An override applies on the next poll; if the device's own sysObjectID disagrees, the conflict is shown on this page.</p>
     <div className="grid gap-2 sm:grid-cols-2">
-      <div><label className="label">Vendor</label><select className="input w-full" value={f.vendor_override} onChange={(e) => setF({ vendor_override: e.target.value, family_override: "" })}>
-        <option value="">Automatic</option>{["cisco", "fortinet", "juniper", "ruckus", "generic"].map((v) => <option key={v}>{v}</option>)}</select></div>
-      <div><label className="label">Product line</label><select className="input w-full" value={f.family_override} onChange={(e) => setF({ ...f, family_override: e.target.value })}>
-        <option value="">Automatic</option>{families.map((x) => <option key={x}>{x}</option>)}</select></div>
+      <label className="block min-w-0"><span className="label">Vendor</span><select className="input w-full" value={f.vendor_override} onChange={(e) => setF({ vendor_override: e.target.value, family_override: "" })}>
+        <option value="">Automatic</option>{["cisco", "fortinet", "juniper", "ruckus", "generic"].map((v) => <option key={v}>{v}</option>)}</select></label>
+      <label className="block min-w-0"><span className="label">Product line</span><select className="input w-full" value={f.family_override} onChange={(e) => setF({ ...f, family_override: e.target.value })}>
+        <option value="">Automatic</option>{families.map((x) => <option key={x}>{x}</option>)}</select></label>
     </div>
     <Err e={save.error} />
     <div className="flex justify-end gap-2 mt-3"><button className="btn" onClick={onClose}>Cancel</button>
@@ -146,7 +146,7 @@ function Traps() {
       <select className="input py-1 text-xs" value={range} onChange={(e) => setRange(e.target.value)} aria-label="Range">{["1h", "24h", "7d", "30d"].map((r) => <option key={r}>{r}</option>)}</select>
       <select className="input py-1 text-xs" value={sev} onChange={(e) => setSev(e.target.value)} aria-label="Severity"><option value="">All severities</option>
         {["critical", "high", "medium", "low", "informational"].map((x) => <option key={x}>{x}</option>)}</select>
-      <input className="input py-1 text-xs w-64" placeholder="Search trap, component or OID" value={qq} onChange={(e) => setQ(e.target.value)} />
+      <input aria-label="Search traps" className="input py-1 text-xs w-64" placeholder="Search trap, component or OID" value={qq} onChange={(e) => setQ(e.target.value)} />
     </div>
     <Loading q={q} />
     {d && <>
@@ -155,7 +155,7 @@ function Traps() {
       <Card title="Traps" bodyClass="p-0">{!d.items.length ? <Empty text="No traps in this range. Point devices' trap host at this NMS (UDP 162) — see docs/SNMP.md." /> :
         <TableWrap maxH="max-h-[36rem]"><table className="tbl"><thead><tr><th>Time</th><th>Device</th><th>Severity</th><th>Trap</th><th>Component</th><th>Summary</th><th>Ver.</th>
           <th className="num">Repeats</th></tr></thead>
-          <tbody>{d.items.map((t: any, i: number) => <tr key={i} className="cursor-pointer hover:bg-white/5" onClick={() => setOpen(t)}><td className="text-xs"><Time v={t.ts} /></td>
+          <tbody>{d.items.map((t: any, i: number) => <tr key={i} {...rowProps(() => setOpen(t))}><td className="text-xs"><Time v={t.ts} /></td>
             <td>{t.switch ? <Link className="link" to={`/switches/${t.switch_id}`} onClick={(e) => e.stopPropagation()}>{t.switch}</Link> : t.source_ip}</td>
             <td><Sev s={t.severity} /></td><td className="text-xs">{t.trap_name}</td><td className="text-xs">{t.component || "—"}</td><td className="text-xs">{t.summary}</td>
             <td className="text-xs">{t.version}</td><td className="num">{t.repeats || "—"}</td></tr>)}</tbody></table></TableWrap>}</Card>
@@ -184,7 +184,7 @@ function Registry() {
     <Card title="Built-in metric definitions" bodyClass="p-0" right={<div className="flex gap-2">
       <select className="input py-1 text-xs" value={vendor} onChange={(e) => setVendor(e.target.value)} aria-label="Vendor"><option value="">All vendors</option>
         {["cisco", "fortinet", "juniper", "ruckus", "generic"].map((v) => <option key={v}>{v}</option>)}</select>
-      <input className="input py-1 text-xs w-48" placeholder="Filter metric / MIB / OID" value={qq} onChange={(e) => setQ(e.target.value)} /></div>}>
+      <input aria-label="Filter registry" className="input py-1 text-xs w-48" placeholder="Filter metric / MIB / OID" value={qq} onChange={(e) => setQ(e.target.value)} /></div>}>
       <Loading q={q} /><Err e={toggle.error} />
       {q.data && <TableWrap maxH="max-h-[40rem]"><table className="tbl"><thead><tr><th>Metric</th><th>Group</th><th>Source (MIB object)</th><th>OID</th><th>Type</th><th>Unit</th>
         <th>Vendors</th><th>Observed on</th><th>Collect</th></tr></thead>
@@ -206,9 +206,9 @@ function OidTools() {
   const test = useMutation({ mutationFn: () => api<any>("/snmp/oids/test", { method: "POST", body: { ...t, switch_id: Number(t.switch_id) } }) });
   return <div className="grid gap-4 xl:grid-cols-2">
     <Card title="Search OIDs (registry, notifications, imported MIBs)" bodyClass="p-0">
-      <div className="p-3"><input className="input w-full" placeholder="Name or OID prefix, e.g. ifHCInOctets or 1.3.6.1.4.1.12356" value={qq} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="p-3"><input aria-label="Search the MIB registry" className="input w-full" placeholder="Name or OID prefix, e.g. ifHCInOctets or 1.3.6.1.4.1.12356" value={qq} onChange={(e) => setQ(e.target.value)} /></div>
       {search.data && (!search.data.items.length ? <Empty text="No match." /> : <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th>Name</th><th>OID</th><th>Source</th></tr></thead>
-        <tbody>{search.data.items.map((x: any, i: number) => <tr key={i} className={admin ? "cursor-pointer hover:bg-white/5" : ""} onClick={() => admin && setT({ ...t, oid: x.oid })}>
+        <tbody>{search.data.items.map((x: any, i: number) => <tr key={i} {...(admin ? rowProps(() => setT({ ...t, oid: x.oid })) : {})}>
           <td className="text-xs">{x.name}{x.description && <div className="text-2xs text-muted truncate max-w-[22rem]">{x.description}</div>}</td>
           <td className="font-mono text-2xs">{x.oid}</td><td className="text-xs">{x.source}</td></tr>)}</tbody></table></TableWrap>)}
     </Card>
@@ -267,19 +267,19 @@ function CustomForm({ c, onClose }: { c: any | null; onClose: () => void }) {
   const body = () => ({ ...Object.fromEntries(Object.keys(CUSTOM_BLANK).map((k) => [k, f[k]])), scale: Number(f.scale) || 1 });
   const save = useMutation({ mutationFn: () => api(c ? `/snmp/custom/${c.id}` : "/snmp/custom", { method: c ? "PUT" : "POST", body: body() }), onSuccess: done });
   const del = useMutation({ mutationFn: () => api(`/snmp/custom/${c.id}`, { method: "DELETE" }), onSuccess: done });
-  const inp = (k: string, l: string, p: any = {}) => <div><label className="label">{l}</label><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></div>;
+  const inp = (k: string, l: string, p: any = {}) => <label className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></label>;
   return <Modal wide title={c ? `Edit ${c.name}` : "Add a custom OID"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-3">
       {inp("name", "Name (metric custom:<name>)", { placeholder: "fgt_ssl_vpn_users" })}{inp("oid", "OID (numeric)", { placeholder: "1.3.6.1.4.1.12356.101.12.2.3.1.2" })}
-      <div><label className="label">Method</label><select className="input w-full" value={f.method} onChange={set("method")}><option value="get">GET (one scalar)</option><option value="walk">WALK (one table column)</option></select></div>
-      <div><label className="label">Value type</label><select className="input w-full" value={f.value_type} onChange={set("value_type")}>
-        {[["gauge", "gauge"], ["counter", "counter (rate per second)"], ["state", "state"], ["info", "info (text, not graphed)"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+      <label className="block min-w-0"><span className="label">Method</span><select className="input w-full" value={f.method} onChange={set("method")}><option value="get">GET (one scalar)</option><option value="walk">WALK (one table column)</option></select></label>
+      <label className="block min-w-0"><span className="label">Value type</span><select className="input w-full" value={f.value_type} onChange={set("value_type")}>
+        {[["gauge", "gauge"], ["counter", "counter (rate per second)"], ["state", "state"], ["info", "info (text, not graphed)"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
       {inp("unit", "Unit")}{inp("scale", "Multiply by", { type: "number", step: "any" })}
-      <div><label className="label">Vendor</label><select className="input w-full" value={f.vendor} onChange={set("vendor")}><option value="">Any</option>
-        {["cisco", "fortinet", "juniper", "ruckus", "generic"].map((v) => <option key={v}>{v}</option>)}</select></div>
+      <label className="block min-w-0"><span className="label">Vendor</span><select className="input w-full" value={f.vendor} onChange={set("vendor")}><option value="">Any</option>
+        {["cisco", "fortinet", "juniper", "ruckus", "generic"].map((v) => <option key={v}>{v}</option>)}</select></label>
       {inp("product_line", "Product line (optional)", { placeholder: "FortiGate" })}
       <label className="flex items-center gap-2 text-sm mt-5"><input type="checkbox" checked={f.enabled} onChange={set("enabled")} /> Enabled</label>
-      <div className="sm:col-span-3"><label className="label">Only these devices (none = every matching device)</label>
+      <div className="sm:col-span-3" role="group" aria-label="Only these devices (none = every matching device)"><span className="label">Only these devices (none = every matching device)</span>
         <div className="max-h-32 overflow-auto border border-line rounded p-2 grid sm:grid-cols-3 gap-1">{(devs.data?.devices || []).map((d: any) =>
           <label key={d.id} className="flex items-center gap-1 text-xs"><input type="checkbox" checked={f.switch_ids.includes(d.id)}
             onChange={() => setF({ ...f, switch_ids: f.switch_ids.includes(d.id) ? f.switch_ids.filter((x: number) => x !== d.id) : [...f.switch_ids, d.id] })} />{d.name}</label>)}</div></div>

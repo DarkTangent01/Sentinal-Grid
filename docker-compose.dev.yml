@@ -1,0 +1,22 @@
+# Development / lab overrides. The base docker-compose.yml is the production configuration and is secure by default;
+# this file only relaxes what a laptop or lab copy needs. Never use it on a production host.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# - unprivileged host ports, loopback only (no root needed to bind, nothing reachable from the network)
+# - the API published on loopback for the Vite dev server (npm run dev proxies /api to 127.0.0.1:8000)
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:18443:8443"
+      - "127.0.0.1:18080:8080"
+  api:
+    ports: ["127.0.0.1:8000:8000"]
+  ingress:
+    ports: !override
+      - "127.0.0.1:15514:5514/udp"
+      - "127.0.0.1:15514:5514/tcp"
+  traps:
+    ports: !override
+      - "127.0.0.1:11162:1162/udp"
+  tacacs:
+    ports: !override
+      - "127.0.0.1:10049:49/tcp"

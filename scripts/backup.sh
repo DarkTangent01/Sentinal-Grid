@@ -28,4 +28,25 @@ while :; do
   esac
 done
 echo "$TS" > "$OUT/clickhouse_backup_name"
-echo "[backup] done: $OUT (+ backups/clickhouse/$TS.zip)"
+chmod 700 backups "$OUT"
+
+# Optional encryption to a public key (security/PRODUCTION_DEPLOYMENT.md, "Backups"): with BACKUP_GPG_RECIPIENT set in
+# .env (a key imported with `gpg --import`), both files are encrypted and the plaintext removed. The server holds only
+# the public key, so a copied backup is unreadable without the private key, which is kept offline.
+RCPT=$(envval BACKUP_GPG_RECIPIENT)
+if [ -n "$RCPT" ]; then
+  for f in "$OUT/postgres.dump" "backups/clickhouse/$TS.zip"; do
+    gpg --batch --yes --trust-model always --recipient "$RCPT" --output "$f.gpg" --encrypt "$f"
+    rm -f "$f"
+  done
+  echo "[backup] encrypted for $RCPT"
+else
+  echo "[backup] WARNING: not encrypted (set BACKUP_GPG_RECIPIENT in .env); copy it only to storage you would trust with the database" >&2
+fi
+
+# retention: keep BACKUP_KEEP_DAYS (default 14) days of local backups; older ones are removed (copies elsewhere are not)
+KEEP=$(envval BACKUP_KEEP_DAYS); KEEP=${KEEP:-14}
+[[ "$KEEP" =~ ^[0-9]+$ ]] && [ "$KEEP" -ge 1 ] || { echo "[backup] BACKUP_KEEP_DAYS must be a positive number" >&2; exit 1; }
+find backups -mindepth 1 -maxdepth 1 -type d -name '20*Z' -mtime +"$KEEP" -exec rm -rf {} +
+find backups/clickhouse -maxdepth 1 -type f -name '20*Z.zip*' -mtime +"$KEEP" -delete 2>/dev/null || true
+echo "[backup] done: $OUT (+ backups/clickhouse/$TS.zip${RCPT:+.gpg}); kept the last $KEEP days"

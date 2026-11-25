@@ -5,12 +5,15 @@ IOS / IOS-XE, Ruckus ICX FastIron), managed from Sentinel Grid. It does **not** 
 SIEM sign-in and RBAC are unchanged. The module never changes network devices: it generates device templates for
 engineers to review and apply, and it changes only the TACACS+ server's configuration, through an approved job.
 
-> **Verification status.** Everything below is implemented and covered by automated tests against simulated
-> components (a test TACACS+ server speaking the real protocol framing, a simulated deploy agent, synthetic log lines
-> in the configured format). The tac_plus-ng server itself has **not** been built or run in this environment: running
-> the upstream build was not permitted during development. The generated configuration follows the tac_plus-ng
-> documentation of the pinned commit, and the deploy agent refuses any version that `tac_plus-ng -P` does not parse.
-> Run the lab checklist below before pointing production devices at it.
+> **Verification status (2026-11-03).** Unit and integration tests run against simulated components (a test TACACS+
+> server speaking the real framing, a simulated agent, synthetic log lines). In addition, the whole flow was run end to
+> end against the **real tac_plus-ng** built from the pinned commit, in a lab copy of the Docker Compose stack:
+> UI / API → version → approval → deploy agent (`tac_plus-ng -P`, activation, health check) → live server; the testing
+> center; a simulated Cisco IOS device (PAP / ASCII authentication, exec and command authorization, accounting
+> start / command / stop, wrong shared secret) → log files → ingestion → explorer, sessions, CSV export
+> (`scripts/lab/tacacs_e2e.py`, 59 checks). That run found and fixed six defects that the simulated tests could not see
+> (see *Fixes from the end-to-end validation*). Real network devices have **not** been tested: run the lab checklist
+> with lab hardware before pointing production devices at the server.
 
 ## Architecture
 
@@ -61,7 +64,8 @@ rejected) until the first approved version is deployed. The bootstrap uses the s
 configuration; a SIEM-deployed version is never replaced.
 
 Then register the server under **Servers** as kind *managed*, management address `tacacs` (the compose service
-name, checked from the worker and api containers), client address = the host IP devices use, port 49. The agent checks
+name, checked from the worker and api containers over the `aaa` network), client address = the host IP devices use,
+port 49. The agent checks
 its own listener through `/proc/net` rather than connecting, and connection-log lines from the SIEM's own containers
 (the TCP/49 health checks) are stored as `conn_probe` / `health_check`, never as unknown devices.
 
@@ -78,7 +82,7 @@ Environment variables (backend): `TACACS_CONFIG_DIR` (`/tacacs/config`), `TACACS
 |---|---|---|---|
 | network devices (management interfaces) | SIEM host | TCP/49 | TACACS+ (restrict to the device management subnets in the host firewall) |
 | tacacs container | LDAP / AD servers | TCP/636 (LDAPS) or TCP/389 + StartTLS | MAVIS directory lookups |
-| SIEM worker | tacacs container | TCP/49 (Docker network) | health checks and tests |
+| SIEM worker / api | tacacs container | TCP/49 (compose network `aaa`) | health checks (worker), testing center (api) |
 
 TACACS+ obfuscates packet bodies with the shared key (MD5-based); this is **not** transport encryption and must not be
 treated as equivalent to TLS. Keep TCP/49 on management networks only.
@@ -86,8 +90,10 @@ treated as equivalent to TLS. Keep TCP/49 on management networks only.
 ## Getting started
 
 1. **Settings** (policy_admin): add the authorised client networks (device management subnets), and the tester
-   address: the SIEM worker's source IP as the TACACS+ server sees it (`docker inspect` the worker on the compose
-   network). A tester key is generated; it is used only by the SIEM.
+   address. Tests run from the **api** container, so this is the api's address on the `aaa` network, or better the
+   `aaa` network's subnet (`docker network inspect <project>_aaa`, /24 or narrower), because container addresses
+   change whenever containers are recreated. A tester key is generated; it is used only by the SIEM. The tester device
+   has a deny-all profile, so a subnet cannot open a shell anywhere.
 2. **Servers** (operator): add the managed server (management address `tacacs`, client-facing address = the host IP
    devices use), and any external TACACS+ servers (monitor and test only).
 3. **Users & identity sources** (policy_admin): add `local` (for break-glass accounts) and your AD / LDAP source:
@@ -254,7 +260,12 @@ with the SIEM's VPN / identity alerts for the same person.
 
 | Symptom | Likely cause |
 |---|---|
-| Test: TCP refused / name does not resolve | tacacs service not running (COMPOSE_PROFILES), or wrong management address (use `tacacs`) |
+| Test: TCP refused / name does not resolve | tacacs service not running (COMPOSE_PROFILES), wrong management address (use `tacacs`), or api / worker not on the `aaa` network |
+| Test: *reset* (connection closed by the server without a reply) | the SIEM's source address is not a device in the active configuration: the tester address no longer matches the api container (recreated → new IP; use the `aaa` subnet), or only the bootstrap configuration is active (deploy a version) |
+| Test: *protocol error* (undecodable reply) | shared-secret mismatch between the client and the server |
+| Health: *cannot write /tacacs/logs* | the log volume is owned by another user (Podman chowns an empty named volume to the first container that mounts it): `docker compose restart tacacs` re-applies ownership. AAA keeps working, but nothing is logged or ingested until fixed |
+| Deployment *failed: agent error: PermissionError … on candidates/N.cfg* | the agent cannot read the candidate: fixed in the worker (it sets the `tacshare` group); check the worker has `group_add: ["10050"]` |
+| Device on TCP/49 times out | host firewall / security group: allow TCP/49 from the device management subnets to the SIEM host; check `TACACS_BIND` publishes on the right address (`ss -ltn 'sport = :49'` on the host) |
 | Test: authentication *policy denial* | the user has no role mapping for the tester device / was disabled — or for real devices, no mapping for that device |
 | Test: *backend unavailable* | LDAP / AD not reachable from the tacacs container, certificate not trusted, bind account wrong (run the bind test) |
 | *protocol error* events / alert | shared-secret mismatch between device and server (rotation half-finished?) |
@@ -265,11 +276,59 @@ with the SIEM's VPN / identity alerts for the same person.
 
 ## Testing
 
+Unit and integration tests (simulated server and agent, no real AAA, no network):
+
+```bash
+cd backend && ../.venv/bin/python -m pytest -q tests/test_tacacs.py
 ```
-cd backend && ../.venv/bin/python -m pytest -q tests/test_tacacs.py   # TACACS+ (simulated server / agent, no real AAA)
-cd backend && ../.venv/bin/python -m pytest -q                       # whole backend (regression)
+
+```bash
+cd backend && ../.venv/bin/python -m pytest -q
+```
+
+```bash
 cd frontend && npx tsc --noEmit && npx vitest run
 ```
+
+### End to end against the real tac_plus-ng (lab stack, never production)
+
+1. Run a **separate copy** of the stack (its own directory, `gen-secrets.sh`, `COMPOSE_PROFILES=tacacs`), not the
+   production one: the script creates users, devices and versions. Publish TCP/49 on loopback only.
+2. `docker compose up -d --build`, then confirm `docker compose exec tacacs tac_plus-ng -v` and that the worker and api
+   resolve `tacacs` (`docker compose exec worker getent hosts tacacs`).
+3. Run the suite (it signs in through the web container with TLS verified against the lab certificate):
+
+```bash
+python3 scripts/lab/tacacs_e2e.py --stack /path/to/lab-copy --base https://127.0.0.1:443 --host-header sentinel.test
+```
+
+It generates every password and key itself, never prints them, and plays a Cisco IOS device from inside the worker
+container (the worker's address is registered as the lab client). Checks (59): settings / server / user / mapping /
+client validation, write-only secrets, redacted preview and versions, separation of duties, replayed approvals, real
+`tac_plus-ng -P` validation and deployment, live config hash, no candidate left on the volume, health, testing center
+(PASS, wrong password, unknown user, disabled user, accounting ingested), device authentication / authorization /
+accounting results, ingestion with device attribution, secret redaction of accounted commands, pagination, CSV export,
+session reconstruction, overview counts, RBAC. Afterwards scan the containers' logs and stores for the generated
+values (the script writes them to a 0600 file you pass with `--leaks`, for `grep -F -f`; delete it after).
+
+Mock TACACS+ server for unit tests: `backend/tests/tacacs_sim.py` (PAP authentication and accounting, configurable
+users and keys, a wrong reply key to simulate a shared-secret mismatch).
+
+### Fixes from the end-to-end validation (2026-11-03)
+
+| Defect | Effect | Fix |
+|---|---|---|
+| Deploy agent `PermissionError` on every request | no version could ever be validated or deployed (production job 1 failed this way) | the volume's setgid bit is silently dropped without CAP_FSETID; the worker now sets the `tacshare` group on the files it writes (`jobs._share`) and removes the candidate on every path |
+| tacacs on the default network only | after the network segmentation, health checks and tests could not resolve `tacacs` (production showed *degraded*) | dedicated `aaa` network shared by tacacs, api and worker |
+| Unquoted SHA-512-crypt hash (`$6$rounds=656000$…`) | tac_plus-ng rejected every version with a local user (`Expected … but got '='`) | the hash is quoted |
+| `${device.name}` in the log formats | it is the **server's** hostname, so every event named the TACACS+ container | `${device}` (the matched device's configured name) |
+| End anchors in command regexes | Cisco authorizes `configure terminal <cr>`; the simulator stripped `<cr>` but the server did not, so the server denied what the simulator permitted | every `$` anchor in rendered regexes accepts an optional ` <cr>` |
+| DateTime64 parameters bound at whole seconds (clickhouse-connect) | session audit showed no commands; any millisecond window in production was truncated | datetimes are sent as UTC text with milliseconds (`db/ch.py`) |
+
+Also: wrong-key replies and server hang-ups are classified (*protocol error* / *reset*) instead of *server error*; the
+accounting test sends START and STOP (no permanently open test session); the agent reports `logs_writable`; ranges
+registered as clients are attributed by device name; `priv-lvl` comes from the AV pair when present; the tester
+address accepts a /24-or-narrower subnet; the test password never enters the browser's mutation state.
 
 Covered: rendering (full vs redacted, escaping, ordering, rotation keys), validation and conflicts, exec and command
 authorization per vendor (permitted, denied, unmatched, exceptions, time windows, expiry, policies), parsing of every
@@ -309,8 +368,16 @@ id = tac_plus-ng {
 
 ## Known limitations
 
-* tac_plus-ng was not built or run during development (see the verification note); validate in a lab first. Upstream
-  describes it as work in progress.
+* Validated against the real tac_plus-ng and a simulated Cisco device, not against real FortiGate / Ruckus / Cisco
+  hardware: run the lab checklist. Upstream describes tac_plus-ng as work in progress.
+* **tac_plus-ng's own log files hold raw records**, including any password an administrator types into an accounted
+  command (`username x secret 0 …`). The SIEM redacts before storing, indexing, displaying or exporting, but the files
+  on the `tacacs_logs` volume keep the raw text. They are readable only by the tacacs user and the worker (directory
+  0770 `tacacs:tacshare`). **They are not rotated or expired**: rotate them on the host (copy-truncate after the worker
+  has read them, or size-based rotation with a SIGHUP to tac_plus-ng) and include them in your retention policy.
+* TACACS+ obfuscation (MD5 pad with the shared key) is not encryption; anyone with the key and a capture can read the
+  traffic. Keep TCP/49 on management networks. Anyone who can `docker exec` into tacacs or the worker, or read Docker's
+  volumes on the host, can read the live configuration (device keys) and raw logs.
 * One managed server per SIEM host; secondary servers are external (monitored and tested, not configured).
 * Remote (external) servers' logs are not ingested; ingestion reads the managed server's files only.
 * Command authorization cannot be enforced on FortiGates; FortiGate accounting is release-dependent.

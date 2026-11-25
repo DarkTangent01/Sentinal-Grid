@@ -155,12 +155,12 @@ function PanelEditor({ p, onSave, onClose }: { p: Panel; onSave: (p: Panel) => v
   return (
     <Modal title={p.title ? `Panel: ${p.title}` : "New panel"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-3">
-        <div className="sm:col-span-3"><label className="label">Title</label><input className="input w-full" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
-        <div className="sm:col-span-3"><label className="label">Query</label><textarea className="input w-full font-mono text-[13px] min-h-[5rem]" spellCheck={false} value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></div>
-        <div><label className="label">Visualisation</label><select className="input w-full" value={f.viz} onChange={(e) => setF({ ...f, viz: e.target.value as Viz })}>{VIZ_OPTIONS.map((v) => <option key={v}>{v}</option>)}</select></div>
-        <div><label className="label">Width (of 12)</label><select className="input w-full" value={f.width} onChange={(e) => setF({ ...f, width: Number(e.target.value) })}>{[2, 3, 4, 6, 8, 9, 12].map((w) => <option key={w} value={w}>{w}</option>)}</select></div>
-        <div><label className="label">Range override</label><select className="input w-full" value={f.range || ""} onChange={(e) => setF({ ...f, range: e.target.value || null })}>
-          <option value="">Workbook range</option>{RANGES.map((r) => <option key={r}>{r}</option>)}</select></div>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Title</span><input className="input w-full" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></label>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Query</span><textarea className="input w-full font-mono text-[13px] min-h-[5rem]" spellCheck={false} value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Visualisation</span><select className="input w-full" value={f.viz} onChange={(e) => setF({ ...f, viz: e.target.value as Viz })}>{VIZ_OPTIONS.map((v) => <option key={v}>{v}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Width (of 12)</span><select className="input w-full" value={f.width} onChange={(e) => setF({ ...f, width: Number(e.target.value) })}>{[2, 3, 4, 6, 8, 9, 12].map((w) => <option key={w} value={w}>{w}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Range override</span><select className="input w-full" value={f.range || ""} onChange={(e) => setF({ ...f, range: e.target.value || null })}>
+          <option value="">Workbook range</option>{RANGES.map((r) => <option key={r}>{r}</option>)}</select></label>
       </div>
       {err && <div role="alert" className="text-sm text-red-400 mt-2 font-mono">{err}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.title || !f.query} onClick={check}>Apply</button>

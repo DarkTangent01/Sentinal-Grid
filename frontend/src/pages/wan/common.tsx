@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { availText, dur, rangeParams, toLocalInput } from "./fmt";
@@ -14,7 +14,6 @@ const STATE: Record<string, [string, string]> = {
   up: ["bg-emerald-400", "Up"], down: ["bg-red-500 animate-pulse", "Down"], degraded: ["bg-amber-400", "Degraded"],
   unknown: ["bg-slate-500", "Unknown"], paused: ["bg-slate-700 ring-1 ring-slate-500", "Paused"], disabled: ["bg-slate-700", "Paused"],
 };
-export const STATE_HEX: Record<string, string> = { up: "#34d399", down: "#ef4444", degraded: "#fbbf24", unknown: "#64748b", paused: "#475569" };
 
 export function StateDot({ s }: { s: string }) {
   const [c, l] = STATE[s] || STATE.unknown;
@@ -65,23 +64,8 @@ export function useRange(initial = "24h") {
   return [r, setR, rangeParams(r)] as const;
 }
 
-export function SortTh({ k, label, sort, setSort, className = "" }: { k: string; label: ReactNode; sort: { key: string; desc: boolean }; setSort: (s: { key: string; desc: boolean }) => void; className?: string }) {
-  const on = sort.key === k;
-  return <th className={className} aria-sort={on ? (sort.desc ? "descending" : "ascending") : "none"}>
-    <button className="inline-flex items-center gap-0.5 hover:text-slate-200" onClick={() => setSort({ key: k, desc: on ? !sort.desc : true })}>
-      {label}<span className="text-2xs w-2">{on ? (sort.desc ? "▼" : "▲") : ""}</span></button></th>;
-}
-
-export function Pager({ page, size, total, onPage }: { page: number; size: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / size));
-  if (total <= size) return null;
-  return <div className="flex items-center gap-2 justify-end text-xs p-2">
-    <span className="text-muted">{(page - 1) * size + 1}–{Math.min(total, page * size)} of {total}</span>
-    <button className="btn py-0.5" disabled={page <= 1} onClick={() => onPage(page - 1)}>‹</button>
-    <span>{page} / {pages}</span>
-    <button className="btn py-0.5" disabled={page >= pages} onClick={() => onPage(page + 1)}>›</button>
-  </div>;
-}
+// shared with every module: one sortable header and one pager across the app
+export { Field, Pager, SortTh } from "../../components/ui";
 
 export function CollectorBadge({ c }: { c?: any }) {
   if (!c) return null;
@@ -97,6 +81,3 @@ export function StaleBanner({ c }: { c?: any }) {
   </div>;
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
-  return <div><label className="label">{label}</label>{children}{hint && <div className="text-2xs text-muted mt-0.5">{hint}</div>}</div>;
-}

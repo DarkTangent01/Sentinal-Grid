@@ -1,2 +1,13 @@
+# build context: package files, sources and the nginx configuration only
 node_modules
 dist
+coverage
+*.log
+.env*
+*.pem
+*.key
+*.crt
+.git
+.vscode
+.idea
+tsconfig.tsbuildinfo

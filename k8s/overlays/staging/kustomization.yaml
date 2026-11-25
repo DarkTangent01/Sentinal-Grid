@@ -1,0 +1,15 @@
+# Staging: production layout with images from the registry by tag (replace with digests before promoting) and one poller.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../../base]
+images:
+  - { name: sentinel/backend, newName: registry.sentinel.internal/sentinel/backend, newTag: "1.0.0" }
+  - { name: sentinel/web, newName: registry.sentinel.internal/sentinel/web, newTag: "1.0.0" }
+  - { name: sentinel/ingress, newName: registry.sentinel.internal/sentinel/ingress, newTag: "1.0.0" }
+  - { name: sentinel/tacacs, newName: registry.sentinel.internal/sentinel/tacacs, newTag: "1.0.0" }
+replicas:
+  - { name: poller, count: 1 }
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals: [ENVIRONMENT=staging]

@@ -1,5 +1,7 @@
-# Lint, type-check, test, audit and build on every push and pull request. Uses only GitHub's own actions (pin them to
-# commit SHAs if your policy requires it). Nothing is deployed or pushed from CI.
+# Lint, type-check, test, audit, build and scan on every push and pull request (security/DOCKER_HARDENING.md, "CI").
+# Every action is pinned to a full commit SHA (tag in the comment) and every scanner image to a digest, so a moved tag
+# or a compromised release cannot change what runs here. Dependabot (.github/dependabot.yml) proposes updates.
+# Nothing is deployed or pushed from CI. Policy: deploy only a commit whose `security-gate` job passed.
 name: ci
 on:
   push:
@@ -10,6 +12,9 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+env:
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  HADOLINT_IMAGE: hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
 
 jobs:
   backend:
@@ -17,13 +22,14 @@ jobs:
     timeout-minutes: 30
     defaults: { run: { working-directory: backend } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements*.txt }
       - run: pip install -r requirements-dev.txt pip-audit
       - name: lint
         run: ruff check app tests migrations
-      - name: tests
+      - name: tests (includes the static container / secrets policy tests in tests/test_secret_files.py)
         run: python -m pytest -q -m "not live" -p no:cacheprovider
       - name: dependency audit (installed environment)
         run: pip-audit -l --progress-spinner off --skip-editable
@@ -33,9 +39,10 @@ jobs:
     timeout-minutes: 20
     defaults: { run: { working-directory: frontend } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.12.0", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with: { node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci --no-fund
       - name: type check
         run: npm run typecheck
@@ -52,16 +59,18 @@ jobs:
 
   images:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - name: compose file is valid, with throwaway secret files
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { persist-credentials: false }
+      - name: compose files are valid (production and development), with throwaway secret files
         run: |
-          cp .env.example .env && mkdir -p secrets
-          for f in postgres_password db_app_password clickhouse_password secret_key token_encryption_key bootstrap_admin_password; do
+          cp .env.example .env && mkdir -p secrets reports
+          for f in postgres_password db_app_password clickhouse_password clickhouse_app_password secret_key token_encryption_key bootstrap_admin_password; do
             openssl rand -hex 16 > "secrets/$f"; done
           : > secrets/token_encryption_key_previous; : > secrets/anthropic_api_key
           docker compose config -q
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
       - name: no service receives a secret through its environment
         run: |
           docker compose config --format json > /tmp/rendered.json
@@ -73,34 +82,64 @@ jobs:
           print("plain secret env vars:", bad or "none")
           sys.exit(1 if bad else 0)
           PY
-      - name: build images (no push)
-        run: docker compose build --pull
-      - name: scan the built images (fails on fixable critical / high)
-        uses: aquasecurity/trivy-action@0.28.0
-        with: { scan-type: image, image-ref: "fortisiem-backend:1.0.0", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1", scanners: "vuln,secret" }
-      - uses: aquasecurity/trivy-action@0.28.0
-        with: { scan-type: image, image-ref: "fortisiem-web:1.0.0", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1", scanners: "vuln,secret" }
+      - name: build all images, TACACS+ included (no push)
+        run: COMPOSE_PROFILES=tacacs docker compose build --pull
+      - name: scan the images (fails on fixable critical / high)
+        run: |
+          for img in fortisiem-backend fortisiem-web fortisiem-ingress fortisiem-tacacs; do
+            echo "::group::$img"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/reports:/reports" \
+              aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+              image --scanners vuln,secret --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+              --format json --output "/reports/trivy-$img.json" "$img:1.0.0" || fail=1
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+              image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --format table "$img:1.0.0"
+            echo "::endgroup::"
+          done
+          exit ${fail:-0}
       - name: SBOM (SPDX) for the backend and web images
-        uses: anchore/sbom-action@v0.17.8
-        with: { image: "fortisiem-backend:1.0.0", format: spdx-json, output-file: sbom-backend.spdx.json }
-      - uses: anchore/sbom-action@v0.17.8
-        with: { image: "fortisiem-web:1.0.0", format: spdx-json, output-file: sbom-web.spdx.json }
+        if: always()
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+        with: { image: "fortisiem-backend:1.0.0", format: spdx-json, output-file: reports/sbom-backend.spdx.json, upload-artifact: false }
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+        if: always()
+        with: { image: "fortisiem-web:1.0.0", format: spdx-json, output-file: reports/sbom-web.spdx.json, upload-artifact: false }
+      - name: keep the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with: { name: image-security-reports, path: reports/, retention-days: 30 }
 
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # the whole history: a secret removed later is still exposed
-      - name: secret scan (gitleaks, values redacted in the output)
-        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2 detect --source /repo --redact --no-banner -v
-      - name: Dockerfile lint (hadolint)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }   # the whole history: a secret removed later is still exposed
+      - name: secret scan, whole history (gitleaks; values redacted in the output)
+        run: docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" git /repo --redact --no-banner -v
+      - name: Dockerfile lint (hadolint; fails on errors)
         run: |
           for f in backend/Dockerfile frontend/Dockerfile deploy/ingress/Dockerfile deploy/tacacs/Dockerfile; do
-            docker run --rm -i hadolint/hadolint:v2.12.0 hadolint --failure-threshold error - < "$f"; done
-      - name: misconfiguration scan (trivy config)
-        uses: aquasecurity/trivy-action@0.28.0
-        with: { scan-type: config, scan-ref: ".", severity: "CRITICAL,HIGH", exit-code: "1" }
-      - name: Dockerfile / compose policy (checkov)
-        uses: bridgecrewio/checkov-action@v12.2873.0
-        with: { directory: ".", framework: dockerfile, quiet: true, soft_fail: true }
+            echo "== $f"; docker run --rm -i "$HADOLINT_IMAGE" hadolint --failure-threshold error - < "$f"; done
+      - name: misconfiguration scan (trivy config: Dockerfiles, compose, workflows; fails on critical / high)
+        run: |
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            config --severity CRITICAL,HIGH --exit-code 1 --ignorefile /src/.trivyignore.yaml /src
+      - name: Kubernetes manifests (every overlay renders; restricted security contexts, RBAC, default-deny NetworkPolicies; production digests)
+        run: |
+          pip install pyyaml==6.0.2
+          for ov in development staging production; do
+            echo "== $ov"; kubectl kustomize "k8s/overlays/$ov" > "/tmp/k8s-$ov.yaml"
+            python3 scripts/security/k8s_audit.py --manifests "/tmp/k8s-$ov.yaml" $([ "$ov" = production ] && echo --require-digests) | tail -n 1
+          done
+      - name: Dockerfile / compose / workflow policy (checkov; report only, reviewed in security/DOCKER_SECURITY_AUDIT.md)
+        uses: bridgecrewio/checkov-action@45edc9d8856b664db2ec251f5f8632361f0a67aa  # v12.3139.0
+        with: { directory: ".", framework: "dockerfile,github_actions,secrets", quiet: true, soft_fail: true, output_format: cli }
+
+  security-gate:
+    # one required check for branch protection and for deploys: every job above must pass
+    needs: [backend, frontend, images, security]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all checks passed"

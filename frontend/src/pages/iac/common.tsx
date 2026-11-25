@@ -123,14 +123,7 @@ export function Confirm({ title, children, confirmLabel, danger, disabled, onCon
   </div>;
 }
 
-export function Pager({ page, size, total, onPage }: { page: number; size: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / size));
-  if (pages <= 1) return null;
-  return <div className="flex items-center gap-2 text-xs justify-end p-2">
-    <button className="btn py-0.5" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
-    <span className="text-muted">page {page} / {pages} · {total}</span>
-    <button className="btn py-0.5" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button></div>;
-}
+export { Pager } from "../../components/ui";
 
 export function useLocalState<T>(key: string, init: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => { try { const s = sessionStorage.getItem(key); return s ? JSON.parse(s) : init; } catch { return init; } });

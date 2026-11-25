@@ -1,0 +1,549 @@
+# Default deny (ingress and egress) for every pod in the namespace, then one policy per workload listing exactly the flows
+# it needs (the sentinel/flow annotation documents each one). Requires a CNI that enforces NetworkPolicy (Calico, Cilium,
+# kube-router, kindnet >= v0.24 / kube-network-policies).
+# Site-specific values: the device / management networks are RFC 1918 here; the production overlay narrows them to the real
+# management CIDRs. *ICMP: NetworkPolicy has no ICMP selector; whether the worker's ping checks pass under these egress rules
+# depends on the CNI (Calico / Cilium: add a CNI-specific ICMP rule).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  annotations:
+    sentinel/flow: 'baseline: nothing in or out unless a policy below allows it'
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  annotations:
+    sentinel/flow: every pod -> cluster DNS 53/udp+tcp
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  annotations:
+    sentinel/flow: backend services -> 5432; no egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: worker
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: poller
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: syslog
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traps
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: flows
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: migrate
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clickhouse
+  annotations:
+    sentinel/flow: backend services -> 8123 / 9000; no egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: worker
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: poller
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: syslog
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: traps
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: flows
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: migrate
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web
+  annotations:
+    sentinel/flow: users -> 8443/8080; web -> api 8000 only (no database route)
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: web
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 8443
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api
+  annotations:
+    sentinel/flow: web -> api; api -> databases, TACACS+ tests (49), device management networks (FortiGate / SNMP tests), HTTPS to AI API
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: tacacs
+    ports:
+    - protocol: TCP
+      port: 49
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+    - ipBlock:
+        cidr: 172.16.0.0/12
+    - ipBlock:
+        cidr: 192.168.0.0/16
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker
+  annotations:
+    sentinel/flow: worker -> databases, TACACS+, device management networks (polling, ICMP*, SSH config backup), HTTPS feeds / webhooks, SMTP
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: tacacs
+    ports:
+    - protocol: TCP
+      port: 49
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+    - ipBlock:
+        cidr: 172.16.0.0/12
+    - ipBlock:
+        cidr: 192.168.0.0/16
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 25
+    - protocol: TCP
+      port: 465
+    - protocol: TCP
+      port: 587
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: poller
+  annotations:
+    sentinel/flow: poller -> databases, SNMP 161/udp to device management networks
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: poller
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+    - ipBlock:
+        cidr: 172.16.0.0/12
+    - ipBlock:
+        cidr: 192.168.0.0/16
+    ports:
+    - protocol: UDP
+      port: 161
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: syslog
+  annotations:
+    sentinel/flow: relay -> syslog 5515; syslog -> databases only (untrusted input, no route out)
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: syslog
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-relay
+    ports:
+    - protocol: TCP
+      port: 5515
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-relay
+  annotations:
+    sentinel/flow: devices -> 5514; relay -> syslog 5515 only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-relay
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: UDP
+      port: 5514
+    - protocol: TCP
+      port: 5514
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: syslog
+    ports:
+    - protocol: TCP
+      port: 5515
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: traps
+  annotations:
+    sentinel/flow: devices -> 1162/udp; traps -> databases
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traps
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: UDP
+      port: 1162
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flows
+  annotations:
+    sentinel/flow: exporters -> 2055/4739/6343 udp; flows -> databases
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flows
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: UDP
+      port: 2055
+    - protocol: UDP
+      port: 4739
+    - protocol: UDP
+      port: 6343
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tacacs
+  annotations:
+    sentinel/flow: devices, api, worker -> 49; tac_plus-ng -> LDAP / AD (389, 636, 3268, 3269) on the management networks
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tacacs
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 49
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+    - ipBlock:
+        cidr: 172.16.0.0/12
+    - ipBlock:
+        cidr: 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 389
+    - protocol: TCP
+      port: 636
+    - protocol: TCP
+      port: 3268
+    - protocol: TCP
+      port: 3269
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: migrate
+  annotations:
+    sentinel/flow: migrate -> databases
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: migrate
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+    - protocol: TCP
+      port: 9000

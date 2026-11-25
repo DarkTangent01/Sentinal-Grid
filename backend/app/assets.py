@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .analytics.filters import table
+from .platform.eventquery import table
 from .config import get_settings
 from .db.ch import ClickHouse
 from .db.models import Asset
@@ -30,7 +30,7 @@ async def learn_assets(s: AsyncSession, ch: ClickHouse, since: datetime) -> int:
         GROUP BY src_ip LIMIT 100000""", {"t0": since, "cidrs": internal_cidrs()})
     if not rows:
         return 0
-    from .policy.store import to_utc
+    from .platform.timeutil import to_utc
     existing = {a.ip: a for a in (await s.execute(select(Asset).where(Asset.ip.in_([r["src_ip"] for r in rows])))).scalars()}
     for r in rows:
         a = existing.get(r["src_ip"])

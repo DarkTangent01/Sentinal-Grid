@@ -1,0 +1,16 @@
+# deploy/clickhouse/siem.xml of the Compose deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-config
+data:
+  siem.xml: |
+    <clickhouse>
+        <logger><level>warning</level><console>1</console></logger>
+        <listen_host>0.0.0.0</listen_host>
+        <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+        <merge_tree>
+            <parts_to_throw_insert>600</parts_to_throw_insert>
+        </merge_tree>
+        <backups><allowed_path>/backups/</allowed_path></backups>
+    </clickhouse>

@@ -1,0 +1,16 @@
+# Sentinel Grid / Sentinel NMS namespace. Every workload, including the databases and the TACACS+ server, meets the
+# "restricted" Pod Security Standard (non-root, no privilege escalation, all capabilities dropped, RuntimeDefault seccomp):
+# there is no exception namespace. TACACS+ binds port 49 through the namespaced "safe" sysctl
+# net.ipv4.ip_unprivileged_port_start, which the restricted profile allows.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinel
+  labels:
+    app.kubernetes.io/part-of: sentinel
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

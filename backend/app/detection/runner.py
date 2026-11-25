@@ -56,7 +56,10 @@ def to_detections(rule: Rule, rows: list[dict], threshold: float, origin: str):
         vals = {g: r[f"g_{g}"] for g in c.group_by}
         ev = {"rule_id": rule.id, "rule_version": rule.version, "origin": origin, "group": vals, "metric": r["metric"], "threshold": threshold,
               "events": int(r["events"]), "samples": list(r.get("samples") or [])[:20], "data_sources": rule.data_sources,
-              "falsepositives": rule.falsepositives, "troubleshooting": rule.investigation, "tags": rule.tags}
+              "falsepositives": rule.falsepositives, "troubleshooting": rule.investigation, "tags": rule.tags,
+              "confidence": rule.confidence, "risk_score": rule.risk}
+        if rule.detection.followed_by:
+            ev["sequence"] = {"within_s": rule.detection.followed_by.within, "then": rule.detection.followed_by.selection}
         flt: dict[str, Any] = {"category": [rule.log_source.category]}
         for g in ("src_ip", "dst_ip", "user", "src_mac"):
             if vals.get(g):
@@ -75,7 +78,7 @@ def to_detections(rule: Rule, rows: list[dict], threshold: float, origin: str):
 async def execute(ch, rule: Rule, now: datetime, params: dict, cidrs: list[str], origin: str = "builtin") -> tuple[list, dict]:
     """Run against `events` over the rule's time frame (at least one evaluation interval, so no gap between runs)."""
     c = rule.detection.condition
-    window = max(c.timeframe, int(params.get("interval_minutes") or 0) * 60)
+    window = max(rule.window, int(params.get("interval_minutes") or 0) * 60)
     thr = float(params.get("threshold") or c.threshold)
     q = compile_rule(rule, t0=now - timedelta(seconds=window), t1=now, cidrs=cidrs, threshold=thr)
     t = time.monotonic()
@@ -156,7 +159,7 @@ async def run_tests(ch, rule: Rule) -> list[dict]:
         try:
             now = _aware(tc.now) if tc.now else TEST_NOW
             rows = [r for ev in tc.events for r in _expand(ev, rule, now)]
-            window = rule.detection.condition.timeframe
+            window = rule.window
             q = compile_rule(rule, t0=now - timedelta(seconds=window), t1=now + timedelta(seconds=1), cidrs=TEST_CIDRS,
                              source=src, source_params={**sparams, "data": "\n".join(json.dumps(r) for r in rows)})
             out = await ch.aquery(q.sql, q.params)

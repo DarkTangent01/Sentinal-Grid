@@ -6,7 +6,7 @@ import { useMe } from "../../lib/context";
 import { useTheme } from "../../lib/theme";
 import { fmtNum, fmtTime } from "../../lib/format";
 import { Chart, SERIES_ROLE, axisStyle } from "../../components/Chart";
-import { Card, Empty, Kpi, Loading, Modal, TableWrap, Time } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, Modal, rowProps, TableWrap, Time } from "../../components/ui";
 import { SERVICE_STATE, TONE_TEXT, WEEKDAYS, availTone, describeScope, describeWindow, fmtAvail, serviceTarget } from "./nms";
 
 /** Sentinel NMS operations: service checks (TCP / HTTP / DNS / TLS), maintenance windows and device dependencies.
@@ -51,7 +51,7 @@ export function ServicesPage() {
       {q.data && (!q.data.items.length ? <Empty text={admin ? "No service checks yet. Add one to monitor a web app, DNS name, port or certificate." : "No service checks defined."} /> :
         <TableWrap maxH="max-h-[34rem]"><table className="tbl"><thead><tr><th>Check</th><th>Kind</th><th>Target</th><th>State</th><th className="num">Latency</th>
           <th>Last result</th><th>Certificate</th><th>Checked</th>{admin && <th />}</tr></thead>
-          <tbody>{q.data.items.map((x: any) => <tr key={x.id} className={`cursor-pointer hover:bg-white/5 ${sel === x.id ? "bg-white/5" : ""}`} onClick={() => setSp({ id: String(x.id) })}>
+          <tbody>{q.data.items.map((x: any) => <tr key={x.id} className={sel === x.id ? "bg-brand-500/[0.06]" : ""} aria-current={sel === x.id ? "true" : undefined} {...rowProps(() => setSp({ id: String(x.id) }))}>
             <td className="font-medium">{x.name}{(x.site || x.switch) && <div className="text-2xs text-muted">{[x.site, x.switch].filter(Boolean).join(" · ")}</div>}</td>
             <td className="text-xs uppercase">{x.kind}</td><td className="font-mono text-xs max-w-[18rem] truncate" title={serviceTarget(x)}>{serviceTarget(x)}</td>
             <td><ServiceState s={x.state} />{x.fail_streak > 1 && <span className="text-2xs text-muted"> ×{x.fail_streak}</span>}</td>
@@ -112,7 +112,7 @@ function ServiceForm({ svc, onClose }: { svc: any | null; onClose: () => void })
   const sws = useSwitches();
   const [f, setF] = useState<any>(() => ({ ...SVC_BLANK, ...(svc || {}), port: svc?.port ?? "", switch_id: svc?.switch_id ?? "", latency_warn_ms: svc?.latency_warn_ms ?? "" }));
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  const inp = (k: string, l: string, p: any = {}) => <div><label className="label">{l}</label><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></div>;
+  const inp = (k: string, l: string, p: any = {}) => <label className="block min-w-0"><span className="label">{l}</span><input className="input w-full" value={f[k] ?? ""} onChange={set(k)} {...p} /></label>;
   const num = (v: any) => (v === "" || v == null ? null : Number(v));
   const body = () => ({ ...f, port: num(f.port), switch_id: num(f.switch_id), latency_warn_ms: num(f.latency_warn_ms), interval_seconds: Number(f.interval_seconds),
     timeout_ms: Number(f.timeout_ms), cert_warn_days: Number(f.cert_warn_days), expect: f.kind === "http" ? f.expect : "", match: ["http", "dns"].includes(f.kind) ? f.match : "" });
@@ -123,20 +123,20 @@ function ServiceForm({ svc, onClose }: { svc: any | null; onClose: () => void })
   return <Modal wide title={svc ? `Edit ${svc.name}` : "Add a service check"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-3">
       {inp("name", "Name", { placeholder: "Warehouse portal HTTPS" })}
-      <div><label className="label">Kind</label><select className="input w-full" value={f.kind} onChange={set("kind")}>
-        <option value="http">HTTP(S)</option><option value="tcp">TCP port</option><option value="dns">DNS lookup</option><option value="tls">TLS certificate</option></select></div>
+      <label className="block min-w-0"><span className="label">Kind</span><select className="input w-full" value={f.kind} onChange={set("kind")}>
+        <option value="http">HTTP(S)</option><option value="tcp">TCP port</option><option value="dns">DNS lookup</option><option value="tls">TLS certificate</option></select></label>
       {inp("target", f.kind === "http" ? "URL" : "Host name or IP", { placeholder: f.kind === "http" ? "https://portal.example.com/health" : "10.20.0.5" })}
       {["tcp", "tls"].includes(f.kind) && inp("port", "Port", { type: "number", min: 1, max: 65535, placeholder: f.kind === "tls" ? "443" : "22" })}
       {f.kind === "http" && inp("expect", "Accepted status codes", { placeholder: "200-399" })}
       {f.kind === "http" && inp("match", "Body must contain (optional)", { placeholder: "ok" })}
-      {f.kind === "dns" && <div><label className="label">Record</label><select className="input w-full" value={f.record} onChange={set("record")}><option>A</option><option>AAAA</option></select></div>}
+      {f.kind === "dns" && <label className="block min-w-0"><span className="label">Record</span><select className="input w-full" value={f.record} onChange={set("record")}><option>A</option><option>AAAA</option></select></label>}
       {f.kind === "dns" && inp("match", "Expected address (optional)", { placeholder: "10.20.0.5" })}
       {f.kind === "tls" && inp("cert_warn_days", "Warn days before expiry", { type: "number", min: 1, max: 365 })}
       {inp("interval_seconds", "Check every (seconds)", { type: "number", min: 30, max: 86400 })}{inp("timeout_ms", "Timeout (ms)", { type: "number", min: 500, max: 60000 })}
       {inp("latency_warn_ms", "Warn above latency (ms, optional)", { type: "number", min: 1 })}
       {inp("site", "Site (for correlation and maintenance)")}
-      <div><label className="label">Related device (optional)</label><select className="input w-full" value={f.switch_id} onChange={set("switch_id")}>
-        <option value="">—</option>{(sws.data?.items || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+      <label className="block min-w-0"><span className="label">Related device (optional)</span><select className="input w-full" value={f.switch_id} onChange={set("switch_id")}>
+        <option value="">—</option>{(sws.data?.items || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label className="flex items-center gap-2 text-sm mt-5"><input type="checkbox" checked={!!f.enabled} onChange={set("enabled")} /> Enabled</label>
     </div>
     <p className="text-xs text-muted mt-2">{KIND_HELP[f.kind]}</p>
@@ -206,31 +206,31 @@ function MaintenanceForm({ m, switches, services, onClose }: { m: any | null; sw
   const err = (save.error || del.error) as Error | null;
   return <Modal wide title={m ? `Edit ${m.name}` : "Schedule maintenance"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-3">
-      <div><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Core switch upgrade" /></div>
-      <div><label className="label">Type</label><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
-        <option value="once">One-off</option><option value="weekly">Weekly</option></select></div>
-      <div><label className="label">Time zone</label><input className="input w-full" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} /></div>
+      <label className="block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Core switch upgrade" /></label>
+      <label className="block min-w-0"><span className="label">Type</span><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+        <option value="once">One-off</option><option value="weekly">Weekly</option></select></label>
+      <label className="block min-w-0"><span className="label">Time zone</span><input className="input w-full" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} /></label>
       {f.kind === "once" ? <>
-        <div><label className="label">Starts (your local time)</label><input type="datetime-local" className="input w-full" value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} /></div>
-        <div><label className="label">Ends</label><input type="datetime-local" className="input w-full" value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} /></div>
+        <label className="block min-w-0"><span className="label">Starts (your local time)</span><input type="datetime-local" className="input w-full" value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Ends</span><input type="datetime-local" className="input w-full" value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} /></label>
       </> : <>
-        <div className="sm:col-span-3"><label className="label">Days</label><div className="flex flex-wrap gap-2">{WEEKDAYS.map((d, i) =>
+        <div className="sm:col-span-3" role="group" aria-label="Days"><span className="label">Days</span><div className="flex flex-wrap gap-2">{WEEKDAYS.map((d, i) =>
           <label key={d} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={f.weekdays.includes(i)} onChange={() => toggle("weekdays", i)} />{d}</label>)}</div></div>
-        <div><label className="label">Start time (HH:MM, in the time zone)</label><input className="input w-full" value={f.start_time} onChange={(e) => setF({ ...f, start_time: e.target.value })} /></div>
-        <div><label className="label">Duration (minutes)</label><input type="number" min={1} max={10080} className="input w-full" value={f.duration_minutes}
-          onChange={(e) => setF({ ...f, duration_minutes: e.target.value })} /></div>
+        <label className="block min-w-0"><span className="label">Start time (HH:MM, in the time zone)</span><input className="input w-full" value={f.start_time} onChange={(e) => setF({ ...f, start_time: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Duration (minutes)</span><input type="number" min={1} max={10080} className="input w-full" value={f.duration_minutes}
+          onChange={(e) => setF({ ...f, duration_minutes: e.target.value })} /></label>
       </>}
-      <div className="sm:col-span-3"><label className="label">Reason</label><input className="input w-full" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })}
-        placeholder="Change ticket, vendor, what is expected to go down" /></div>
+      <label className="sm:col-span-3 block min-w-0"><span className="label">Reason</span><input className="input w-full" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })}
+        placeholder="Change ticket, vendor, what is expected to go down" /></label>
       <label className="sm:col-span-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={f.all_devices} onChange={(e) => setF({ ...f, all_devices: e.target.checked })} />
         Hold back all network alerts (every device, circuit and check)</label>
       {!f.all_devices && <>
-        <div className="sm:col-span-3"><label className="label">Sites (comma separated{sites.length ? `; known: ${sites.join(", ")}` : ""})</label>
-          <input className="input w-full" value={f.sitesText} onChange={(e) => setF({ ...f, sitesText: e.target.value })} /></div>
-        <div className="sm:col-span-2"><label className="label">Devices</label><div className="max-h-40 overflow-auto border border-line rounded p-2 grid sm:grid-cols-2 gap-1">
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Sites (comma separated{sites.length ? `; known: ${sites.join(", ")}` : ""})</span>
+          <input className="input w-full" value={f.sitesText} onChange={(e) => setF({ ...f, sitesText: e.target.value })} /></label>
+        <div className="sm:col-span-2" role="group" aria-label="Devices"><span className="label">Devices</span><div className="max-h-40 overflow-auto border border-line rounded p-2 grid sm:grid-cols-2 gap-1">
           {switches.map((s) => <label key={s.id} className="flex items-center gap-1 text-xs"><input type="checkbox" checked={f.switch_ids.includes(s.id)} onChange={() => toggle("switch_ids", s.id)} />
             {s.name}{s.site && <span className="text-muted"> · {s.site}</span>}</label>)}</div></div>
-        <div><label className="label">Service checks</label><div className="max-h-40 overflow-auto border border-line rounded p-2 space-y-1">
+        <div role="group" aria-label="Service checks"><span className="label">Service checks</span><div className="max-h-40 overflow-auto border border-line rounded p-2 space-y-1">
           {!services.length && <div className="text-xs text-muted">None defined.</div>}
           {services.map((s) => <label key={s.id} className="flex items-center gap-1 text-xs"><input type="checkbox" checked={f.service_ids.includes(s.id)} onChange={() => toggle("service_ids", s.id)} />{s.name}</label>)}</div></div>
       </>}
@@ -253,7 +253,16 @@ export function DependenciesPage() {
   const q = useSwitches();
   const [err, setErr] = useState("");
   const set = useMutation({ mutationFn: ({ id, parent_id }: { id: number; parent_id: number | null }) => api(`/nms/dependencies/${id}`, { method: "PUT", body: { parent_id } }),
-    onSuccess: () => { setErr(""); qc.invalidateQueries({ queryKey: ["nms-deps"] }); }, onError: (e: Error) => setErr(e.message) });
+    onSuccess: () => { setErr(""); qc.invalidateQueries({ queryKey: ["nms-deps"] }); qc.invalidateQueries({ queryKey: ["nms-deps-sugg"] }); },
+    onError: (e: Error) => setErr(e.message) });
+  const sq = useQuery({ queryKey: ["nms-deps-sugg"], queryFn: () => api<any>("/nms/dependencies/suggestions"), staleTime: 60_000 });
+  const sugg: any[] = (sq.data?.items || []).filter((x: any) => x.differs);
+  const acceptAll = async () => {
+    for (const x of sugg.filter((r) => !r.current_parent_id)) {
+      try { await api(`/nms/dependencies/${x.switch_id}`, { method: "PUT", body: { parent_id: x.suggested_parent_id } }); } catch (e) { setErr((e as Error).message); break; }
+    }
+    qc.invalidateQueries({ queryKey: ["nms-deps"] }); qc.invalidateQueries({ queryKey: ["nms-deps-sugg"] });
+  };
   const items: any[] = q.data?.items || [];
   const roots = items.filter((x) => !x.parent_id);
   return <div className="space-y-4 min-w-0">
@@ -262,6 +271,14 @@ export function DependenciesPage() {
     <div className="kpi-grid"><Kpi label="Devices" value={fmtNum(items.length)} /><Kpi label="With a parent" value={fmtNum(items.length - roots.length)} />
       <Kpi label="Top-level" value={fmtNum(roots.length)} /></div>
     {err && <div role="alert" className="text-sm text-red-300">{err}</div>}
+    {sugg.length > 0 && <Card title={`Suggested from LLDP / CDP (${sugg.length})`} bodyClass="p-0"
+      right={admin && sugg.some((r) => !r.current_parent_id) ? <button className="btn btn-primary py-0.5 text-xs" onClick={acceptAll}>Accept all unset</button> : undefined}>
+      <p className="text-2xs text-muted px-3 pt-2">{sq.data?.note} Review before accepting: a suggestion follows the cabling, not your routing intent.</p>
+      <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th>Device</th><th>Role</th><th className="num">Hops from root</th><th>Configured parent</th><th>Suggested parent</th><th /></tr></thead>
+        <tbody>{sugg.map((x) => <tr key={x.switch_id}><td>{x.switch}</td><td>{x.role || "—"}</td><td className="num">{x.hops_from_root ?? "—"}</td>
+          <td>{x.current_parent || <span className="text-muted">none</span>}</td><td className="font-medium">{x.suggested_parent}</td>
+          <td>{admin && <button className="btn py-0.5 text-xs" onClick={() => set.mutate({ id: x.switch_id, parent_id: x.suggested_parent_id })}>
+            {x.current_parent_id ? "Replace" : "Accept"}</button>}</td></tr>)}</tbody></table></TableWrap></Card>}
     <Card title="Device dependencies" bodyClass="p-0"><Loading q={q} />
       {q.data && (!items.length ? <Empty text="No devices yet." /> :
         <TableWrap maxH="max-h-[40rem]"><table className="tbl"><thead><tr><th>Device</th><th>Site</th><th>Role</th><th>State</th><th>Depends on (parent)</th><th className="num">Children</th></tr></thead>

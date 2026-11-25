@@ -32,6 +32,13 @@ STEPS = {
     "wireless_channel_changes": ["Open Wireless → RF & Frequency → RF events for the change reasons and radar detections",
                                  "Review DCA sensitivity / DFS channel use for the RF profile on the controller"],
     "wireless_stale_metrics": ["Open Wireless → Monitoring health for the controller", "Check the SNMP view includes the wireless MIBs"],
+    "wireless_rogue_detected": ["Locate the rogue from the detecting AP and its signal strength (Wireless → Rogues)",
+                                "If it broadcasts one of your SSIDs or is seen on the wired network, treat it as an incident",
+                                "Classify it on the controller (friendly / malicious); this product never contains rogues"],
+    "wireless_ap_poe_issue": ["Check the switch port's PoE status and the switch's PoE budget (Capacity Planning → PoE)",
+                              "An AP at low power runs with reduced radios: move it to a PoE+ / UPOE port or raise the port's power"],
+    "wireless_floor_sla_breach": ["Open Wireless → Floors for the floor's APs and their channel utilisation / noise",
+                                  "Check whether one AP or the whole floor is affected"],
 }
 
 DEFAULT_RULES = [
@@ -65,10 +72,19 @@ DEFAULT_RULES = [
     {"key": "wireless_channel_changes", "name": "Wireless: repeated channel changes", "severity": "low", "mitre": {},
      "description": "A radio changed channel more often than the threshold within the window (DFS radar, DCA or configuration).",
      "params": {"window_hours": 24}},
+    {"key": "wireless_rogue_detected", "name": "Wireless: rogue access point", "severity": "high", "mitre": {},
+     "description": "The controller detects a rogue AP that is classified malicious, broadcasts one of our SSIDs, or is seen on the wired "
+                    "network (AIRESPACE bsnRogueAPTable). Rogues the controller marks known / acknowledged / friendly are ignored.", "params": {}},
+    {"key": "wireless_ap_poe_issue", "name": "Wireless: AP power problem", "severity": "medium", "mitre": {},
+     "description": "An AP is down while its switch port is not delivering PoE, or an AP runs at low power (CISCO-LWAPP-AP-MIB cLApPowerStatus).",
+     "params": {}},
+    {"key": "wireless_floor_sla_breach", "name": "Wireless: floor client-experience SLA breached", "severity": "medium", "mitre": {},
+     "description": "On a floor with enough clients, the share of clients with a good experience score is below the target.",
+     "params": {"target_pct": 80, "min_clients": 10}},
     {"key": "wireless_stale_metrics", "name": "Wireless: stale or missing wireless metrics", "severity": "medium", "mitre": {},
      "description": "A controller is reachable but a wireless collection group has not succeeded for 3 of its intervals.", "params": {}},
 ]
-AUTO_RESOLVE = {"wireless_channel_changes", "wireless_ap_down", "wireless_radio_down", "wireless_channel_utilization", "wireless_interference", "wireless_noise_high",
+AUTO_RESOLVE = {"wireless_rogue_detected", "wireless_ap_poe_issue", "wireless_floor_sla_breach", "wireless_channel_changes", "wireless_ap_down", "wireless_radio_down", "wireless_channel_utilization", "wireless_interference", "wireless_noise_high",
                 "wireless_retry_high", "wireless_poor_rssi", "wireless_low_snr", "wireless_ap_overload", "wireless_stale_metrics"}
 
 
@@ -93,17 +109,86 @@ async def _ctx():
 
 
 async def rule_wireless_ap_down(ch, now, p):
+    from ..switches.alerts import ap_root
     wlcs, aps, _ = await _ctx()
+    async with session_factory()() as s:
+        by_id = {x.id: x for x in (await s.execute(select(Switch))).scalars()}
     out = []
     for a in aps.values():
         since = _aware(a.state_since)
         if a.state != "down" or a.wlc_id not in wlcs or wlcs[a.wlc_id].state != "up" or not since:
             continue  # controller down: its APs are unknown, not individually down (switch_unreachable covers it)
+        if ap_root(a.switch_id, by_id) is not None:
+            continue  # its uplink switch (or a device above it) is down: that device's alert is the root cause and lists this AP
         if (now - since).total_seconds() < 60 * float(p.get("min_down_minutes", 2)):
             continue
         out.append(_det(f"{a.id}:{since:%Y%m%d%H%M%S}", "wireless_ap_down", f"AP {a.name} ({a.model or 'model ?'}, {a.mac}) left controller "
                         f"{wlcs[a.wlc_id].name} at {since:%Y-%m-%d %H:%M} UTC" + (f"; uplink {a.uplink.get('switch')} {a.uplink.get('port')}" if (a.uplink or {}).get("switch") else ""),
                         first=since, last=now, sites=[a.site], evidence={"ap_id": a.id, "ap": a.name, "uplink": a.uplink or {}}))
+    return out
+
+
+IGNORED_ROGUE_STATES = {"known", "acknowledge", "knownContained", "trustedMissing"}
+
+
+async def rule_wireless_rogue_detected(ch, now, p):
+    from ..db.models import WirelessRogue
+    wlcs, _, _ = await _ctx()
+    async with session_factory()() as s:
+        rs = (await s.execute(select(WirelessRogue).where(WirelessRogue.present.is_(True), WirelessRogue.wlc_id.in_(list(wlcs) or [0])))).scalars().all()
+    out = []
+    for r in rs:
+        if r.state in IGNORED_ROGUE_STATES or r.class_type == "friendly":
+            continue
+        why = [w for w, hit in (("classified malicious by the controller", r.class_type == "malicious"), ("broadcasts one of our SSIDs", r.spoofs_ssid),
+                                ("seen on the wired network", r.on_network)) if hit]
+        if not why:
+            continue
+        w = wlcs[r.wlc_id]
+        out.append(_det(f"{r.wlc_id}:{r.mac}", "wireless_rogue_detected",
+                        f"Rogue AP {r.mac} ({r.ssid or 'hidden SSID'}, channel {r.channel or '?'}) {', '.join(why)}; strongest at "
+                        f"{r.rssi_dbm if r.rssi_dbm is not None else '?'} dBm by {r.detecting_ap or 'an AP'} of {w.name}",
+                        first=_aware(r.first_seen) or now, last=now, sites=[w.site],
+                        evidence={"rogue": r.mac, "ssid": r.ssid, "channel": r.channel, "rssi_dbm": r.rssi_dbm, "detecting_ap": r.detecting_ap,
+                                  "class_type": r.class_type, "state": r.state, "reasons": why, "clients": r.clients}))
+    return out
+
+
+async def rule_wireless_ap_poe_issue(ch, now, p):
+    from ..db.models import SwitchInterface
+    wlcs, aps, _ = await _ctx()
+    cabled = [a for a in aps.values() if a.switch_id and a.switch_ifindex is not None]
+    async with session_factory()() as s:
+        ports = {(i.switch_id, i.ifindex): i for i in (await s.execute(select(SwitchInterface).where(
+            SwitchInterface.switch_id.in_({a.switch_id for a in cabled} or {0})))).scalars()}
+    out = []
+    for a in aps.values():
+        i = ports.get((a.switch_id, a.switch_ifindex)) if a.switch_id else None
+        poe = (i.poe or {}) if i else {}
+        if a.state == "down" and poe and poe.get("status") not in (None, "", "delivering", "unknown"):
+            out.append(_det(f"{a.id}:poe", "wireless_ap_poe_issue", f"AP {a.name} is down and its switch port {i.name} is not delivering PoE "
+                            f"(status {poe.get('status')})", first=_aware(a.state_since) or now, last=now, sites=[a.site],
+                            evidence={"ap_id": a.id, "ap": a.name, "port": i.name, "switch_id": a.switch_id, "poe": poe}))
+        elif a.state == "up" and (a.power_status or "") == "low":
+            out.append(_det(f"{a.id}:lowpower", "wireless_ap_poe_issue", f"AP {a.name} runs at low power (reduced radios)"
+                            + (f"; switch port {i.name} supplies {poe.get('power_w')} W" if i and poe.get("power_w") is not None else ""),
+                            first=now, last=now, sites=[a.site], evidence={"ap_id": a.id, "ap": a.name, "power_status": a.power_status,
+                                                                           "port": i.name if i else None, "poe": poe}))
+    return out
+
+
+async def rule_wireless_floor_sla_breach(ch, now, p):
+    from .service import floors
+    async with session_factory()() as s:
+        res = await floors(s, None, target_pct=float(p.get("target_pct", 80)), now=now)
+    out = []
+    for f in res["items"]:
+        if f["sla"] != "breach" or f["scored"] < int(p.get("min_clients", 10)):
+            continue
+        name = " / ".join(x for x in (f["site"], f["building"], f["floor"]) if x) or "unassigned floor"
+        out.append(_det(f"floor:{f['site']}|{f['building']}|{f['floor']}", "wireless_floor_sla_breach",
+                        f"{name}: {f['good_pct']}% of {f['scored']} clients have a good experience score (target {f['target_pct']}%, "
+                        f"average score {f['avg_score']})", first=now, last=now, sites=[f["site"]], evidence={**{k: v for k, v in f.items() if k != "trend"}}))
     return out
 
 

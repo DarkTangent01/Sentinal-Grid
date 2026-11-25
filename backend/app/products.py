@@ -28,20 +28,22 @@ PATH_PRODUCT: dict[str, str | None] = {
     "/api/automation": "grid", "/api/entity": "grid", "/api/investigate": "grid", "/api/identity": "grid", "/api/vpn": "grid",
     "/api/geo": "grid", "/api/mitre": "grid", "/api/sigma": "grid", "/api/ql": "grid", "/api/tuning": "grid",
     "/api/compliance": "grid", "/api/ai": "grid",
+    "/api/network-security": "grid", "/api/risk": "grid", "/api/soc": "grid", "/api/response": "grid",
     # Sentinel NMS — ISP / WAN, device health, routing, switches, AAA, policy and configuration management
     "/api/isp": "nms", "/api/wan": "nms", "/api/switches": "nms", "/api/tacacs": "nms", "/api/iac": "nms", "/api/bgp": "nms",
     "/api/fwhealth": "nms", "/api/vpn-tunnels": "nms", "/api/wireless": "nms", "/api/nms": "nms", "/api/snmp": "nms", "/api/hardening": "nms", "/api/drift": "nms", "/api/v1/policies": "nms",
     # shared services
     "/api/auth": None, "/api/users": None, "/api/admin": None, "/api/notifications": None, "/api/log-sources": None,
     "/api/system": None, "/api/reports": None, "/api/alert-rules": None, "/api/assets": None, "/api/alerts": None, "/api/firewalls": None,
-    "/api/health": None, "/api/ready": None, "/api/metrics": None,  # metrics: administrators only (main.py)
+    "/api/health": None, "/api/ready": None, "/api/metrics": None, "/api/identities": None,
+    "/api/ingest": None,  # machine ingestion, authenticated by the log source's token (no user session)  # metrics: administrators only (main.py)
 }
 # shared reads whose changes belong to one product
 WRITE_PRODUCT: dict[str, str] = {"/api/firewalls": "nms"}
 
 # alert rules that describe network operations (everything else is a security detection → Grid)
-NMS_RULE_PREFIXES = ("switch_", "wan_", "bgp_", "wireless_", "nms_", "snmp_")
-NMS_RULES = {"isp_outage", "icmp_down", "fw_resource_high", "fw_reboot", "log_feed_gap", "vpn_tunnel_down", "iac_drift",
+NMS_RULE_PREFIXES = ("switch_", "wan_", "bgp_", "wireless_", "nms_", "snmp_", "traffic_")
+NMS_RULES = {"risky_config_change", "isp_outage", "icmp_down", "fw_resource_high", "fw_reboot", "log_feed_gap", "vpn_tunnel_down", "iac_drift",
              "tacacs_server_down", "tacacs_accounting_gap", "tacacs_missing_accounting", "tacacs_protocol_errors",
              "tacacs_backend_failures", "tacacs_config_change"}
 

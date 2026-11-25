@@ -1,13 +1,14 @@
 """Persist policy configuration, objects, counters, analysis runs and assessments."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics.filters import table
+from ..platform.eventquery import table
 from ..db.ch import ClickHouse
 from ..db.models import (FirewallPolicy, PolicyAnalysisRun, PolicyAssessmentChange, PolicyConfigChange,
                          PolicyObjectSet, ShadowFinding)
@@ -23,19 +24,7 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def to_utc(v) -> datetime | None:
-    """Normalize ClickHouse timestamps to aware UTC. The embedded engine returns strings; clickhouse-connect (server
-    mode) returns datetime objects that may be timezone-naive. Comparing naive and aware datetimes raises TypeError."""
-    if v in (None, ""):
-        return None
-    if isinstance(v, datetime):
-        dt = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
-    else:
-        text = str(v).strip().replace(" ", "T").replace("Z", "+00:00")
-        dt = datetime.fromisoformat(text)
-        dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(timezone.utc)
-    return None if dt.year <= 1970 else dt
+from ..platform.timeutil import hour_bounds as _hour_bounds, to_utc  # noqa: E402,F401  (moved to the platform package)
 
 
 async def store_policies(s: AsyncSession, firewall_id: int, vdom: str, policies: list[dict], source: str = "api") -> dict:
@@ -205,15 +194,63 @@ async def counter_deltas_window(ch: ClickHouse, fw: int, vdom: str, t0, t1) -> d
     return out
 
 
+_seam: dict = {}
+
+
+async def _rollup_seam(ch: ClickHouse) -> datetime | None:
+    """policy_usage_seam, cached per ClickHouse instance (it changes only when the view is recreated)."""
+    key = id(ch)
+    if key not in _seam:
+        from ..db.ch_schema import policy_usage_seam
+        _seam[key] = await asyncio.to_thread(policy_usage_seam, ch)
+    return _seam[key]
+
+
+async def policy_usage(ch: ClickHouse, fw: int, vdom: str, t0: datetime, t1: datetime, *, policy_id: int | None = None,
+                       uuid_empty: bool = False) -> list[dict]:
+    """Traffic-log matches per (policy_id, policy_uuid) in [t0, t1): n, bytes, denied, first, last.
+
+    Whole hours come from the policy_usage_hourly rollup (ClickHouse migration 16), the partial first and last hour
+    from raw events, so the result is exact while reading thousands of rows instead of up to 550 million (that 30-day
+    raw scan ran 14-60 s per firewall every few minutes and hit the 60 s limit)."""
+    t0, t1 = to_utc(t0), to_utc(t1)
+    seam = await _rollup_seam(ch)
+    h0, h1 = _hour_bounds(t0, t1) if seam is not None else (t1, t1)  # no view: everything from raw events
+    # the seam hour (inside [h0, h1)) is read from raw events and skipped in the rollup
+    s0, s1 = (max(h0, seam), min(h1, seam + timedelta(hours=1))) if seam is not None else (t1, t1)
+    if s0 >= s1:
+        s0 = s1 = t1
+    p = {"fw": fw, "vd": vdom, "t0": t0, "t1": t1, "h0": h0, "h1": h1, "s0": s0, "s1": s1}
+    extra = ""
+    if policy_id is not None:
+        extra += " AND policy_id = {pid:UInt32}"
+        p["pid"] = policy_id
+    if uuid_empty:
+        extra += " AND policy_uuid = ''"
+    return await ch.aquery(
+        f"""SELECT policy_id, policy_uuid, sum(n) AS n, max(last) AS last, min(first) AS first, sum(bytes) AS bytes, sum(denied) AS denied
+            FROM (
+                SELECT policy_id, policy_uuid, sum(n) AS n, max(last) AS last, min(first) AS first, sum(bytes) AS bytes, sum(denied) AS denied
+                FROM policy_usage_hourly WHERE firewall_id = {{fw:UInt32}} AND (vdom = {{vd:String}} OR vdom = '')
+                  AND hour >= {{h0:DateTime64(3)}} AND hour < {{h1:DateTime64(3)}}
+                  AND NOT (hour >= {{s0:DateTime64(3)}} AND hour < {{s1:DateTime64(3)}}){extra}
+                GROUP BY policy_id, policy_uuid
+                UNION ALL
+                SELECT assumeNotNull(policy_id) AS policy_id, policy_uuid, count() AS n, max(event_time) AS last, min(event_time) AS first,
+                       sum(sent_bytes + rcvd_bytes) AS bytes, countIf(action IN ('deny', 'block')) AS denied
+                FROM {table()} WHERE category = 'traffic' AND firewall_id = {{fw:UInt32}} AND (vdom = {{vd:String}} OR vdom = '')
+                  AND policy_id IS NOT NULL{extra}
+                  AND ((event_time >= {{t0:DateTime64(3)}} AND event_time < {{h0:DateTime64(3)}})
+                       OR (event_time >= {{s0:DateTime64(3)}} AND event_time < {{s1:DateTime64(3)}})
+                       OR (event_time >= {{h1:DateTime64(3)}} AND event_time < {{t1:DateTime64(3)}}))
+                GROUP BY policy_id, policy_uuid)
+            GROUP BY policy_id, policy_uuid""", p)
+
+
 async def siem_matches(ch: ClickHouse, fw: int, vdom: str, t0, t1, policies: list[FirewallPolicy]) -> dict[int, dict]:
     """Traffic log matches per policy. Logs carry policyid (+ poluuid on FortiOS 6.2+). When a policy ID was reused
     (UUID history > 1), logs without a UUID are only attributed after the current UUID was first observed."""
-    rows = await ch.aquery(
-        f"""SELECT policy_id, policy_uuid, count() AS n, max(event_time) AS last, min(event_time) AS first,
-                   sum(sent_bytes + rcvd_bytes) AS bytes, countIf(action IN ('deny','block')) AS denied
-            FROM {table()} WHERE category = 'traffic' AND firewall_id = {{fw:UInt32}} AND (vdom = {{vd:String}} OR vdom = '')
-              AND event_time >= {{t0:DateTime64(3)}} AND event_time < {{t1:DateTime64(3)}} AND policy_id IS NOT NULL
-            GROUP BY policy_id, policy_uuid""", {"fw": fw, "vd": vdom, "t0": t0, "t1": t1})
+    rows = await policy_usage(ch, fw, vdom, t0, t1)
     by_id: dict[int, list] = {}
     for r in rows:
         by_id.setdefault(int(r["policy_id"]), []).append(r)
@@ -234,11 +271,7 @@ async def siem_matches(ch: ClickHouse, fw: int, vdom: str, t0, t1, policies: lis
             total["last_seen"] = max(filter(None, [total["last_seen"], last]))
         if total["time_cut"]:
             cut = to_utc(total["time_cut"])
-            extra = await ch.aquery(
-                f"""SELECT count() AS n, max(event_time) AS last, sum(sent_bytes + rcvd_bytes) AS bytes FROM {table()}
-                    WHERE category='traffic' AND firewall_id={{fw:UInt32}} AND policy_id={{pid:UInt32}} AND policy_uuid=''
-                      AND event_time >= {{c:DateTime64(3)}} AND event_time < {{t1:DateTime64(3)}}""",
-                {"fw": fw, "pid": p.policyid, "c": max(cut, t0), "t1": t1})
+            extra = await policy_usage(ch, fw, vdom, max(cut, to_utc(t0)), t1, policy_id=p.policyid, uuid_empty=True)
             if extra and int(extra[0]["n"]):
                 total["matches"] += int(extra[0]["n"])
                 total["bytes"] += int(extra[0]["bytes"])
@@ -248,8 +281,12 @@ async def siem_matches(ch: ClickHouse, fw: int, vdom: str, t0, t1, policies: lis
 
 
 async def ingest_since(ch: ClickHouse, fw: int) -> datetime | None:
-    r = await ch.aquery(f"SELECT min(event_time) AS m, count() AS n FROM {table()} WHERE category='traffic' AND firewall_id={{fw:UInt32}}", {"fw": fw})
-    if not r or not int(r[0]["n"]):
+    """Earliest traffic log of the firewall. From the rollup (it was a scan of every raw traffic row of the firewall on
+    each assessment); raw events only while the rollup has nothing yet for it."""
+    r = await ch.aquery("SELECT min(first) AS m, sum(n) AS n FROM policy_usage_hourly WHERE firewall_id = {fw:UInt32}", {"fw": fw})
+    if not r or not int(r[0]["n"] or 0):
+        r = await ch.aquery(f"SELECT min(event_time) AS m, count() AS n FROM {table()} WHERE category='traffic' AND firewall_id={{fw:UInt32}}", {"fw": fw})
+    if not r or not int(r[0]["n"] or 0):
         return None
     return to_utc(r[0]["m"])
 

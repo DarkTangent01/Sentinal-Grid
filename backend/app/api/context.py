@@ -1,9 +1,10 @@
-"""APIs: threat intel, assets, geo/ASN, VPN, compliance, configuration drift."""
+"""APIs: threat intel, assets, geo/ASN, VPN, compliance. (Configuration drift moved to api/netops.py, NMS.)"""
 from __future__ import annotations
 
 import csv
 import io
 import ipaddress
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -11,14 +12,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..analytics.ngen import geo_summary, hunt, ti_summary, vpn_summary
 from ..compliance import compliance_status
 from ..db.ch import ClickHouse
-from ..db.models import Asset, ConfigSnapshot, Firewall, TiFeed, TiIndicator, User
+from ..db.models import Asset, TiFeed, TiIndicator, User
 from ..db.pg import get_session
 from ..enrich.feeds import MANUAL, fetch_feed
-from ..enrich.geo import GeoResolver
+from ..platform.geoip import GeoResolver
 from ..config import get_settings
 from ..netguard import DestinationError, check_url_static
 from .deps import audit, ch_dep, csv_safe, current_user, event_filter, iso, require_admin
@@ -30,7 +31,8 @@ router = APIRouter(prefix="/api", tags=["context"])
 def feed_out(f: TiFeed) -> dict:
     return {"id": f.id, "name": f.name, "url": f.url, "kind": f.kind, "category": f.category, "enabled": f.enabled, "builtin": f.builtin,
             "refresh_hours": f.refresh_hours, "last_fetch": iso(f.last_fetch), "last_success": iso(f.last_success),
-            "last_status": f.last_status, "indicator_count": f.indicator_count}
+            "last_status": f.last_status, "indicator_count": f.indicator_count, "auth_header": f.auth_header, "has_auth": bool(f.auth_ciphertext),
+            "default_confidence": f.default_confidence, "expire_days": f.expire_days}
 
 
 @router.get("/ti/feeds")
@@ -41,9 +43,14 @@ async def list_feeds(_: User = Depends(current_user), s: AsyncSession = Depends(
 class FeedIn(BaseModel):
     name: str = Field(min_length=2, max_length=64)
     url: str = Field(pattern=r"^https://", max_length=1024)
-    kind: str = Field(pattern=r"^(ip|cidr|domain|mixed)$")
+    kind: str = Field(pattern=r"^(ip|cidr|domain|mixed|stix|taxii|misp|otx)$")
     category: str = Field("malicious", max_length=48)
     refresh_hours: int = Field(6, ge=1, le=168)
+    # API key / token for the source: sent in `auth_header` (default per connector), stored encrypted, never returned
+    auth_header: str = Field("", max_length=64, pattern=r"^[A-Za-z0-9-]*$")
+    auth_value: str = Field("", max_length=4096)
+    default_confidence: int = Field(50, ge=0, le=100)
+    expire_days: int = Field(0, ge=0, le=3650)
 
 
 @router.post("/ti/feeds", status_code=201)
@@ -54,16 +61,24 @@ async def add_feed(body: FeedIn, request: Request, admin: User = Depends(require
         raise HTTPException(422, str(e))
     if (await s.execute(select(TiFeed).where(TiFeed.name == body.name))).scalar_one_or_none():
         raise HTTPException(409, "feed name exists")
-    f = TiFeed(**body.model_dump(), enabled=True, builtin=False)
+    data = body.model_dump(exclude={"auth_value"})
+    if body.auth_value:
+        from ..enrich.connectors import DEFAULT_HEADER
+        from ..security import TokenCipher
+        data["auth_header"] = body.auth_header or DEFAULT_HEADER.get(body.kind, "Authorization")
+        data["auth_ciphertext"] = TokenCipher().encrypt(body.auth_value)
+    f = TiFeed(**data, enabled=True, builtin=False)
     s.add(f)
     await s.commit()
-    await audit(s, request, admin.username, "ti_feed_add", body.name, {"url": body.url})
+    await audit(s, request, admin.username, "ti_feed_add", body.name, {"url": body.url, "kind": body.kind, "auth": bool(body.auth_value)})
     return feed_out(f)
 
 
 class FeedPatch(BaseModel):
     enabled: bool | None = None
     refresh_hours: int | None = Field(None, ge=1, le=168)
+    default_confidence: int | None = Field(None, ge=0, le=100)
+    expire_days: int | None = Field(None, ge=0, le=3650)
 
 
 @router.put("/ti/feeds/{fid}")
@@ -120,7 +135,9 @@ async def manual_add(body: ManualIn, request: Request, admin: User = Depends(req
     feed = (await s.execute(select(TiFeed).where(TiFeed.name == MANUAL))).scalar_one()
     existing = {r for (r,) in (await s.execute(select(TiIndicator.indicator).where(TiIndicator.feed_id == feed.id))).all()}
     added = 0
-    for ind, typ in [(i, "ip") for i in ips] + [(n, "cidr") for n in nets] + [(d, "domain") for d in doms]:
+    from ..enrich.connectors import normalize as ti_normalize
+    extra = [n for n in (ti_normalize(tok) for tok in body.indicators.replace(",", " ").split()) if n and n[1] in ("url", "sha256", "sha1", "md5", "email", "asn")]
+    for ind, typ in [(i, "ip") for i in ips] + [(n, "cidr") for n in nets] + [(d, "domain") for d in doms if "/" not in d] + extra:   # a URL is a url indicator, not a domain
         if ind not in existing:
             s.add(TiIndicator(feed_id=feed.id, indicator=ind, type=typ, note=body.note))
             existing.add(ind)
@@ -143,6 +160,70 @@ async def manual_delete(iid: int, request: Request, admin: User = Depends(requir
     await s.commit()
     await audit(s, request, admin.username, "ti_manual_delete", r.indicator)
     return {"ok": True}
+
+
+class IndicatorPatch(BaseModel):
+    false_positive: bool
+    note: str | None = Field(None, max_length=255)
+
+
+@router.get("/ti/indicators")
+async def ti_indicators(q: str | None = Query(None, max_length=255), type: str | None = Query(None, pattern=r"^(ip|cidr|domain|url|sha256|sha1|md5|email|asn)$"),
+                        feed_id: int | None = None, false_positive: bool | None = None, page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200),
+                        _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Search the indicator store. The same indicator from several feeds is one row per feed (source attribution)."""
+    from sqlalchemy import func
+    cond = []
+    if q:
+        cond.append(TiIndicator.indicator.contains(q.strip().lower(), autoescape=True))
+    if type:
+        cond.append(TiIndicator.type == type)
+    if feed_id:
+        cond.append(TiIndicator.feed_id == feed_id)
+    if false_positive is not None:
+        cond.append(TiIndicator.false_positive.is_(false_positive))
+    total = (await s.execute(select(func.count(TiIndicator.id)).where(*cond))).scalar() or 0
+    rows = (await s.execute(select(TiIndicator, TiFeed.name, TiFeed.category, TiFeed.default_confidence).join(TiFeed, TiFeed.id == TiIndicator.feed_id)
+                            .where(*cond).order_by(TiIndicator.added_at.desc(), TiIndicator.id.desc()).offset((page - 1) * size).limit(size))).all()
+    now = datetime.now(timezone.utc)
+    return {"total": total, "page": page, "size": size, "items": [
+        {"id": r.id, "indicator": r.indicator, "type": r.type, "feed": name, "category": cat, "threat": r.threat, "note": r.note,
+         "confidence": r.confidence if r.confidence is not None else dc, "confidence_from_source": r.confidence is not None,
+         "first_seen": iso(r.first_seen), "last_seen": iso(r.last_seen), "added_at": iso(r.added_at), "expires_at": iso(r.expires_at),
+         "expired": bool(r.expires_at and (r.expires_at if r.expires_at.tzinfo else r.expires_at.replace(tzinfo=timezone.utc)) <= now),
+         "false_positive": r.false_positive, "fp_by": r.fp_by} for r, name, cat, dc in rows]}
+
+
+@router.patch("/ti/indicators/{iid}")
+async def ti_indicator_patch(iid: int, body: IndicatorPatch, request: Request, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Analyst verdict. A false positive stops matching within 5 minutes and survives feed refreshes."""
+    r = await s.get(TiIndicator, iid)
+    if not r:
+        raise HTTPException(404, "not found")
+    r.false_positive, r.fp_by = body.false_positive, user.username if body.false_positive else ""
+    if body.note is not None:
+        r.note = body.note
+    await s.commit()
+    await audit(s, request, user.username, "ti_indicator_false_positive" if body.false_positive else "ti_indicator_restore", r.indicator)
+    return {"ok": True}
+
+
+@router.get("/ti/stats")
+async def ti_stats(_: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    from sqlalchemy import func
+    now = datetime.now(timezone.utc)
+    by_type = (await s.execute(select(TiIndicator.type, func.count(TiIndicator.id)).group_by(TiIndicator.type))).all()
+    by_feed = (await s.execute(select(TiFeed.name, TiFeed.kind, TiFeed.category, func.count(TiIndicator.id)).join(TiIndicator, TiIndicator.feed_id == TiFeed.id, isouter=True)
+                               .group_by(TiFeed.id).order_by(func.count(TiIndicator.id).desc()))).all()
+    distinct = (await s.execute(select(func.count(func.distinct(TiIndicator.indicator))))).scalar() or 0
+    total = sum(n for _t, n in by_type)
+    fp = (await s.execute(select(func.count(TiIndicator.id)).where(TiIndicator.false_positive.is_(True)))).scalar() or 0
+    expired = (await s.execute(select(func.count(TiIndicator.id)).where(TiIndicator.expires_at.is_not(None), TiIndicator.expires_at <= now))).scalar() or 0
+    return {"total": total, "distinct": distinct, "in_several_feeds": total - distinct, "false_positives": fp, "expired": expired,
+            "by_type": [{"type": t, "count": n} for t, n in sorted(by_type, key=lambda x: -x[1])],
+            "by_feed": [{"feed": n, "kind": k, "category": c, "count": cnt} for n, k, c, cnt in by_feed],
+            "matched_at_ingest": ["ip", "cidr", "domain", "url", "email", "asn"],
+            "note": "File hashes are stored for search and retro-hunts; events carry no hash column, so they are not matched at ingest."}
 
 
 @router.get("/ti/summary")
@@ -261,34 +342,3 @@ async def compliance_csv(request: Request, user: User = Depends(current_user), s
     await audit(s, request, user.username, "compliance_export")
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": 'attachment; filename="compliance-evidence.csv"'})
-
-
-# ------------------------------------------------------------------ configuration drift
-@router.get("/drift")
-async def drift_list(firewall_id: int | None = None, _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    qy = select(ConfigSnapshot)
-    if firewall_id:
-        qy = qy.where(ConfigSnapshot.firewall_id == firewall_id)
-    snaps = (await s.execute(qy.order_by(ConfigSnapshot.collected_at.desc()).limit(200))).scalars().all()
-    fws = {f.id: f for f in (await s.execute(select(Firewall))).scalars()}
-    latest: dict = {}
-    for sn in snaps:
-        latest.setdefault((sn.firewall_id, sn.vdom), sn)
-    from ..drift import assess_risks
-    current = [{"firewall_id": k[0], "firewall": fws[k[0]].name if k[0] in fws else "?", "vdom": k[1], "snapshot_id": sn.id,
-                "collected_at": iso(sn.collected_at), "risks": assess_risks(sn.data, None), "errors": sn.errors}
-               for k, sn in latest.items()]
-    return {"current": current,
-            "snapshots": [{"id": sn.id, "firewall_id": sn.firewall_id, "firewall": fws[sn.firewall_id].name if sn.firewall_id in fws else "?",
-                           "vdom": sn.vdom, "collected_at": iso(sn.collected_at), "changes": len(sn.changes or []),
-                           "risks": len([r for r in sn.risks or [] if not r.get("baseline")]), "baseline": not sn.changes and any(r.get("baseline") for r in sn.risks or [])}
-                          for sn in snaps]}
-
-
-@router.get("/drift/{sid}")
-async def drift_detail(sid: int, _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    sn = await s.get(ConfigSnapshot, sid)
-    if not sn:
-        raise HTTPException(404, "not found")
-    return {"id": sn.id, "firewall_id": sn.firewall_id, "vdom": sn.vdom, "collected_at": iso(sn.collected_at), "changes": sn.changes,
-            "risks": sn.risks, "errors": sn.errors, "tables": {k: (len(v) if isinstance(v, dict) else 1) for k, v in (sn.data or {}).items()}}

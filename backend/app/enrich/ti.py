@@ -102,6 +102,10 @@ class IndicatorSet:
         """rows: (indicator, type, source, category)"""
         self.ips: dict[str, Hit] = {}
         self.domains: dict[str, Hit] = {}
+        self.urls: dict[str, Hit] = {}       # host/path without scheme, lower-cased host
+        self.emails: dict[str, Hit] = {}
+        self.asns: dict[int, Hit] = {}
+        self.hashes: dict[str, Hit] = {}     # not matched at ingest (events carry no hash column): used by retro-hunts
         self._starts: list[int] = []
         self._nets: list[tuple[int, int, Hit]] = []
         nets = []
@@ -111,6 +115,14 @@ class IndicatorSet:
                 self.ips[ind] = h
             elif typ == "domain":
                 self.domains[ind.lower()] = h
+            elif typ == "url":
+                self.urls[ind.lower().rstrip("/")] = h
+            elif typ == "email":
+                self.emails[ind.lower()] = h
+            elif typ == "asn" and str(ind).isdigit():
+                self.asns[int(ind)] = h
+            elif typ in ("sha256", "sha1", "md5"):
+                self.hashes[ind.lower()] = h
             elif typ == "cidr":
                 try:
                     n = ipaddress.ip_network(ind, strict=False)
@@ -123,7 +135,7 @@ class IndicatorSet:
         self._starts = [a for a, _, _ in self._segs]
 
     def __len__(self):
-        return len(self.ips) + len(self.domains) + len(self._nets)
+        return len(self.ips) + len(self.domains) + len(self._nets) + len(self.urls) + len(self.emails) + len(self.asns) + len(self.hashes)
 
     def match_ip(self, ip: str) -> Hit | None:
         if not ip:
@@ -150,5 +162,16 @@ class IndicatorSet:
         return None
 
     def match_event(self, ev: dict) -> Hit | None:
-        return (self.match_ip(ev.get("dst_ip", "")) or self.match_ip(ev.get("src_ip", ""))
-                or self.match_domain(ev.get("dns_qname", "")) or self.match_domain(ev.get("hostname", "")))
+        h = (self.match_ip(ev.get("dst_ip", "")) or self.match_ip(ev.get("src_ip", ""))
+             or self.match_domain(ev.get("dns_qname", "")) or self.match_domain(ev.get("hostname", "")))
+        if h or not (self.urls or self.emails or self.asns):
+            return h
+        if self.urls and ev.get("url"):
+            u = ev["url"].lower()
+            u = u.split("://", 1)[1] if "://" in u else u
+            h = self.urls.get(u.rstrip("/")) or self.urls.get(u.split("?", 1)[0].rstrip("/"))
+        if not h and self.emails and "@" in (ev.get("user") or ""):
+            h = self.emails.get(ev["user"].lower())
+        if not h and self.asns and ev.get("dst_asn"):
+            h = self.asns.get(int(ev["dst_asn"]))
+        return h

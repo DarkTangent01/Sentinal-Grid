@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../lib/theme";
 import { escHtml, fmtBytes, fmtCompact, fmtNum, fmtTime, getTimezone } from "../lib/format";
-import { Chart, PALETTES, axisStyle } from "./Chart";
+import { Chart, PALETTES, SERIES_ROLE, axisStyle } from "./Chart";
 import { Donut, TopBar } from "./charts";
 import { Empty, IpLink, TableWrap, Time } from "./ui";
 
@@ -81,7 +81,7 @@ function TimeSeriesChart({ r, area, height }: { r: PipelineResult; area?: boolea
       ps.map((p) => `<br/>${p.marker}${escHtml(p.seriesName)}: <b>${bytes ? fmtBytes(p.value[1]) : Number(p.value[1]).toLocaleString()}</b>`).join("") },
     series: series.map((s, i) => ({
       name: s, type: "line", smooth: true, showSymbol: false, stack: area ? "a" : undefined, areaStyle: area ? { opacity: 0.25 } : undefined,
-      itemStyle: { color: s === "OTHER" ? "#8f8f8f" : PALETTES[theme][i % 8] }, lineStyle: { width: 2 },
+      itemStyle: { color: s === "OTHER" ? SERIES_ROLE[theme].muted : PALETTES[theme][i % 8] }, lineStyle: { width: 2 },
       data: r.rows.map((row) => [Date.parse(String(row._time).replace(" ", "T") + (/[zZ+]/.test(String(row._time).slice(19)) ? "" : "Z")), Number(row[s] || 0)]),
     })),
   }), [r, series, area, bytes, theme]);

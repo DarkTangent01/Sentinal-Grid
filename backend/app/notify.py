@@ -161,6 +161,11 @@ def build_request(ch: NotificationChannel, p: dict, secret: dict) -> dict:
                                  "".join(f"<tr><td><b>{_esc(k)}</b></td><td>{_esc(str(v))}</td></tr>" for k, v in (p.get("fields") or {}).items()) +
                                  "</table>" + (f"<p><a href='{_esc(p['url'])}'>Open in SIEM</a></p>" if p.get("url", "").startswith("http") else ""))
         msg.add_alternative(html, subtype="html")
+        for a in (p.get("attachments") or [])[:5]:      # e.g. a scheduled report's PDF (reports.run_definition)
+            import base64
+            main, _, sub = (a.get("mime") or "application/octet-stream").partition("/")
+            msg.add_attachment(base64.b64decode(a["content_b64"]), maintype=main, subtype=sub or "octet-stream",
+                               filename=str(a.get("filename") or "attachment")[:120])
         return {"method": "smtp", "message": msg}
     raise ValueError(f"unknown channel type {ch.type}")
 

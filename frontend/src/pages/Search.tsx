@@ -105,9 +105,9 @@ export function BookmarkModal({ query, res, onClose }: { query: string; res: Pip
     <Modal title="Bookmark results" onClose={onClose}>
       <p className="text-xs text-muted mb-2">Saves the query, time window and the first {Math.min(100, res.rows.length)} rows as evidence. Attaching to an incident adds it to the case evidence.</p>
       <div className="grid gap-2">
-        <div><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div><label className="label">Notes</label><textarea className="input w-full h-20" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
-        <div><label className="label">Attach to incident # (optional)</label><input className="input w-40" inputMode="numeric" value={f.incident_id} onChange={(e) => setF({ ...f, incident_id: e.target.value.replace(/\D/g, "") })} /></div>
+        <label className="block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Notes</span><textarea className="input w-full h-20" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Attach to incident # (optional)</span><input className="input w-40" inputMode="numeric" value={f.incident_id} onChange={(e) => setF({ ...f, incident_id: e.target.value.replace(/\D/g, "") })} /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.name || m.isPending} onClick={() => m.mutate()}>Save bookmark</button>
@@ -132,16 +132,16 @@ function AddToWorkbook({ query, viz, onClose }: { query: string; viz: Viz; onClo
   return (
     <Modal title="Add to workbook" onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className="label">Workbook</label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Workbook</span>
           <select className="input w-full" value={f.id} onChange={(e) => setF({ ...f, id: e.target.value })}>
             <option value="">Choose…</option><option value="new">+ New workbook (named after the panel)</option>
             {editable.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select></div>
-        <div className="sm:col-span-2"><label className="label">Panel title</label><input className="input w-full" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></div>
-        <div><label className="label">Visualisation</label><select className="input w-full" value={f.viz} onChange={(e) => setF({ ...f, viz: e.target.value as Viz })}>
-          {VIZ_OPTIONS.filter((v) => v !== "auto").map((v) => <option key={v}>{v}</option>)}</select></div>
-        <div><label className="label">Width (of 12)</label><select className="input w-full" value={f.width} onChange={(e) => setF({ ...f, width: Number(e.target.value) })}>
-          {[3, 4, 6, 8, 12].map((w) => <option key={w} value={w}>{w}</option>)}</select></div>
+          </select></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Panel title</span><input className="input w-full" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Visualisation</span><select className="input w-full" value={f.viz} onChange={(e) => setF({ ...f, viz: e.target.value as Viz })}>
+          {VIZ_OPTIONS.filter((v) => v !== "auto").map((v) => <option key={v}>{v}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Width (of 12)</span><select className="input w-full" value={f.width} onChange={(e) => setF({ ...f, width: Number(e.target.value) })}>
+          {[3, 4, 6, 8, 12].map((w) => <option key={w} value={w}>{w}</option>)}</select></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.id || !f.title || m.isPending} onClick={() => m.mutate()}>Add panel</button>

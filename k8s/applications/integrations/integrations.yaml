@@ -1,0 +1,194 @@
+# Edge receivers that are not the backend image:
+#   ingress-relay  rsyslog (deploy/ingress): receives device syslog on 5514, queues to disk (ingress-spool), forwards to syslog:5515
+#   tacacs         tac_plus-ng + deploy agent (deploy/tacacs), uid 10003 / group tacshare 10050, no capability: port 49 via the
+#                  namespaced safe sysctl net.ipv4.ip_unprivileged_port_start (allowed by the restricted Pod Security Standard)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-relay
+  labels:
+    app.kubernetes.io/name: ingress-relay
+    app.kubernetes.io/component: siem-ingestion
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-relay
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ingress-relay
+        app.kubernetes.io/component: siem-ingestion
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: ingress-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        runAsGroup: 10002
+        fsGroup: 10002
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: rsyslog
+        image: sentinel/ingress:1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: syslog-udp
+          containerPort: 5514
+          protocol: UDP
+        - name: syslog-tcp
+          containerPort: 5514
+          protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - kill -0 $(cat /tmp/rsyslogd.pid)
+          periodSeconds: 15
+          initialDelaySeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: syslog-tcp
+          periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: spool
+          mountPath: /var/spool/rsyslog
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: spool
+        persistentVolumeClaim:
+          claimName: ingress-spool
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tacacs
+  labels:
+    app.kubernetes.io/name: tacacs
+    app.kubernetes.io/component: aaa
+    app.kubernetes.io/part-of: sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: tacacs
+  ports:
+  - name: tacacs
+    port: 49
+    targetPort: tacacs
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tacacs
+  labels:
+    app.kubernetes.io/name: tacacs
+    app.kubernetes.io/component: aaa
+    app.kubernetes.io/part-of: sentinel
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tacacs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tacacs
+        app.kubernetes.io/component: aaa
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: tacacs
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10003
+        runAsGroup: 10050
+        fsGroup: 10050
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+        sysctls:
+        - name: net.ipv4.ip_unprivileged_port_start
+          value: '49'
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: tacacs
+        image: sentinel/tacacs:1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: tacacs
+          containerPort: 49
+          protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+        readinessProbe:
+          tcpSocket:
+            port: tacacs
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: tacacs
+          periodSeconds: 20
+          failureThreshold: 6
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: config
+          mountPath: /tacacs/config
+        - name: logs
+          mountPath: /tacacs/logs
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: config
+        persistentVolumeClaim:
+          claimName: tacacs-config
+      - name: logs
+        persistentVolumeClaim:
+          claimName: tacacs-logs

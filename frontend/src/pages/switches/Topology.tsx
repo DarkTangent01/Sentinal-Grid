@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useTheme } from "../../lib/theme";
 import { escHtml } from "../../lib/format";
-import { CHART_THEME, Chart, PALETTES, SERIES_ROLE } from "../../components/Chart";
+import { Chart, CHART_THEME, PALETTES, SERIES_ROLE, statusColor } from "../../components/Chart";
 import { Card, Empty, Kpi, Loading, TableWrap, Time, rowProps } from "../../components/ui";
 import { Util, fmtBps } from "./common";
 import { groupLinks, worstStatus } from "./fmt";
@@ -18,12 +18,13 @@ export function Topology({ site }: { site: string }) {
   const nav = useNavigate();
   const { theme } = useTheme();
   const [endpoints, setEndpoints] = useState(false);
+  const [showAps, setShowAps] = useState(true);
   const [lost, setLost] = useState(24);
   const [sel, setSel] = useState<any>(null);
   const [src, setSrc] = useState("");
   const [dst, setDst] = useState("");
-  const q = useQuery({ queryKey: ["switch-topo", site, endpoints, lost], refetchInterval: 60_000, placeholderData: (p) => p,
-    queryFn: () => api<any>("/switches/topology", { params: { site: site || undefined, endpoints, lost_hours: lost } }) });
+  const q = useQuery({ queryKey: ["switch-topo", site, endpoints, lost, showAps], refetchInterval: 60_000, placeholderData: (p) => p,
+    queryFn: () => api<any>("/switches/topology", { params: { site: site || undefined, endpoints, lost_hours: lost, aps: showAps } }) });
   const pq = useQuery({ queryKey: ["switch-path", site, src, dst], enabled: !!src && !!dst && src !== dst,
     queryFn: () => api<any>("/switches/topology/path", { params: { src, dst, site: site || undefined } }) });
   const d = q.data;
@@ -33,14 +34,15 @@ export function Topology({ site }: { site: string }) {
     if (!d) return null;
     const ct = CHART_THEME[theme];
     const role = SERIES_ROLE[theme];
-    const edgeColor: Record<string, string> = { up: "#1baf7a", degraded: role.warn, down: role.alert, lost: role.alert, unknown: role.muted };
-    const nodeColor = (n: any) => !n.managed ? PALETTES[theme][TYPES.indexOf(n.type) % 8] : n.status === "up" ? "#1baf7a"
+    const edgeColor = (s: string) => statusColor(theme, s);
+    const nodeColor = (n: any) => !n.managed ? PALETTES[theme][TYPES.indexOf(n.type) % 8] : n.status === "up" ? statusColor(theme, "up")
       : ["down", "auth_failed"].includes(n.status) ? role.alert : role.muted;
     return {
       tooltip: { trigger: "item", confine: true, formatter: (p: any) => {
         if (p.dataType === "node") {
           const n = p.data.raw;
           return `<b>${escHtml(n.label)}</b><br/>${escHtml(TYPE_LABEL[n.type] || n.type)}${n.managed ? ` · ${escHtml(n.status || "")}` : " · not monitored"}` +
+            `${n.kind === "ap" && n.clients != null ? `<br/>${n.clients} client(s) now` : ""}` +
             `${n.address ? `<br/>${escHtml(n.address)}` : ""}${n.model ? `<br/>${escHtml(n.vendor)} ${escHtml(n.model)}` : ""}${n.site ? `<br/>site ${escHtml(n.site)}` : ""}<br/>${n.degree} link(s)`;
         }
         const g = p.data.raw;
@@ -53,12 +55,12 @@ export function Topology({ site }: { site: string }) {
         categories: TYPES.map((t, i) => ({ name: TYPE_LABEL[t], itemStyle: { color: PALETTES[theme][i % 8] } })),
         label: { show: true, position: "bottom", color: ct.text, fontSize: 11 },
         data: d.nodes.map((n: any) => ({ id: n.id, name: n.label, category: TYPES.indexOf(n.type), symbol: SYMBOL[n.type] || "circle", raw: n,
-          symbolSize: (n.managed ? 30 : 18) + Math.min(16, (n.degree || 0) * 2),
-          itemStyle: { color: nodeColor(n), borderColor: [src, dst].includes(n.id) ? "#3987e5" : n.managed ? ct.strong : "transparent", borderWidth: [src, dst].includes(n.id) ? 4 : n.managed ? 1.5 : 0 } })),
+          symbolSize: n.kind === "ap" ? 16 : (n.managed ? 30 : 18) + Math.min(16, (n.degree || 0) * 2),
+          itemStyle: { color: nodeColor(n), borderColor: [src, dst].includes(n.id) ? role.primary : n.managed ? ct.strong : "transparent", borderWidth: [src, dst].includes(n.id) ? 4 : n.managed ? 1.5 : 0 } })),
         links: groups.map((g: any) => {
           const hot = g.links.some((l: any) => onPath.has(l.id));
           return { source: g.a, target: g.b, raw: g, label: { show: g.links.length > 1, formatter: `${g.links.length}×`, color: ct.text },
-            lineStyle: { color: hot ? "#3987e5" : edgeColor[g.status], width: hot ? 5 : 1.5 + Math.min(4, g.links.length), type: g.status === "lost" ? "dashed" : "solid",
+            lineStyle: { color: hot ? role.primary : edgeColor(g.status), width: hot ? 5 : 1.5 + Math.min(4, g.links.length), type: g.status === "lost" ? "dashed" : "solid",
               opacity: g.status === "lost" ? 0.8 : 0.9, curveness: 0.05 } };
         }),
         emphasis: { focus: "adjacency", lineStyle: { width: 5 } },
@@ -67,7 +69,8 @@ export function Topology({ site }: { site: string }) {
   }, [d, groups, theme, onPath, src, dst]);
   const onClick = (p: any) => {
     if (p.dataType === "node") {
-      if (p.data.raw.switch_id) nav(`/switches/${p.data.raw.switch_id}?tab=neighbors`);
+      if (p.data.raw.switch_id) setSel({ impact: p.data.raw });
+      else if (p.data.raw.ap_id) nav(`/wireless?tab=aps&ap=${p.data.raw.ap_id}`);
       else setSel({ node: p.data.raw });
     } else if (p.dataType === "edge") setSel({ group: p.data.raw });
   };
@@ -78,7 +81,8 @@ export function Topology({ site }: { site: string }) {
     <div className="flex flex-wrap items-center gap-2">
       <p className="text-xs text-muted flex-1 min-w-[16rem]">Built from the LLDP (and Cisco CDP) neighbor tables of the monitored switches. A cable seen from both ends is one link.
         Link colours: green up, amber degraded (≥ 80 % utilisation or errors), red down, red dashed lost (neighbor disappeared in the last {lost} h), grey unknown.
-        Click a switch to open it, a link or another device for details.</p>
+        Click a switch for its failure impact, an AP to open it, a link or another device for details.</p>
+      <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={showAps} onChange={(e) => setShowAps(e.target.checked)} /> controller APs on their switch ports</label>
       <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={endpoints} onChange={(e) => setEndpoints(e.target.checked)} /> show APs, phones and hosts</label>
       <select aria-label="Lost link window" className="input py-1" value={lost} onChange={(e) => setLost(Number(e.target.value))}>
         {[1, 6, 24, 72, 168].map((h) => <option key={h} value={h}>Lost links: last {h < 48 ? `${h} h` : `${h / 24} days`}</option>)}</select>
@@ -115,7 +119,8 @@ export function Topology({ site }: { site: string }) {
       {!d.nodes.length ? <Empty text="No switches in scope." /> : !d.links.length ? <Empty text="No LLDP / CDP neighbors collected yet. Enable LLDP on the switches (Cisco: lldp run; Ruckus: lldp run) — the neighbors group polls every 5 minutes." />
         : <Chart option={option!} height={600} onClick={onClick} ariaLabel="Switch topology graph" />}
     </Card>
-    {sel && <Card title={sel.node ? sel.node.label : `${label(sel.group.a)} ↔ ${label(sel.group.b)}`} right={<button className="btn" onClick={() => setSel(null)}>Close</button>}>
+    {sel?.impact && <Impact node={sel.impact} onClose={() => setSel(null)} />}
+    {sel && !sel.impact && <Card title={sel.node ? sel.node.label : `${label(sel.group.a)} ↔ ${label(sel.group.b)}`} right={<button className="btn" onClick={() => setSel(null)}>Close</button>}>
       {sel.node ? <div className="text-sm space-y-1"><div>{TYPE_LABEL[sel.node.type]} · not monitored{sel.node.address && <> · <span className="font-mono">{sel.node.address}</span></>}</div>
         {sel.node.chassis_id && <div className="text-xs text-muted">chassis {sel.node.chassis_id}</div>}{sel.node.descr && <div className="text-xs text-muted">{sel.node.descr}</div>}
         {sel.node.capabilities?.length > 0 && <div className="text-xs">capabilities: {sel.node.capabilities.join(", ")}</div>}
@@ -127,6 +132,29 @@ export function Topology({ site }: { site: string }) {
       <TableWrap><table className="tbl"><thead><tr><th>Switch</th><th className="w-full">Reason</th></tr></thead>
         <tbody>{d.without_neighbors.map((x: any) => <tr key={x.switch_id} {...rowProps(() => nav(`/switches/${x.switch_id}?tab=health`))}><td>{x.switch}</td><td className="text-xs">{x.reason}</td></tr>)}</tbody></table></TableWrap></Card>}
   </div>;
+}
+
+/** "If this switch fails": downstream switches, APs, clients and SSIDs (configured dependencies, completed by LLDP / CDP). */
+function Impact({ node, onClose }: { node: any; onClose: () => void }) {
+  const nav = useNavigate();
+  const q = useQuery({ queryKey: ["switch-impact", node.switch_id], queryFn: () => api<any>(`/switches/${node.switch_id}/impact`), staleTime: 60_000 });
+  const d = q.data;
+  return <Card title={`If ${node.label} fails`} right={<div className="flex gap-2"><button className="btn" onClick={() => nav(`/switches/${node.switch_id}?tab=neighbors`)}>Open switch</button>
+    <button className="btn" onClick={onClose}>Close</button></div>}>
+    <Loading q={q} />
+    {d && <div className="space-y-3">
+      <div className="kpi-grid">
+        <Kpi label="Downstream switches" value={d.downstream_switches.length} tone={d.downstream_switches.length ? "warn" : "ok"} />
+        <Kpi label="Access points" value={d.aps.length} tone={d.aps.length ? "warn" : "ok"} />
+        <Kpi label="Wireless clients now" value={d.clients} tone={d.clients ? "warn" : "ok"} />
+        <Kpi label="SSIDs affected" value={Object.keys(d.ssids).length} sub={Object.entries(d.ssids).slice(0, 4).map(([s, n]) => `${s || "(none)"} ${n}`).join(" · ")} />
+      </div>
+      {d.downstream_switches.length > 0 && <div className="text-xs"><span className="text-muted">Switches: </span>{d.downstream_switches.map((x: any) =>
+        <span key={x.id} className="mr-2">{x.name}{x.via === "inferred" && <span className="text-muted" title="from LLDP / CDP; confirm it in Device Dependencies"> (inferred)</span>}</span>)}</div>}
+      {d.aps.length > 0 && <div className="text-xs"><span className="text-muted">APs: </span>{d.aps.slice(0, 40).map((a: any) => a.name).join(", ")}{d.aps.length > 40 && ` and ${d.aps.length - 40} more`}</div>}
+      <p className="text-2xs text-muted">Based on {d.basis}. Clients are the controller's latest count on those APs.</p>
+    </div>}
+  </Card>;
 }
 
 function LinkTable({ links, label }: { links: any[]; label: (id: string) => string }) {

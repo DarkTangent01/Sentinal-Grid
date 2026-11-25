@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 
-from ..alerts.engine import VPN_FAIL, VPN_UP
+from ..alerts.siem import VPN_FAIL, VPN_UP
 from ..alerts.travel import find_impossible_travel
 from ..db.ch import ClickHouse
-from .filters import EventFilter, build_where, table
+from ..platform.eventquery import EventFilter, build_where, table
 from .queries import _clean, category_timeseries, bucket_seconds, FILL
 
 

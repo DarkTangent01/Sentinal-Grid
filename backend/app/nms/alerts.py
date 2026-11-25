@@ -15,6 +15,9 @@ TROUBLE = {
                          "Check the service's host, its firewall rules and the path from the NMS", "Look for a deployment or restart at the same time"],
     "nms_service_degraded": ["Compare the latency with the service's history on the Service Checks page", "Check load on the host and the network path"],
     "snmp_trap": ["Read the trap's varbinds on the SNMP → Traps page", "Check the device log at the same time (show logging / show log messages)"],
+    "nms_self_slo_breach": ["Open Monitoring Health for the failing objective and the processes' figures",
+                            "Stale devices: check the poller containers (docker compose ps / logs poller)",
+                            "High loop lag: CPU-bound work in that process; see docs/performance"],
     "nms_cert_expiry": ["Renew the certificate and deploy it with its full chain", "Check that automatic renewal (ACME / internal CA) is still running"],
 }
 
@@ -29,6 +32,9 @@ DEFAULT_RULES = [
                     "Paired notifications (jnxFanFailure / jnxFanOK, bgpBackwardTransition / bgpEstablished) clear the alert; others clear after "
                     "the window. linkDown is excluded by default: switch_port_down already covers port state from polling.",
      "params": {"window_minutes": 60, "min_severity": "medium", "exclude_oids": ["1.3.6.1.6.3.1.1.5.3"]}},
+    {"key": "nms_self_slo_breach", "name": "NMS self-monitoring objective missed", "severity": "medium", "mitre": {},
+     "description": "One of the NMS's own objectives is not met: device metric freshness, event-loop lag in the worker / pollers, "
+                    "alert pass duration, wireless rollup age, or no worker / poller process reporting.", "params": {}},
     {"key": "nms_cert_expiry", "name": "TLS certificate expiring", "severity": "medium", "mitre": {},
      "description": "A TLS check's certificate expires within its warning period (high within 7 days or once expired).", "params": {"critical_days": 7}},
 ]
@@ -142,6 +148,24 @@ async def rule_snmp_trap(ch, now, p):
         out.append(sw_det(sw, bs, f"{sid}:{fam}:{comp}", "snmp_trap", f"{sw.name}: {r['summary']} ({r['trap_name']})", first=ts, last=ts,
                           count=1 + int(r["repeats"] or 0), component=comp or r["trap_name"], metric=r["trap_name"], severity=r["severity"],
                           extra={"trap_oid": r["trap_oid"], "clears_with": CLEARS.get(fam)}))
+    return out
+
+
+async def rule_nms_self_slo_breach(ch, now, p):
+    from ..alerts.engine import Detection
+    from ..selfmon import slo_status
+    async with session_factory()() as s:
+        st = await slo_status(s, ch, now)
+    out = []
+    for o in st["slos"]:
+        if o["ok"] is not False:
+            continue
+        unit = o["unit"]
+        out.append(Detection(group_key=f"slo:{o['key']}", count=1, first_seen=now, last_seen=now,
+                             explanation=f"{o['label']}: {o['value']}{unit} (objective {o['comparison']} {o['target']}{unit})",
+                             dst_ip=None, firewall_ids=[], sites=[], event_filter={}, severity=None,
+                             evidence={"objective": o["key"], "value": o["value"], "target": o["target"], "troubleshooting": TROUBLE["nms_self_slo_breach"],
+                                       "stale_devices": st["stale_devices"][:20], "link": "/nms/monitoring", "detected_at": now.isoformat()}))
     return out
 
 

@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtBytes, fmtNum, fmtTime } from "../lib/format";
 import { Card, Empty, Tabs } from "../components/ui";
-import { Mitre } from "./Incidents";
+import { Mitre } from "../components/Mitre";
 
 export function Settings({ onMeChange }: { onMeChange: () => void }) {
   const me = useMe();
@@ -34,7 +34,7 @@ function Prefs({ onMeChange }: { onMeChange: () => void }) {
   const zones: string[] = (Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf("timeZone") : ["UTC"];
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card title="Display timezone"><div className="flex gap-2"><select className="input" value={tz} onChange={(e) => setTz(e.target.value)}>{["UTC", ...zones].map((z) => <option key={z}>{z}</option>)}</select>
+      <Card title="Display timezone"><div className="flex gap-2"><select aria-label="Display timezone" className="input" value={tz} onChange={(e) => setTz(e.target.value)}>{["UTC", ...zones].map((z) => <option key={z}>{z}</option>)}</select>
         <button className="btn btn-primary" onClick={async () => { await api("/auth/me/preferences", { method: "PUT", body: { timezone: tz } }); onMeChange(); setMsg("Timezone saved."); }}>Save</button></div>
         <p className="text-xs text-muted mt-2">All timestamps are stored in UTC and displayed in this timezone.</p></Card>
       {me.products.length > 1 && <Card title="Start in"><div className="flex gap-2"><select aria-label="Start product" className="input" value={start} onChange={(e) => setStart(e.target.value)}>
@@ -42,8 +42,8 @@ function Prefs({ onMeChange }: { onMeChange: () => void }) {
         <button className="btn btn-primary" onClick={async () => { try { await api("/auth/me/preferences", { method: "PUT", body: { default_product: start } }); onMeChange(); setMsg("Start product saved."); } catch (e) { setMsg((e as Error).message); } }}>Save</button></div>
         <p className="text-xs text-muted mt-2">Which product opens after you sign in. Deep links always open the page you asked for.</p></Card>}
       <Card title="Change password"><div className="space-y-2">
-        <input className="input w-full" type="password" placeholder="Current password" value={cur} onChange={(e) => setCur(e.target.value)} />
-        <input className="input w-full" type="password" placeholder="New password (min 12 chars)" value={nw} onChange={(e) => setNw(e.target.value)} />
+        <input aria-label="Current password" autoComplete="current-password" className="input w-full" type="password" placeholder="Current password" value={cur} onChange={(e) => setCur(e.target.value)} />
+        <input aria-label="New password" autoComplete="new-password" className="input w-full" type="password" placeholder="New password (min 12 chars)" value={nw} onChange={(e) => setNw(e.target.value)} />
         <button className="btn btn-primary" onClick={() => api("/auth/me/password", { method: "PUT", body: { current_password: cur, new_password: nw } }).then(() => setMsg("Password changed.")).catch((e) => setMsg(e.message))}>Change</button></div></Card>
       {msg && <div className="text-sm text-sky-300">{msg}</div>}
     </div>

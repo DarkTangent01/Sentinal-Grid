@@ -5,9 +5,9 @@ import { api } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { useTheme } from "../../lib/theme";
 import { escHtml, fmtNum, fmtTime, getTimezone } from "../../lib/format";
-import { Chart, PALETTES, SERIES_ROLE, axisStyle } from "../../components/Chart";
-import { Card, Drawer, Empty, Kpi, Loading, Modal, TableWrap, Time, useDebounced } from "../../components/ui";
-import { Avail, CollectorBadge, Dur, Field, Pager, RangePicker, STATE_HEX, SortTh, StaleBanner, StateDot, dur, ms, pct, rangeParams, useRange, useWanMeta } from "./common";
+import { Chart, PALETTES, SERIES_ROLE, axisStyle, statusColor } from "../../components/Chart";
+import { Card, Drawer, Empty, Kpi, Loading, Modal, rowProps, TableWrap, Time, useDebounced } from "../../components/ui";
+import { Avail, CollectorBadge, Dur, Field, Pager, RangePicker, SortTh, StaleBanner, StateDot, dur, ms, pct, rangeParams, useRange, useWanMeta } from "./common";
 
 const BLANK = { name: "", address: "", isp_name: "", isp_link_id: null as number | null, site: "", enabled: true, interval_seconds: 30, probes: 3,
   timeout_ms: 1000, retries: 0, down_after: 3, up_after: 2, degrade_after: 3, clear_after: 2, rtt_warn_ms: 150, loss_warn_pct: 20, jitter_warn_ms: null as number | null };
@@ -88,7 +88,7 @@ export function WanLive() {
               {S("state_since", "Since", "")}{S("availability", "Availability")}{S("outages", "Outages")}{S("downtime_s", "Downtime")}
               <th className="num hidden xl:table-cell">Longest</th>{S("last_rtt_ms", "RTT now")}{S("rtt_ms", "Avg / P95")}{S("jitter_ms", "Jitter")}{S("loss_pct", "Loss")}
               {S("last_check", "Last check", "")}<th className="num hidden xl:table-cell">Every</th><th /></tr></thead>
-              <tbody>{d.items.map((x: any) => <tr key={x.id} className="cursor-pointer hover:bg-white/5" onClick={() => setSel(x)}>
+              <tbody>{d.items.map((x: any) => <tr key={x.id} {...rowProps(() => setSel(x))}>
                 <td><StateDot s={x.state} /></td>
                 <td className="font-medium">{x.name}<div className="text-2xs text-muted">{x.site}{x.firewall && ` · ${x.firewall}`}</div></td>
                 <td className="font-mono text-xs">{x.address}</td><td className="text-xs">{x.isp}{x.role === "backup" && <span className="text-muted"> (backup)</span>}</td>
@@ -183,7 +183,7 @@ export function TargetDetail({ x, r, admin, onClose }: { x: any; r: any; admin: 
             {!d.timeline.length ? <Empty text="No state history in this range." /> : <>
               <div className="flex h-5 w-full overflow-hidden rounded" role="img" aria-label="State timeline">
                 {d.timeline.map((s: any, i: number) => <div key={i} title={`${s.state}: ${fmtTime(s.start)} → ${fmtTime(s.end)} (${dur(s.duration_s)})`}
-                  style={{ width: `${span ? (100 * (Date.parse(s.end) - Date.parse(s.start))) / span : 100}%`, background: STATE_HEX[s.state] || STATE_HEX.unknown }} />)}</div>
+                  style={{ width: `${span ? (100 * (Date.parse(s.end) - Date.parse(s.start))) / span : 100}%`, background: statusColor(theme, s.state) }} />)}</div>
               <div className="flex justify-between text-2xs text-muted mt-1"><span>{fmtTime(d.timeline[0].start)}</span><span>{fmtTime(d.timeline[d.timeline.length - 1].end)}</span></div></>}
           </Card>
           <Card title="Round-trip time, jitter and loss" right={<span className="text-2xs text-muted">red bands: outages · grey: maintenance · gaps: no checks</span>}>
@@ -197,7 +197,7 @@ export function TargetDetail({ x, r, admin, onClose }: { x: any; r: any; admin: 
             {!d.outages.length ? <Empty text="No outages in this range." /> :
               <TableWrap maxH="max-h-72"><table className="tbl"><thead><tr><th>Kind</th><th>Last healthy</th><th>First failure</th><th>Confirmed</th><th>Recovered</th>
                 <th className="num">Duration</th><th>Incident</th></tr></thead>
-                <tbody>{d.outages.map((o: any) => <tr key={o.id} className="cursor-pointer hover:bg-white/5" onClick={() => setObs({ start: o.last_ok_at || o.started_at, end: o.recovery_detected_at || new Date().toISOString() })}>
+                <tbody>{d.outages.map((o: any) => <tr key={o.id} {...rowProps(() => setObs({ start: o.last_ok_at || o.started_at, end: o.recovery_detected_at || new Date().toISOString() }))}>
                   <td>{o.kind}{o.maintenance_id && <span className="pill bg-slate-700/60 text-slate-300 ml-1">maintenance</span>}</td>
                   <td className="text-xs"><Time v={o.last_ok_at} /></td><td className="text-xs"><Time v={o.started_at} /></td><td className="text-xs"><Time v={o.detected_at} /></td>
                   <td className="text-xs">{o.ongoing ? <span className="text-red-300">ongoing</span> : <Time v={o.recovered_at} />}</td>

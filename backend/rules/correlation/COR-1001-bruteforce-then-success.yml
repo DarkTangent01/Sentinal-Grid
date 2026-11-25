@@ -1,0 +1,53 @@
+id: COR-1001
+name: Successful login after repeated failures from one source
+description: >
+  One source address failed to log in several times and then logged in successfully shortly afterwards
+  (password guessing that worked). Covers every log source that reports logins: Windows, Linux, JSON / LEEF / CEF
+  applications and network devices. The VPN counterpart is the built-in identity rule.
+version: 1
+severity: high
+confidence: high
+category: credential_access
+author: sentinel
+log_source: {category: system}
+detection:
+  selection: {action: logon-fail, src_ip: {exists: true}}
+  condition: {group_by: [src_ip], count: 8, timeframe: 15m}
+  followed_by:
+    selection: {action: [logon, privileged-logon, logon-explicit]}
+    within: 15m
+explanation: "{src_ip}: {metric} failed logins in {timeframe}, then a successful login (threshold {threshold})"
+data_sources: [Authentication logs with the client address (Windows Security, Linux sshd, application / JSON / LEEF sources)]
+falsepositives:
+  - A user who mistyped a password several times and then got it right (usually far fewer failures than the threshold)
+  - A monitoring or backup job with a stale password next to a working one on the same host
+investigation:
+  - Which account logged in successfully, and is that source normal for it (Users & Identity page)?
+  - Were the failures against one account (guessing) or many (spraying)?
+  - Reset the account's password and review what the session did after the login
+mitre: {tactic: TA0006, techniques: [T1110]}
+tests:
+  - name: ten failures then a success
+    events:
+      - {action: logon-fail, src_ip: 203.0.113.50, user: alice, repeat: 10, at: "-8m"}
+      - {action: logon, src_ip: 203.0.113.50, user: alice, at: "-2m"}
+    expect_alerts: 1
+    expect_groups: [{src_ip: 203.0.113.50}]
+  - name: failures without a success
+    events: [{action: logon-fail, src_ip: 203.0.113.50, user: alice, repeat: 30, at: "-8m"}]
+    expect_alerts: 0
+  - name: the success came first
+    events:
+      - {action: logon, src_ip: 203.0.113.50, user: alice, at: "-14m"}
+      - {action: logon-fail, src_ip: 203.0.113.50, user: alice, repeat: 10, at: "-5m"}
+    expect_alerts: 0
+  - name: success from another address
+    events:
+      - {action: logon-fail, src_ip: 203.0.113.50, user: alice, repeat: 10, at: "-8m"}
+      - {action: logon, src_ip: 10.1.1.20, user: alice, at: "-2m"}
+    expect_alerts: 0
+  - name: a few typos then success
+    events:
+      - {action: logon-fail, src_ip: 10.1.1.20, user: bob, repeat: 3, at: "-8m"}
+      - {action: logon, src_ip: 10.1.1.20, user: bob, at: "-7m"}
+    expect_alerts: 0

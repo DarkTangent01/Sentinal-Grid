@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics.filters import table
+from ..platform.eventquery import table
 from ..db.ch import ClickHouse
 from ..db.models import (Firewall, FirewallPolicy, PolicyAnalysisRun, PolicyAssessmentChange, PolicyConfigChange,
                          PolicyObjectSet, PolicySync, ShadowFinding, User)

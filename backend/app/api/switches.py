@@ -200,9 +200,27 @@ async def events(switch_id: int | None = None, kind: list[str] = Query(default=[
 # ------------------------------------------------------------------ topology (LLDP / CDP)
 @router.get("/topology")
 async def topology(site: str | None = Query(None, max_length=128), endpoints: bool = False, lost_hours: int = Query(24, ge=1, le=720),
-                   user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+                   aps: bool = False, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     from ..switches.topology import build
-    return await build(s, site=site or None, endpoints=endpoints, lost_hours=lost_hours)
+    return await build(s, site=site or None, endpoints=endpoints, lost_hours=lost_hours, aps=aps)
+
+
+@router.get("/topology/l3")
+async def topology_l3(site: str | None = Query(None, max_length=128), user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Layer-3 / WAN topology: OSPF and BGP adjacencies, IPsec tunnels and ISP circuits, each edge with its source."""
+    from ..db.ch import get_ch
+    from ..switches.l3topology import build as build_l3
+    return await build_l3(s, get_ch(), site=site or None)
+
+
+@router.get("/{sid}/impact")
+async def switch_impact(sid: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """If this switch fails: the downstream switches, APs, clients and SSIDs that depend on it."""
+    from ..switches.topology import impact
+    res = await impact(s, sid)
+    if not res:
+        raise HTTPException(404, "switch not found")
+    return res
 
 
 @router.get("/topology/path")
@@ -814,13 +832,14 @@ async def import_csv(body: ImportIn, request: Request, user: User = Depends(requ
 # ------------------------------------------------------------------ admin: discovery
 class DiscoveryIn(BaseModel):
     network_id: int
-    credential_id: int
+    credential_id: int | None = None
+    methods: list[str] = Field(default_factory=lambda: ["snmp"], max_length=4)
 
 
 @router.get("/admin/discovery")
 async def discovery_runs(_: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(SwitchDiscoveryRun).order_by(SwitchDiscoveryRun.id.desc()).limit(20))).scalars().all()
-    return {"items": [{"id": r.id, "cidr": r.cidr, "network_id": r.network_id, "credential_id": r.credential_id, "status": r.status,
+    return {"items": [{"id": r.id, "cidr": r.cidr, "network_id": r.network_id, "credential_id": r.credential_id, "methods": r.methods or ["snmp"], "status": r.status,
                        "requested_by": r.requested_by, "created_at": iso(r.created_at), "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
                        "scanned": r.scanned, "found": len(r.results or []), "results": r.results, "error": r.error} for r in rows]}
 
@@ -831,19 +850,24 @@ async def start_discovery(body: DiscoveryIn, request: Request, user: User = Depe
     n = await s.get(SwitchNetwork, body.network_id)
     if n is None or not n.allow_discovery:
         raise HTTPException(422, "discovery is only allowed in an authorised network with 'allow discovery' enabled")
-    cred = await s.get(SwitchCredential, body.credential_id)
-    if cred is None:
-        raise HTTPException(422, "credential profile not found")
-    from ..switches.discovery import hosts_of
+    from ..switches.discovery import METHODS, hosts_of
+    methods = sorted(set(body.methods))
+    if not methods or any(m not in METHODS for m in methods):
+        raise HTTPException(422, f"methods: one or more of {', '.join(METHODS)}")
+    cred = await s.get(SwitchCredential, body.credential_id) if body.credential_id else None
+    if "snmp" in methods and cred is None:
+        raise HTTPException(422, "credential profile not found (SNMP discovery needs one)")
     try:
-        P.check_version_allowed(cred.version)
+        if cred is not None:
+            P.check_version_allowed(cred.version)
         hosts = hosts_of(n.cidr)
     except (ValueError, SnmpError) as e:
         raise HTTPException(422, getattr(e, "message", str(e)))
     if (await s.execute(select(SwitchDiscoveryRun).where(SwitchDiscoveryRun.status.in_(["queued", "running"])))).scalars().first():
         raise HTTPException(409, "a discovery run is already queued or running")
-    r = SwitchDiscoveryRun(network_id=n.id, cidr=n.cidr, credential_id=cred.id, status="queued", requested_by=user.username)
+    r = SwitchDiscoveryRun(network_id=n.id, cidr=n.cidr, credential_id=cred.id if cred else None, methods=methods, status="queued",
+                           requested_by=user.username)
     s.add(r)
     await s.commit()
-    await audit(s, request, user.username, "switch_discovery", n.cidr, {"hosts": len(hosts), "credential": cred.name})
+    await audit(s, request, user.username, "switch_discovery", n.cidr, {"hosts": len(hosts), "credential": cred.name if cred else None, "methods": methods})
     return {"id": r.id, "hosts": len(hosts)}

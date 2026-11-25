@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import identity
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..db.ch import ClickHouse
 from ..db.models import User
 from .deps import ch_dep, current_user

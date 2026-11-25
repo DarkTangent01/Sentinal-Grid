@@ -15,14 +15,14 @@ export function SaveSearch({ query, range, onClose }: { query: string; range: st
   return (
     <Modal title="Save search" onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div className="sm:col-span-2"><label className="label">Query</label><input className="input w-full font-mono" value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></div>
-        <div><label className="label">Time range</label><select className="input w-full" value={f.range} onChange={(e) => setF({ ...f, range: e.target.value })}>{["5m", "15m", "1h", "24h", "7d", "30d"].map((r) => <option key={r}>{r}</option>)}</select></div>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Query</span><input className="input w-full font-mono" value={f.query} onChange={(e) => setF({ ...f, query: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Time range</span><select className="input w-full" value={f.range} onChange={(e) => setF({ ...f, range: e.target.value })}>{["5m", "15m", "1h", "24h", "7d", "30d"].map((r) => <option key={r}>{r}</option>)}</select></label>
         <label className="text-sm flex items-center gap-2 self-end"><input type="checkbox" checked={f.shared} onChange={(e) => setF({ ...f, shared: e.target.checked })} />Share with team</label>
         {me.role === "admin" && <>
-          <div><label className="label">Schedule (alert when matches ≥ threshold)</label><select className="input w-full" value={f.schedule} onChange={(e) => setF({ ...f, schedule: e.target.value })}><option value="none">Not scheduled</option><option value="hourly">Hourly</option><option value="daily">Daily</option></select></div>
-          <div><label className="label">Threshold</label><input type="number" min={1} className="input w-full" value={f.threshold} onChange={(e) => setF({ ...f, threshold: Number(e.target.value) })} /></div>
-          <div><label className="label">Notification severity</label><select className="input w-full" value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value })}>{["low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></div>
+          <label className="block min-w-0"><span className="label">Schedule (alert when matches ≥ threshold)</span><select className="input w-full" value={f.schedule} onChange={(e) => setF({ ...f, schedule: e.target.value })}><option value="none">Not scheduled</option><option value="hourly">Hourly</option><option value="daily">Daily</option></select></label>
+          <label className="block min-w-0"><span className="label">Threshold</span><input type="number" min={1} className="input w-full" value={f.threshold} onChange={(e) => setF({ ...f, threshold: Number(e.target.value) })} /></label>
+          <label className="block min-w-0"><span className="label">Notification severity</span><select className="input w-full" value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value })}>{["low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></label>
         </>}
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}

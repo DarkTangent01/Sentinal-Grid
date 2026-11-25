@@ -280,7 +280,7 @@ def _corr_entity(cfg: dict, ctx: Ctx, t: IcmpTarget) -> tuple[str, str]:
 
 
 async def attach_incident(s: AsyncSession, o: WanOutage, cfg: dict, *, key: str, entity: tuple[str, str], role: str = "primary") -> Incident:
-    from .incidents import SLA
+    from .platform.sla import SLA
     await _lock(s, key)
     now = _now()
     gap = timedelta(seconds=int(cfg.get("merge_gap_seconds") or 0))

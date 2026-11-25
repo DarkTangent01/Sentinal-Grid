@@ -1,0 +1,14 @@
+# Narrow the poller's SNMP egress to the real device management networks (REPLACE the example CIDR). Apply the same
+# change to the api / worker / tacacs policies when their device networks differ.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: poller
+spec:
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: postgres } } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: clickhouse } } }]
+      ports: [{ protocol: TCP, port: 8123 }, { protocol: TCP, port: 9000 }]
+    - to: [{ ipBlock: { cidr: 10.200.0.0/16 } }]   # REPLACE: device management networks
+      ports: [{ protocol: UDP, port: 161 }]

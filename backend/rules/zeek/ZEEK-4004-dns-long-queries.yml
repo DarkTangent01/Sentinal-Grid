@@ -1,0 +1,29 @@
+id: ZEEK-4004
+name: Many long DNS queries from one host (Zeek)
+description: >
+  A host made many DNS queries with very long names in a short time. Data can be carried out in DNS names
+  (tunnelling); long names are also used by some security and telemetry products.
+version: 1
+severity: medium
+confidence: low
+category: command_and_control
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection: {event_subtype: dns, dns_qname_len: {gte: 60}}
+  condition: {group_by: [src_ip], count: 100, timeframe: 10m}
+explanation: "{src_ip}: {metric} DNS queries with names of 60+ characters in {timeframe} (Zeek dns.log)"
+data_sources: [Zeek dns.log]
+falsepositives:
+  - Endpoint security, anti-spam (DNSBL) and CDN telemetry lookups
+investigation:
+  - Which parent domain do the long names share? Is it known software?
+  - Compare the host's DNS volume with its own baseline (DNS page)
+mitre: {tactic: TA0011, techniques: [T1071.004]}
+tests:
+  - name: 150 long queries
+    events: [{event_subtype: dns, src_ip: 10.20.1.15, dns_qname: "x.example", dns_qname_len: 80, repeat: 150}]
+    expect_alerts: 1
+  - name: ordinary names
+    events: [{event_subtype: dns, src_ip: 10.20.1.15, dns_qname: "example.com", dns_qname_len: 11, repeat: 500}]
+    expect_alerts: 0

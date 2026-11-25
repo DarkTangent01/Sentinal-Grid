@@ -21,10 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
+from app import composition  # noqa: E402
 from app.db import pg  # noqa: E402
 from app.db.ch import ClickHouse, set_ch  # noqa: E402
 from app.db.ch_schema import migrate  # noqa: E402
 from app.db.models import Base  # noqa: E402
+
+composition.load()  # both products' registrations (alert rules, report sections)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -43,6 +46,9 @@ def clean_ch(ch):
     ch.command("TRUNCATE TABLE events_minute")
     ch.command("TRUNCATE TABLE events_1m")
     ch.command("TRUNCATE TABLE src_hourly")
+    ch.command("TRUNCATE TABLE policy_usage_hourly")
+    ch.command("TRUNCATE TABLE traffic_country_hourly")
+    ch.command("TRUNCATE TABLE traffic_port_hourly")
     ch.command("TRUNCATE TABLE bgp_events")
     ch.command("TRUNCATE TABLE bgp_samples")
     yield ch

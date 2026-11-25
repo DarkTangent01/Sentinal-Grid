@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Alert, NmsService, Switch, SwitchEvent, SwitchInterface
@@ -220,7 +220,7 @@ async def service_availability(s: AsyncSession, ch, t0: datetime) -> list[dict]:
 
 # ------------------------------------------------------------------ capacity forecasting
 async def capacity(s: AsyncSession, ch, *, days: int, threshold_if: float, threshold_dev: float, site=None, vendor=None, role=None,
-                   limit: int = 100) -> dict:
+                   limit: int = 100, threshold_poe: float = 90.0) -> dict:
     now = datetime.now(timezone.utc)
     t0 = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
     sws = {x.id: x for x in await devices(s, site, vendor, role) if x.monitoring == "active"}
@@ -268,13 +268,91 @@ async def capacity(s: AsyncSession, ch, *, days: int, threshold_if: float, thres
         if sw.poe_budget_w and sw.poe_used_w is not None:
             poe.append({"switch_id": sw.id, "switch": sw.name, "site": sw.site, "budget_w": _r(sw.poe_budget_w, 1), "used_w": _r(sw.poe_used_w, 1),
                         "headroom_w": _r(sw.poe_budget_w - sw.poe_used_w, 1), "pct": _r(100 * sw.poe_used_w / sw.poe_budget_w, 1)})
-    return {"days": days, "interface_threshold_pct": threshold_if, "device_threshold_pct": threshold_dev,
+    poe_items = await _poe_forecast(ch, sws, ids, t0, day0, threshold_poe, days)
+    ap_items, ssid_items = await _wireless_load(s, ch, t0, day0, days, site)
+    return {"days": days, "interface_threshold_pct": threshold_if, "device_threshold_pct": threshold_dev, "poe_threshold_pct": threshold_poe,
+            "poe_forecast": sorted(poe_items, key=key)[:limit], "ap_load": sorted(ap_items, key=key)[:limit], "ssid_load": sorted(ssid_items, key=key)[:limit],
             "summary": {"interfaces_at_risk_30d": sum(1 for x in if_items if x["days_left"] is not None and x["days_left"] <= 30),
+                        "poe_at_risk_30d": sum(1 for x in poe_items if x["days_left"] is not None and x["days_left"] <= 30),
+                        "aps_at_risk_30d": sum(1 for x in ap_items if x["days_left"] is not None and x["days_left"] <= 30),
                         "interfaces_over_threshold": sum(1 for x in if_items if x["days_left"] == 0),
                         "devices_at_risk_30d": sum(1 for x in dev_items if x["days_left"] is not None and x["days_left"] <= 30),
                         "interfaces_analysed": len(series), "device_series_analysed": len(dser)},
             "interfaces": sorted(if_items, key=key)[:limit], "devices": sorted(dev_items, key=key)[:limit],
             "poe": sorted(poe, key=lambda x: -(x["pct"] or 0))[:limit]}
+
+
+def _day(v) -> date:
+    return v if isinstance(v, date) and not isinstance(v, datetime) else datetime.fromisoformat(str(v)[:10]).date()
+
+
+async def _poe_forecast(ch, sws: dict, ids: list[int], t0: datetime, day0: date, threshold: float, days: int) -> list[dict]:
+    """PoE power drawn as % of the budget, per switch / stack unit: daily average, trend and days to the threshold."""
+    rows = await ch.aquery(
+        "SELECT switch_id, component, toDate(hour) AS d, metric, sum(total) / greatest(sum(samples), 1) AS v FROM switch_metrics_hourly "
+        "WHERE hour >= {t0:DateTime64(3)} AND switch_id IN {ids:Array(UInt32)} AND metric IN ('switch_poe_power_watts', 'switch_poe_budget_watts') "
+        "GROUP BY switch_id, component, d, metric", {"t0": t0, "ids": ids})
+    by: dict[tuple, dict] = defaultdict(dict)
+    for r in rows:
+        by[(int(r["switch_id"]), r["component"], _day(r["d"]))][r["metric"]] = float(r["v"])
+    series: dict[tuple, list] = defaultdict(list)
+    last: dict[tuple, tuple] = {}
+    for (sid, comp, d), m in sorted(by.items(), key=lambda x: x[0][2]):
+        b, u = m.get("switch_poe_budget_watts"), m.get("switch_poe_power_watts")
+        if b and u is not None:
+            series[(sid, comp)].append(((d - day0).days, 100 * u / b))
+            last[(sid, comp)] = (b, u)
+    out = []
+    for (sid, comp), pts in series.items():
+        f = forecast(pts, threshold, min_points=min(7, max(3, days // 2)))
+        if f["days_left"] is None and (f["current"] or 0) < threshold * 0.75:
+            continue
+        b, u = last[(sid, comp)]
+        out.append({"switch_id": sid, "switch": sws[sid].name, "site": sws[sid].site, "component": comp, "budget_w": _r(b, 1), "used_w": _r(u, 1),
+                    "metric": "PoE power % of budget", "threshold": threshold, **f})
+    return out
+
+
+async def _wireless_load(s: AsyncSession, ch, t0: datetime, day0: date, days: int, site: str | None) -> tuple[list[dict], list[dict]]:
+    """Daily peak concurrent clients per AP (against the controller's ap_clients_max) and per SSID (against the WLAN's
+    configured maximum, when it has one), from the client rollup (wireless/history.py)."""
+    from ..db.models import WirelessAp, WirelessWlan
+    from ..wireless.service import thresholds
+    wlcs = {x.id: x for x in (await s.execute(select(Switch).where(func.lower(Switch.role) == "wlc"))).scalars()}
+    if not wlcs:
+        return [], []
+    aps = {a.id: a for a in (await s.execute(select(WirelessAp).where(WirelessAp.present.is_(True)))).scalars()
+           if not site or (a.site or "").lower() == site.lower()}
+    mp = max(3, days // 2)
+    rows = await ch.aquery("SELECT toDate(slot) AS d, ap_id, arrayMax((sumMapMerge(conc)).2) AS peak FROM wireless_client_slots FINAL "
+                           "WHERE slot >= {t0:DateTime64(3)} AND ap_id != 0 GROUP BY d, ap_id", {"t0": t0})
+    ser: dict[int, list] = defaultdict(list)
+    for r in rows:
+        if int(r["ap_id"]) in aps:
+            ser[int(r["ap_id"])].append(((_day(r["d"]) - day0).days, float(r["peak"])))
+    ap_items = []
+    for ap_id, pts in ser.items():
+        a = aps[ap_id]
+        limit = float(thresholds(wlcs.get(a.wlc_id))["ap_clients_max"])
+        f = forecast(sorted(pts), limit, min_points=min(7, mp))
+        if f["days_left"] is None and (f["current"] or 0) < limit * 0.75:
+            continue
+        ap_items.append({"ap_id": ap_id, "ap": a.name, "site": a.site, "metric": "peak concurrent clients", "threshold": limit, **f})
+    maxes: dict[str, float] = defaultdict(float)
+    for w in (await s.execute(select(WirelessWlan).where(WirelessWlan.present.is_(True)))).scalars():
+        if w.max_clients:
+            maxes[w.ssid] += float(w.max_clients)
+    ssid_items = []
+    if maxes:
+        rows = await ch.aquery("SELECT toDate(slot) AS d, ssid, arrayMax((sumMapMerge(conc)).2) AS peak FROM wireless_client_slots FINAL "
+                               "WHERE slot >= {t0:DateTime64(3)} AND ssid IN {ss:Array(String)} GROUP BY d, ssid", {"t0": t0, "ss": list(maxes)})
+        sser: dict[str, list] = defaultdict(list)
+        for r in rows:
+            sser[r["ssid"]].append(((_day(r["d"]) - day0).days, float(r["peak"])))
+        for ssid, pts in sser.items():
+            f = forecast(sorted(pts), maxes[ssid], min_points=min(7, mp))
+            ssid_items.append({"ssid": ssid, "metric": "peak concurrent clients", "threshold": maxes[ssid], **f})
+    return ap_items, ssid_items
 
 
 # ------------------------------------------------------------------ top-N and 95th percentile

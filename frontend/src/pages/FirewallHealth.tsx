@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { useGlobal } from "../lib/context";
 import { useTheme } from "../lib/theme";
 import { fmtNum, getTimezone } from "../lib/format";
-import { Chart, PALETTES, axisStyle } from "../components/Chart";
+import { Chart, PALETTES, SERIES_ROLE, axisStyle } from "../components/Chart";
 import { Card, Empty, Kpi, Loading, TableWrap, Time } from "../components/ui";
 
 const uptime = (s?: number | null) => (s == null ? "—" : s >= 86400 ? `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`);
@@ -52,7 +52,7 @@ function FirewallCard({ f, range }: { f: any; range: string }) {
         data: ts.data.points.filter((p: any) => p.member === m).map((p: any) => [Date.parse(p.t), p.cpu]) },
       { name: `${m} memory %`, type: "line", showSymbol: false, smooth: true, yAxisIndex: 0, lineStyle: { type: "dashed" }, itemStyle: { color: PALETTES[theme][(i * 2 + 1) % 8] },
         data: ts.data.points.filter((p: any) => p.member === m).map((p: any) => [Date.parse(p.t), p.mem]) },
-      { name: `${m} sessions`, type: "line", showSymbol: false, smooth: true, yAxisIndex: 1, lineStyle: { width: 1, opacity: 0.6 }, itemStyle: { color: "#9c9c9c" },
+      { name: `${m} sessions`, type: "line", showSymbol: false, smooth: true, yAxisIndex: 1, lineStyle: { width: 1, opacity: 0.6 }, itemStyle: { color: SERIES_ROLE[theme].muted },
         data: ts.data.points.filter((p: any) => p.member === m).map((p: any) => [Date.parse(p.t), p.sessions]) },
     ]);
     return {

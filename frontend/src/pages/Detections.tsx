@@ -83,27 +83,27 @@ function Editor({ d, readOnly, onClose }: { d: Det; readOnly: boolean; onClose: 
   return (
     <Modal title={d.id ? `Detection: ${d.name}` : "New detection"} onClose={onClose} wide>
       <fieldset disabled={readOnly} className="grid gap-3 sm:grid-cols-4">
-        <div className="sm:col-span-3"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
-        <div><label className="label">Severity</label><select className="input w-full" value={f.severity} onChange={(e) => set("severity", e.target.value)}>
-          {["informational", "low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></div>
-        <div className="sm:col-span-4"><label className="label">Description</label><input className="input w-full" value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-        <div className="sm:col-span-4"><label className="label">Query (pipeline). Tip: aggregate with stats … by &lt;entity&gt; and filter with where, so each result row is one finding.</label>
-          <textarea className="input w-full font-mono text-[13px] min-h-[6rem]" spellCheck={false} value={f.query} onChange={(e) => set("query", e.target.value)} /></div>
-        <div><label className="label">Run every (minutes)</label><input type="number" min={1} max={1440} className="input w-full" value={f.interval_minutes} onChange={(e) => set("interval_minutes", e.target.value)} /></div>
-        <div><label className="label">Look back (minutes)</label><input type="number" min={1} max={20160} className="input w-full" value={f.lookback_minutes} onChange={(e) => set("lookback_minutes", e.target.value)} /></div>
-        <div><label className="label">Alert when results</label><div className="flex gap-1">
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => set("name", e.target.value)} /></label>
+        <label className="block min-w-0"><span className="label">Severity</span><select className="input w-full" value={f.severity} onChange={(e) => set("severity", e.target.value)}>
+          {["informational", "low", "medium", "high", "critical"].map((x) => <option key={x}>{x}</option>)}</select></label>
+        <label className="sm:col-span-4 block min-w-0"><span className="label">Description</span><input className="input w-full" value={f.description} onChange={(e) => set("description", e.target.value)} /></label>
+        <label className="sm:col-span-4 block min-w-0"><span className="label">Query (pipeline). Tip: aggregate with stats … by &lt;entity&gt; and filter with where, so each result row is one finding.</span>
+          <textarea className="input w-full font-mono text-[13px] min-h-[6rem]" spellCheck={false} value={f.query} onChange={(e) => set("query", e.target.value)} /></label>
+        <label className="block min-w-0"><span className="label">Run every (minutes)</span><input type="number" min={1} max={1440} className="input w-full" value={f.interval_minutes} onChange={(e) => set("interval_minutes", e.target.value)} /></label>
+        <label className="block min-w-0"><span className="label">Look back (minutes)</span><input type="number" min={1} max={20160} className="input w-full" value={f.lookback_minutes} onChange={(e) => set("lookback_minutes", e.target.value)} /></label>
+        <div role="group" aria-label="Alert when results"><span className="label">Alert when results</span><div className="flex gap-1">
           <select className="input" value={f.trigger_op} onChange={(e) => set("trigger_op", e.target.value)}>{OPS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <input type="number" min={0} className="input w-full" value={f.trigger_count} onChange={(e) => set("trigger_count", e.target.value)} /></div></div>
-        <div><label className="label">Alert grouping</label><select className="input w-full" value={f.grouping} onChange={(e) => set("grouping", e.target.value)}>
-          <option value="per_row">One alert per result row</option><option value="single">One alert for all results</option></select></div>
-        <div className="sm:col-span-2"><label className="label">Entity fields (comma-separated; default: src_ip, user, …)</label>
-          <input className="input w-full font-mono" value={f.entity_fields.join(", ")} onChange={(e) => set("entity_fields", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} /></div>
-        <div><label className="label">MITRE ATT&CK tactic</label><select className="input w-full" value={f.tactic} onChange={(e) => set("tactic", e.target.value)}>
-          <option value="">—</option>{(tactics.data || []).map((t) => <option key={t.id} value={t.id}>{t.id} {t.name}</option>)}</select></div>
-        <div><label className="label">Techniques</label><input className="input w-full font-mono" placeholder="T1021, T1110.001" value={f.techniques.join(", ")}
-          onChange={(e) => set("techniques", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} /></div>
-        <div className="sm:col-span-4"><label className="label">Alert explanation template — {"{field}"} is replaced from the result row</label>
-          <input className="input w-full" placeholder="{src_ip} contacted {dsts} hosts on port 3389" value={f.explanation} onChange={(e) => set("explanation", e.target.value)} /></div>
+        <label className="block min-w-0"><span className="label">Alert grouping</span><select className="input w-full" value={f.grouping} onChange={(e) => set("grouping", e.target.value)}>
+          <option value="per_row">One alert per result row</option><option value="single">One alert for all results</option></select></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Entity fields (comma-separated; default: src_ip, user, …)</span>
+          <input className="input w-full font-mono" value={f.entity_fields.join(", ")} onChange={(e) => set("entity_fields", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} /></label>
+        <label className="block min-w-0"><span className="label">MITRE ATT&CK tactic</span><select className="input w-full" value={f.tactic} onChange={(e) => set("tactic", e.target.value)}>
+          <option value="">—</option>{(tactics.data || []).map((t) => <option key={t.id} value={t.id}>{t.id} {t.name}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Techniques</span><input className="input w-full font-mono" placeholder="T1021, T1110.001" value={f.techniques.join(", ")}
+          onChange={(e) => set("techniques", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} /></label>
+        <label className="sm:col-span-4 block min-w-0"><span className="label">Alert explanation template — {"{field}"} is replaced from the result row</span>
+          <input className="input w-full" placeholder="{src_ip} contacted {dsts} hosts on port 3389" value={f.explanation} onChange={(e) => set("explanation", e.target.value)} /></label>
         <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={f.enabled} onChange={(e) => set("enabled", e.target.checked)} />Enabled</label>
       </fieldset>
       <div className="flex flex-wrap gap-2 mt-3">

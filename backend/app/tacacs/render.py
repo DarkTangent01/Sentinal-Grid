@@ -29,8 +29,28 @@ def q(s) -> str:
     return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
 
 
+def _cr_tolerant(p: str) -> str:
+    """Cisco sends command authorization as "configure terminal <cr>"; the simulator strips the " <cr>" before
+    matching (vendors.normalize_cmd), so every end anchor in the server's regex accepts it too. Escaped "\\$" and "$"
+    inside a character class are literal and left alone."""
+    out, i, cls = [], 0, False
+    while i < len(p):
+        ch = p[i]
+        if ch == "\\" and i + 1 < len(p):
+            out.append(p[i:i + 2])
+            i += 2
+            continue
+        if ch == "[":
+            cls = True
+        elif ch == "]":
+            cls = False
+        out.append("( <cr>)?$" if ch == "$" and not cls else ch)
+        i += 1
+    return "".join(out)
+
+
 def _re(p: str) -> str:
-    return "/" + p.replace("/", "\\/") + "/"
+    return "/" + _cr_tolerant(p).replace("/", "\\/") + "/"
 
 
 def _or(conds: list[str]) -> str:
@@ -142,7 +162,9 @@ def render(snap: dict, secrets: dict, *, redact: bool, now: datetime | None = No
             continue
         validate_name(u["username"], "user name")
         out.append(f"\tuser {u['username']} {{")
-        out.append(f"\t\tpassword login = crypt {u['password_hash'] if not redact else REDACTED}")
+        # quoted: hashes carry "rounds=656000", and tac_plus-ng's tokenizer splits an unquoted word at "=" (the server then
+        # refuses the whole configuration: found by its real parser, 2026-11-03)
+        out.append(f"\t\tpassword login = crypt {q(u['password_hash'] if not redact else REDACTED)}")
         out.append("\t\tpassword pap = login")
         if u.get("groups"):
             out.append(f"\t\tmember = {','.join(u['groups'])}")

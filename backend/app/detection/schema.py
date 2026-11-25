@@ -41,7 +41,7 @@ NUMERIC = {k for k, t in FIELDS.items() if re.search(r"Int|Float", t)}
 IP_FIELDS = {"src_ip", "dst_ip", "nat_src_ip", "nat_dst_ip"}
 OPERATORS = ("eq", "ne", "in", "not_in", "contains", "startswith", "endswith", "regex", "gt", "gte", "lt", "lte", "cidr", "not_cidr",
              "internal", "exists")
-CATEGORIES = ("traffic", "dns", "web", "security", "system")
+CATEGORIES = ("traffic", "dns", "web", "security", "system", "zeek")
 SEVERITIES = ("informational", "low", "medium", "high", "critical")
 WEEKDAYS = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 7}
 ID_RE = re.compile(r"^[A-Z][A-Z0-9]{1,7}-\d{3,5}$")
@@ -192,12 +192,40 @@ class OutsideHours(BaseModel):
         return int(h) * 60 + int(m)
 
 
+class FollowedBy(BaseModel):
+    """Sequence step: the rule alerts only when a group that reached the condition also has an event matching this
+    selection (same group_by values) within `within` AFTER one of the condition's events. Example: five failed logins
+    (condition) followed by a successful one (followed_by) from the same source."""
+    model_config = ConfigDict(extra="forbid")
+    selection: Selection | list[Selection]
+    within: int
+    category: Literal["traffic", "dns", "web", "security", "system", "zeek"] | None = None   # default: the rule's category
+    event_type: str | None = None
+
+    @field_validator("within", mode="before")
+    @classmethod
+    def _w(cls, v):
+        return parse_duration(v)
+
+    @field_validator("selection")
+    @classmethod
+    def _sel(cls, v):
+        blocks = v if isinstance(v, list) else [v]
+        if not blocks or not all(isinstance(b, dict) and b for b in blocks):
+            raise ValueError("followed_by.selection needs at least one field → value clause")
+        for block in blocks:
+            for f, spec in block.items():
+                _check_clause(f, spec)
+        return v
+
+
 class Detection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     selection: Selection | list[Selection] = Field(default_factory=dict)
     filter: Selection | list[Selection] | None = None
     condition: Condition
     outside_hours: OutsideHours | None = None
+    followed_by: FollowedBy | None = None
 
     @field_validator("selection", "filter")
     @classmethod
@@ -214,7 +242,7 @@ class Detection(BaseModel):
 
 class LogSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    category: Literal["traffic", "dns", "web", "security", "system"]
+    category: Literal["traffic", "dns", "web", "security", "system", "zeek"]
     event_type: str | None = None
     product: str | None = None          # documentation only (e.g. "fortigate", "cisco")
 
@@ -261,6 +289,11 @@ class Rule(BaseModel):
     mitre: Mitre | None = None
     tests: list[RuleTest] = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
+    # how sure a match is the described behaviour (not how bad it is: that is severity)
+    confidence: Literal["low", "medium", "high"] = "medium"
+    risk_score: int | None = Field(None, ge=0, le=100)      # default: derived from severity and confidence
+    author: str = Field("", max_length=64)
+    modified: str = Field("", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
 
     @field_validator("id")
     @classmethod
@@ -281,6 +314,20 @@ class Rule(BaseModel):
     @property
     def key(self) -> str:
         return rule_key(self.id)
+
+    @property
+    def risk(self) -> int:
+        """0-100: the given risk_score, else severity weighted by confidence."""
+        if self.risk_score is not None:
+            return self.risk_score
+        base = {"informational": 5, "low": 20, "medium": 45, "high": 70, "critical": 90}[self.severity]
+        return round(base * {"low": 0.6, "medium": 0.8, "high": 1.0}[self.confidence])
+
+    @property
+    def window(self) -> int:
+        """Seconds of events one evaluation needs: the time frame, plus the sequence step's allowance."""
+        fb = self.detection.followed_by
+        return self.detection.condition.timeframe + (fb.within if fb else 0)
 
     def mitre_dict(self) -> dict:
         return {"tactic": self.mitre.tactic, "techniques": self.mitre.techniques} if self.mitre else {}

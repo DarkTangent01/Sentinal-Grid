@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# New installation: creates ./secrets/<name> files with strong random values (docs/SECRET_MANAGEMENT.md) and .env from
+# New installation: creates ./secrets/<name> files with strong random values (security/SECRETS_MANAGEMENT.md) and .env from
 # .env.example. Existing secret files are never overwritten. Nothing secret is printed.
 # Existing installation whose .env still holds secrets: run scripts/migrate-secrets.sh instead.
 set -euo pipefail
@@ -30,7 +30,8 @@ put() {  # name generator
 }
 put postgres_password rand
 put db_app_password copy:postgres_password     # until scripts/create-app-db-role.sh gives the services their own role
-put clickhouse_password rand
+put clickhouse_password rand                    # ClickHouse admin: clickhouse container and operator scripts only
+put clickhouse_app_password copy:clickhouse_password  # until scripts/create-clickhouse-app-user.sh creates the services' account
 put secret_key rand
 put token_encryption_key fernet
 put token_encryption_key_previous empty

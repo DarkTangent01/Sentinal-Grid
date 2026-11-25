@@ -1,0 +1,55 @@
+# Development / kind: locally built images (kind load), small requests, NodePort instead of LoadBalancer, single-node
+# ReadWriteOnce storage for the TACACS+ volumes (several pods on one node may share a ReadWriteOnce claim).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../../base]
+images:
+  - { name: sentinel/backend, newName: localhost/fortisiem-backend, newTag: "1.0.0" }
+  - { name: sentinel/web, newName: localhost/fortisiem-web, newTag: "1.0.0" }
+  - { name: sentinel/ingress, newName: localhost/fortisiem-ingress, newTag: "1.0.0" }
+  - { name: sentinel/tacacs, newName: localhost/fortisiem-tacacs, newTag: "1.0.0" }
+replicas:
+  - { name: poller, count: 1 }
+  - { name: web, count: 1 }
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://siem@postgres:5432/siem
+      - CLICKHOUSE_USER=siem
+patches:
+  - target: { kind: Deployment }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value: { requests: { cpu: 25m, memory: 64Mi, ephemeral-storage: 16Mi }, limits: { cpu: "1", memory: 512Mi, ephemeral-storage: 256Mi } }
+  - target: { kind: StatefulSet, name: clickhouse }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value: { requests: { cpu: 100m, memory: 512Mi, ephemeral-storage: 16Mi }, limits: { cpu: "2", memory: 1536Mi, ephemeral-storage: 1Gi } }
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 2Gi
+  - target: { kind: StatefulSet, name: postgres }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value: { requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 16Mi }, limits: { cpu: "1", memory: 512Mi, ephemeral-storage: 256Mi } }
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 1Gi
+  - target: { kind: PersistentVolumeClaim }
+    patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadWriteOnce]
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 1Gi
+  - target: { kind: Service, name: ".*-external" }
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort

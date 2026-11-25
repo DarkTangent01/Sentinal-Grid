@@ -5,7 +5,7 @@ import { useMe } from "../../lib/context";
 import { useTheme } from "../../lib/theme";
 import { fmtNum, getTimezone } from "../../lib/format";
 import { Chart, PALETTES, axisStyle } from "../../components/Chart";
-import { Card, Empty, Kpi, Loading, Modal, TableWrap, Time } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, Modal, rowProps, TableWrap, Time } from "../../components/ui";
 import { Avail, Dur, Field, Pager, RangePicker, StateDot, dur, useRange, useWanMeta } from "./common";
 import { DailyChart, useGo } from "./Overview";
 
@@ -35,8 +35,8 @@ export function WanAnalytics() {
     <Card title={title} bodyClass="p-0">{!rows ? <Empty text={d?.note || "—"} /> : !rows.length ? <Empty text="No monitored circuits." /> :
       <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th>{kind === "isp" ? "ISP" : kind === "site" ? "Site" : "Circuit"}</th><th>Now</th><th className="num">Outages</th>
         <th className="num">Downtime</th><th className="num">Longest</th><th className="num">Availability</th></tr></thead>
-        <tbody>{rows.map((x: any) => <tr key={x.group} className="cursor-pointer hover:bg-white/5"
-          onClick={() => go("incidents", { ...rangeArgs, ...(kind === "isp" ? { isp: x.isp || x.group } : kind === "site" ? { site: x.site || x.group } : { circuit_id: x.isp_link_id }) })}>
+        <tbody>{rows.map((x: any) => <tr key={x.group}
+          {...rowProps(() => go("incidents", { ...rangeArgs, ...(kind === "isp" ? { isp: x.isp || x.group } : kind === "site" ? { site: x.site || x.group } : { circuit_id: x.isp_link_id }) }))}>
           <td className="font-medium">{x.group}{kind === "circuit" && <div className="text-2xs text-muted">{x.isp} · {x.site}</div>}</td><td><StateDot s={x.state} /></td>
           <td className="num">{fmtNum(x.outages)}</td><td className="num"><Dur s={x.downtime_s} /></td><td className="num"><Dur s={x.longest_s || null} /></td>
           <td className="num"><Avail v={x.availability} coverage={x.coverage_pct} /></td></tr>)}</tbody></table></TableWrap>}</Card>);
@@ -73,8 +73,8 @@ export function WanAnalytics() {
           <Card title="Monthly trend">{d.monthly.length ? <Chart height={240} option={monthOpt!} ariaLabel="Monthly incidents and downtime" /> : <Empty text="No incidents in this range." />}</Card>
         </div>
         <Card title="Incidents by confirmed root cause" bodyClass="p-0">{!d.by_root_cause.length ? <Empty text="No incidents in this range." /> :
-          <TableWrap><table className="tbl"><tbody>{d.by_root_cause.map((x: any) => <tr key={x.category} className="cursor-pointer hover:bg-white/5"
-            onClick={() => go("incidents", x.category === "(not set)" ? { ...rangeArgs, missing_root_cause: 1 } : { ...rangeArgs, root_cause: x.category })}>
+          <TableWrap><table className="tbl"><tbody>{d.by_root_cause.map((x: any) => <tr key={x.category}
+            {...rowProps(() => go("incidents", x.category === "(not set)" ? { ...rangeArgs, missing_root_cause: 1 } : { ...rangeArgs, root_cause: x.category }))}>
             <td>{x.category}</td><td className="num font-semibold">{x.incidents}</td></tr>)}</tbody></table></TableWrap>}</Card>
       </>}
     </div>

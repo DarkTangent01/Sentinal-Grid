@@ -1,7 +1,7 @@
 """PostgreSQL models: inventory, credentials (encrypted), users, rules, alerts, audit, retention."""
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -35,6 +35,8 @@ class User(Base):
     default_product: Mapped[str | None] = mapped_column(String(8), nullable=True)  # skip the product selector at sign-in
     # NMS site scope (app/products.py site_allowed): empty = every site; administrators always see every site
     sites: Mapped[list] = mapped_column(JSON, default=list)
+    # Sentinel NMS device-access roles (app/access/rbac.py ROLES); administrators are super administrators implicitly
+    nms_roles: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class Firewall(Base):
@@ -326,6 +328,12 @@ class TiFeed(Base):
     last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_status: Mapped[str] = mapped_column(Text, default="never fetched")
     indicator_count: Mapped[int] = mapped_column(Integer, default=0)
+    # connectors (enrich/connectors.py): kind stix | taxii | misp | otx read structured intelligence; the API key / token is
+    # sent in `auth_header` and stored encrypted (TokenCipher), never returned by the API or written to logs
+    auth_header: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    auth_ciphertext: Mapped[str] = mapped_column(Text, default="", server_default="")
+    default_confidence: Mapped[int] = mapped_column(Integer, default=50, server_default="50")   # for sources that give none
+    expire_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")            # 0 = until the feed drops it
 
 
 class TiIndicator(Base):
@@ -334,9 +342,17 @@ class TiIndicator(Base):
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
     feed_id: Mapped[int] = mapped_column(ForeignKey("ti_feeds.id", ondelete="CASCADE"), index=True)
     indicator: Mapped[str] = mapped_column(String(255), index=True)
-    type: Mapped[str] = mapped_column(String(8))  # ip | cidr | domain
+    type: Mapped[str] = mapped_column(String(8))  # ip | cidr | domain | url | sha256 | sha1 | md5 | email | asn
     note: Mapped[str] = mapped_column(String(255), default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)                  # 0-100 as the source states it
+    threat: Mapped[str] = mapped_column(String(96), default="", server_default="")          # classification from the source
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # analyst verdict: a false positive stays listed (so the next refresh does not bring it back) but never matches
+    false_positive: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    fp_by: Mapped[str] = mapped_column(String(64), default="", server_default="")
 
 
 class Asset(Base):
@@ -388,6 +404,15 @@ class Incident(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # response lifecycle (incidents.STAGES): new → triage → investigation → containment → eradication → recovery → closed.
+    # `status` stays the coarse state every existing query uses (open | in_progress | resolved | closed), derived from it.
+    stage: Mapped[str] = mapped_column(String(16), default="new", server_default="new", index=True)
+    priority: Mapped[str] = mapped_column(String(4), default="", server_default="")        # P1..P4; "" = follows severity
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    escalated_by: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    escalated_to: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    escalation_reason: Mapped[str] = mapped_column(Text, default="", server_default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     # WAN / ISP incidents (category "wan", app/wan.py) share the case workflow; security incidents keep category "security"
     category: Mapped[str] = mapped_column(String(16), default="security", server_default="security", index=True)
@@ -492,6 +517,7 @@ class ReportRun(Base):
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     html: Mapped[str] = mapped_column(Text)
     summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)     # the same report as PDF (WeasyPrint)
 
 
 class ConfigSnapshot(Base):
@@ -659,6 +685,10 @@ class LogSource(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     events_total: Mapped[int] = mapped_column(BigInteger, default=0)
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HTTP ingestion (POST /api/ingest/{id}): SHA-256 of the bearer token, shown once when created; null = HTTP ingest off
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    token_hint: Mapped[str] = mapped_column(String(8), default="", server_default="")
+    token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -1095,6 +1125,40 @@ class SwitchCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class DeviceSshCredential(Base):
+    """SSH login used only for read-only configuration backup (app/configs/backup.py: fixed show commands). The secret
+    (password and / or private key) is Fernet-encrypted (TokenCipher) and never returned by the API."""
+    __tablename__ = "device_ssh_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    username: Mapped[str] = mapped_column(String(64))
+    secret_ciphertext: Mapped[str] = mapped_column(Text, default="")        # {"password": ..., "private_key": ..., "token": ...}
+    description: Mapped[str] = mapped_column(Text, default="")
+    # credential vault (app/access/vault.py): ssh | https | api_token | netconf; rotation metadata (never the secret)
+    kind: Mapped[str] = mapped_column(String(16), default="ssh", server_default="ssh")
+    owner: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DeviceConfigSnapshot(Base):
+    """A device configuration as read over SSH, secrets masked. A new row only when the configuration changed."""
+    __tablename__ = "device_config_snapshots"
+    __table_args__ = (Index("ix_device_config_snapshots_switch_taken", "switch_id", "taken_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    switch_id: Mapped[int] = mapped_column(ForeignKey("switches.id", ondelete="CASCADE"))
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    config_hash: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    added: Mapped[int] = mapped_column(Integer, default=0)                     # lines added / removed vs the previous snapshot
+    removed: Mapped[int] = mapped_column(Integer, default=0)
+    diff: Mapped[str] = mapped_column(Text, default="")                       # unified diff vs the previous snapshot (masked)
+    trigger: Mapped[str] = mapped_column(String(32), default="schedule")     # schedule | trap | manual | first
+
+
 class SwitchNetwork(Base):
     """Authorised management subnet. Switches can only be added, polled and discovered inside these networks."""
     __tablename__ = "switch_networks"
@@ -1166,7 +1230,20 @@ class Switch(Base):
     group_state: Mapped[dict] = mapped_column(JSON, default=dict)            # {group: {last_run, ok, duration_ms, error}}
     health: Mapped[dict] = mapped_column(JSON, default=dict)                 # latest cpu / memory / environment / stack / poe / stp / lacp / routing / inventory
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # wireless controllers: the large wireless tables are polled as a separate job with its own lease (docs/performance)
+    wireless_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # failing device: next poll not before
+    # read-only configuration backup over SSH (app/configs/backup.py)
+    ssh_credential_id: Mapped[int | None] = mapped_column(ForeignKey("device_ssh_credentials.id", ondelete="SET NULL"), nullable=True)
+    ssh_host_key: Mapped[str] = mapped_column(Text, default="")              # trusted on first use; a change stops backups
+    # device access (app/access): command-library platform override (empty = derived from vendor / family / OS)
+    access_platform: Mapped[str] = mapped_column(String(24), default="", server_default="")
+    # RESTCONF / HTTPS: server certificate SHA-256, pinned on first use (app/access/netconf.py)
+    https_cert_sha256: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    # Telnet (clear text) for legacy devices: off unless an administrator enables it here AND ACCESS_TELNET_ENABLED is set
+    access_telnet: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    config_backup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    config_backup_error: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -1279,7 +1356,9 @@ class SwitchDiscoveryRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     network_id: Mapped[int] = mapped_column(ForeignKey("switch_networks.id", ondelete="CASCADE"), index=True)
     cidr: Mapped[str] = mapped_column(String(64))
-    credential_id: Mapped[int] = mapped_column(ForeignKey("switch_credentials.id", ondelete="CASCADE"))
+    credential_id: Mapped[int | None] = mapped_column(ForeignKey("switch_credentials.id", ondelete="CASCADE"), nullable=True)
+    # snmp | icmp | tcp | arp (app/switches/discovery.py); runs before migration 0036 are SNMP-only
+    methods: Mapped[list] = mapped_column(JSON, default=lambda: ["snmp"])
     status: Mapped[str] = mapped_column(String(16), default="queued")        # queued | running | done | failed
     requested_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -1708,6 +1787,61 @@ class WirelessClient(Base):
     present: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    session_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)        # open WirelessClientSession
+
+
+class WirelessClientSession(Base):
+    """One client association to a controller, from association to disassociation (app/wireless/history.py).
+
+    started_at is the controller's association time (now − cldcClientUpTime) when the controller reports it
+    (start_source "controller"), else the first poll that listed the client ("observed"). Disassociation is not reported
+    by SNMP polling: ended_at is the last poll that listed the client, so the real end lies before the next poll."""
+    __tablename__ = "wireless_client_sessions"
+    __table_args__ = (Index("ix_wireless_sessions_wlc_mac_start", "wlc_id", "mac", "started_at"),
+                      Index("ix_wireless_sessions_started", "started_at"),
+                      Index("ix_wireless_sessions_open", "wlc_id", "ended_at"))
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    wlc_id: Mapped[int] = mapped_column(ForeignKey("switches.id", ondelete="CASCADE"))
+    mac: Mapped[str] = mapped_column(String(17), index=True)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    ssid: Mapped[str] = mapped_column(String(64), default="")
+    vlan: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    band: Mapped[str] = mapped_column(String(16), default="")
+    first_ap_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_ap_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    site: Mapped[str] = mapped_column(String(128), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    start_source: Mapped[str] = mapped_column(String(16), default="observed")       # controller | observed
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_reason: Mapped[str] = mapped_column(String(24), default="")                 # not_listed | reconnected | ssid_change | expired
+    disconnect_reason: Mapped[str] = mapped_column(String(64), default="")          # last reason code the controller reported
+    roams: Mapped[int] = mapped_column(Integer, default=0)
+    band_changes: Mapped[int] = mapped_column(Integer, default=0)
+    aps: Mapped[list] = mapped_column(JSON, default=list)                           # AP ids in order of association (capped)
+
+
+class WirelessRogue(Base):
+    """A rogue access point as reported by the controller's rogue detection (AIRESPACE bsnRogueAPTable). Read-only: the
+    product never contains or classifies rogues on the controller."""
+    __tablename__ = "wireless_rogues"
+    __table_args__ = (UniqueConstraint("wlc_id", "mac", name="uq_wireless_rogue"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    wlc_id: Mapped[int] = mapped_column(ForeignKey("switches.id", ondelete="CASCADE"), index=True)
+    mac: Mapped[str] = mapped_column(String(17))
+    ssid: Mapped[str] = mapped_column(String(64), default="")
+    channel: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rssi_dbm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    clients: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detecting_aps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detecting_ap: Mapped[str] = mapped_column(String(64), default="")
+    type: Mapped[str] = mapped_column(String(16), default="")
+    on_network: Mapped[bool] = mapped_column(Boolean, default=False)
+    state: Mapped[str] = mapped_column(String(24), default="")
+    class_type: Mapped[str] = mapped_column(String(24), default="")
+    spoofs_ssid: Mapped[bool] = mapped_column(Boolean, default=False)      # broadcasts one of our SSIDs
+    present: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WirelessEvent(Base):
@@ -1839,3 +1973,498 @@ class SnmpMetricSetting(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str] = mapped_column(String(64), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+# ------------------------------------------------------------------ network compliance (app/netcompliance)
+class NetComplianceRun(Base):
+    """One evaluation of every network device against the compliance checks. Read-only: the inputs are data already
+    collected (configuration backups, FortiGate snapshots, polling, TACACS+, syslog); nothing contacts a device."""
+    __tablename__ = "net_compliance_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule")     # schedule | manual | data
+    triggered_by: Mapped[str] = mapped_column(String(64), default="")
+    catalog_version: Mapped[str] = mapped_column(String(16), default="")
+    devices: Mapped[int] = mapped_column(Integer, default=0)
+    totals: Mapped[dict] = mapped_column(JSON, default=dict)                 # {pass, fail, not_evaluated, not_applicable}
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)                # per framework: {pass, fail, not_evaluated, score, coverage}
+
+
+class NetComplianceResult(Base):
+    """Results of one device in one run: [{check, status, evidence, lines}] (status pass | fail | not_evaluated |
+    not_applicable). `lines` are configuration lines (secrets already masked by the backup) shown to administrators only."""
+    __tablename__ = "net_compliance_results"
+    __table_args__ = (Index("ix_net_compliance_results_run_device", "run_id", "device_kind", "device_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("net_compliance_runs.id", ondelete="CASCADE"))
+    device_kind: Mapped[str] = mapped_column(String(16))                     # switch (switches / routers / WLCs) | firewall (FortiGate)
+    device_id: Mapped[int] = mapped_column(Integer)
+    device_name: Mapped[str] = mapped_column(String(128), default="")
+    device_type: Mapped[str] = mapped_column(String(16), default="")
+    vendor: Mapped[str] = mapped_column(String(16), default="")
+    site: Mapped[str] = mapped_column(String(128), default="")
+    results: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class NetComplianceException(Base):
+    """Accepted risk: a check that does not apply to, or is accepted for, one device (device_id set) or every device of a
+    kind (device_id null), with a reason and an expiry. Results stay as evaluated; reports show them as excepted."""
+    __tablename__ = "net_compliance_exceptions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    check_id: Mapped[str] = mapped_column(String(16), index=True)
+    device_kind: Mapped[str] = mapped_column(String(16))
+    device_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ------------------------------------------------------------------ response actions (app/response.py)
+class ResponseAction(Base):
+    """A containment or enrichment action with an approval trail. Actions that change a system (block an address,
+    disable an account, isolate a host) are never executed by Sentinel: once a second person approves, Sentinel produces
+    the exact commands (and their rollback), an operator applies them, records it, and Sentinel verifies the effect
+    from the logs. Read-only actions (enrichment, evidence collection, notification) run directly."""
+    __tablename__ = "response_actions"
+    __table_args__ = (Index("ix_response_actions_status_created", "status", "created_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))                    # response.ACTIONS
+    target: Mapped[str] = mapped_column(String(255))                 # IP, CIDR, account, host
+    params: Mapped[dict] = mapped_column(JSON, default=dict)          # vendor, firewall_id, duration, ...
+    reason: Mapped[str] = mapped_column(Text, default="")
+    incident_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    alert_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # pending → approved / rejected → applied → verified | not_verified → rolled_back; done (read-only actions); failed; cancelled
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
+    plan: Mapped[dict] = mapped_column(JSON, default=dict)            # dry-run result: commands, rollback, checks, warnings
+    result: Mapped[dict] = mapped_column(JSON, default=dict)          # execution / verification outcome
+    log: Mapped[list] = mapped_column(JSON, default=list)             # [{at, who, event, detail}]
+    requested_by: Mapped[str] = mapped_column(String(64))
+    decided_by: Mapped[str] = mapped_column(String(64), default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_comment: Mapped[str] = mapped_column(Text, default="")
+    applied_by: Mapped[str] = mapped_column(String(64), default="")
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # temporary blocks: when to roll back
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+# ------------------------------------------------------------------ Sentinel NMS device access (app/access)
+class NmsCredentialAssignment(Base):
+    """Group assignment of a vault credential: devices matching site / role / vendor (empty = any) use it for `kind`
+    unless the device has its own override. The most specific match wins (more non-empty fields), then the lowest id."""
+    __tablename__ = "nms_credential_assignments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    credential_id: Mapped[int] = mapped_column(ForeignKey("device_ssh_credentials.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="ssh")
+    site: Mapped[str] = mapped_column(String(128), default="")
+    role: Mapped[str] = mapped_column(String(32), default="")
+    vendor: Mapped[str] = mapped_column(String(16), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NmsAccessSession(Base):
+    """One interactive device session (browser terminal). The ticket is single use; only its SHA-256 is stored."""
+    __tablename__ = "nms_access_sessions"
+    __table_args__ = (Index("ix_nms_access_sessions_state", "state", "started_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)          # uuid4
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    username: Mapped[str] = mapped_column(String(64))
+    switch_id: Mapped[int | None] = mapped_column(ForeignKey("switches.id", ondelete="SET NULL"), nullable=True, index=True)
+    device_name: Mapped[str] = mapped_column(String(128), default="")
+    device_address: Mapped[str] = mapped_column(String(64), default="")
+    protocol: Mapped[str] = mapped_column(String(16), default="ssh")
+    mode: Mapped[str] = mapped_column(String(16), default="read_only")       # read_only | change
+    change_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    credential_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    client_ip: Mapped[str] = mapped_column(String(64), default="")
+    ticket_hash: Mapped[str] = mapped_column(String(64), default="")
+    ticket_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # pending → active → closed | failed | terminated | expired
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    result: Mapped[str] = mapped_column(String(32), default="")              # connected | auth_failed | host_key_changed | connect_failed | refused
+    termination_reason: Mapped[str] = mapped_column(String(64), default="")
+    terminate_requested_by: Mapped[str] = mapped_column(String(64), default="")
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bytes_in: Mapped[int] = mapped_column(BigInteger, default=0)
+    bytes_out: Mapped[int] = mapped_column(BigInteger, default=0)
+    commands: Mapped[int] = mapped_column(Integer, default=0)
+    blocked: Mapped[int] = mapped_column(Integer, default=0)
+    recording: Mapped[str] = mapped_column(String(16), default="commands")    # off | commands | full
+    console_port_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # protocol "console": the console server port
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NmsAccessCommand(Base):
+    """A command sent to a device: typed in a terminal session, or run by a diagnostic / change job. Masked text."""
+    __tablename__ = "nms_access_commands"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    change_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    switch_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    command: Mapped[str] = mapped_column(Text, default="")
+    risk: Mapped[str] = mapped_column(String(16), default="")
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    reason: Mapped[str] = mapped_column(String(255), default="")
+
+
+class NmsAccessRecording(Base):
+    """Optional terminal output transcript (recording mode "full"): masked, capped, kept for the retention period."""
+    __tablename__ = "nms_access_recordings"
+    session_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class NmsDiagJob(Base):
+    """A diagnostic run: one device or many (bulk), approved templates only."""
+    __tablename__ = "nms_diag_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(8), default="single")          # single | bulk
+    templates: Mapped[list] = mapped_column(JSON, default=list)
+    device_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="queued")       # queued | running | done | cancelled | failed
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    completed: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    concurrency: Mapped[int] = mapped_column(Integer, default=10)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NmsDiagResult(Base):
+    __tablename__ = "nms_diag_results"
+    __table_args__ = (Index("ix_nms_diag_results_job", "job_id", "switch_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("nms_diag_jobs.id", ondelete="CASCADE"))
+    switch_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    device_name: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")      # pending | running | ok | failed | skipped | cancelled
+    error: Mapped[str] = mapped_column(Text, default="")
+    outputs: Mapped[list] = mapped_column(JSON, default=list)               # [{template, command, output, status, ms}]
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NmsChangeRequest(Base):
+    """Controlled configuration change on one device (app/access/changes.py). Never created from an alert."""
+    __tablename__ = "nms_change_requests"
+    __table_args__ = (Index("ix_nms_change_requests_status", "status", "created_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    switch_id: Mapped[int | None] = mapped_column(ForeignKey("switches.id", ondelete="SET NULL"), nullable=True, index=True)
+    device_name: Mapped[str] = mapped_column(String(128), default="")
+    title: Mapped[str] = mapped_column(String(200))
+    reason: Mapped[str] = mapped_column(Text, default="")
+    lines: Mapped[list] = mapped_column(JSON, default=list)                 # configuration lines, in order
+    rollback_lines: Mapped[list] = mapped_column(JSON, default=list)
+    save_config: Mapped[bool] = mapped_column(Boolean, default=False)       # write memory after a verified change
+    risk: Mapped[str] = mapped_column(String(16), default="HIGH_RISK")
+    # draft → pending_approval → approved | rejected → executing → completed | failed | verify_failed → rolled_back; cancelled
+    status: Mapped[str] = mapped_column(String(20), default="pending_approval")
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String(64))
+    approved_by: Mapped[str] = mapped_column(String(64), default="")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_comment: Mapped[str] = mapped_column(Text, default="")
+    executed_by: Mapped[str] = mapped_column(String(64), default="")
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pre_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    post_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preview: Mapped[str] = mapped_column(Text, default="")                  # dry-run / device diff where supported
+    output: Mapped[str] = mapped_column(Text, default="")                   # masked execution transcript
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    log: Mapped[list] = mapped_column(JSON, default=list)                   # [{at, who, event, detail}]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class NmsAccessAudit(Base):
+    """Append-only, hash-chained record of every device-access event (each row commits to the previous row's hash)."""
+    __tablename__ = "nms_access_audit"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    username: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    switch_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(String(36), default="")
+    target: Mapped[str] = mapped_column(String(255), default="")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    client_ip: Mapped[str] = mapped_column(String(64), default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), default="")
+    hash: Mapped[str] = mapped_column(String(64))
+
+
+# ------------------------------------------------------------------ serial console access through console servers
+class ConsoleServer(Base):
+    """An Opengear or Cisco terminal server whose serial ports reach device consoles (app/access/console.py)."""
+    __tablename__ = "nms_console_servers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    address: Mapped[str] = mapped_column(String(64))                         # management IP literal, inside an authorised network
+    kind: Mapped[str] = mapped_column(String(16), default="opengear")       # opengear | cisco
+    method: Mapped[str] = mapped_column(String(8), default="ssh")           # ssh | telnet (telnet: 2000 + port, clear text)
+    credential_id: Mapped[int | None] = mapped_column(ForeignKey("device_ssh_credentials.id", ondelete="SET NULL"), nullable=True)
+    ssh_host_key: Mapped[str] = mapped_column(Text, default="")
+    site: Mapped[str] = mapped_column(String(128), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ConsolePort(Base):
+    __tablename__ = "nms_console_ports"
+    __table_args__ = (UniqueConstraint("server_id", "port", name="uq_console_port"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("nms_console_servers.id", ondelete="CASCADE"), index=True)
+    port: Mapped[int] = mapped_column(Integer)                               # Opengear serial port / Cisco async line number
+    switch_id: Mapped[int | None] = mapped_column(ForeignKey("switches.id", ondelete="SET NULL"), nullable=True, index=True)
+    label: Mapped[str] = mapped_column(String(128), default="")
+
+
+# ------------------------------------------------------------------ wireless controller / cloud integrations
+class WirelessIntegration(Base):
+    """Ruckus SmartZone / vSZ, Ruckus One, Juniper Mist or Aruba Central as a wireless data source
+    (app/wireless/integrations.py). Its APs, radios, WLANs and clients are stored like a polled controller's, under
+    the inventory row switch_id (a virtual controller, monitoring "external")."""
+    __tablename__ = "wireless_integrations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    kind: Mapped[str] = mapped_column(String(16))                           # smartzone | ruckus_one | mist | aruba_central
+    base_url: Mapped[str] = mapped_column(String(255))                      # cloud: an allowlisted vendor host; SmartZone: https://<management IP>:8443
+    org_id: Mapped[str] = mapped_column(String(128), default="")            # Mist org / Ruckus One tenant / (unused for SmartZone, Central)
+    site_filter: Mapped[list] = mapped_column(JSON, default=list)           # vendor site / zone / venue ids or names (empty = all)
+    api_version: Mapped[str] = mapped_column(String(16), default="")        # SmartZone public API version, e.g. v9_1
+    credential_id: Mapped[int | None] = mapped_column(ForeignKey("device_ssh_credentials.id", ondelete="SET NULL"), nullable=True)
+    verify_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    switch_id: Mapped[int | None] = mapped_column(ForeignKey("switches.id", ondelete="SET NULL"), nullable=True)
+    interval_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ------------------------------------------------------------------ Ansible automation (app/automation)
+class NmsPlaybook(Base):
+    """A playbook in the library. Only an approved version (approved_sha256 == sha256, approved by someone other than its
+    author) can run; the policy check (app/automation/policy.py) decides read_only vs change and refuses anything else."""
+    __tablename__ = "nms_playbooks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="read_only")     # read_only | change
+    findings: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="draft")       # draft | approved | retired
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    approved_by: Mapped[str] = mapped_column(String(64), default="")
+    approved_sha256: Mapped[str] = mapped_column(String(64), default="")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class NmsPlaybookRun(Base):
+    __tablename__ = "nms_playbook_runs"
+    __table_args__ = (Index("ix_nms_playbook_runs_status", "status", "created_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    playbook_id: Mapped[int] = mapped_column(ForeignKey("nms_playbooks.id", ondelete="CASCADE"), index=True)
+    playbook_sha256: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="read_only")
+    mode: Mapped[str] = mapped_column(String(8), default="run")            # check (dry run, --check --diff) | run
+    device_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # pending_approval (change runs) → queued → running → done | failed | cancelled; rejected
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    requested_by: Mapped[str] = mapped_column(String(64))
+    approved_by: Mapped[str] = mapped_column(String(64), default="")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    output: Mapped[str] = mapped_column(Text, default="")
+    hosts: Mapped[dict] = mapped_column(JSON, default=dict)                 # name → {ok, changed, failed, unreachable, skipped}
+    backups: Mapped[dict] = mapped_column(JSON, default=dict)               # change runs: switch id → {before, after}
+    error: Mapped[str] = mapped_column(Text, default="")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ------------------------------------------------------------------ Sentinel NMS: application & protocol intelligence
+class TrafficSignature(Base):
+    """Classification registry (app/traffic/registry.py). kind "port": protocol + port range → application (port-based
+    evidence only); "asn": ASN number or organisation substring → provider; "domain": domain suffix → application
+    (DNS-correlated evidence). Built-in rows are seeded once and may be edited or disabled; new rows need no code change."""
+    __tablename__ = "traffic_signatures"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), default="port", index=True)        # port | asn | domain
+    proto: Mapped[int | None] = mapped_column(Integer, nullable=True)                # IP protocol (6, 17, 132 …); port rows only
+    port_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    port_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    match: Mapped[str] = mapped_column(String(255), default="")                     # asn / domain rows
+    app: Mapped[str] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(32), default="")
+    encrypted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)           # None: unknown / depends
+    ambiguous: Mapped[bool] = mapped_column(Boolean, default=False)                 # the port alone does not identify it
+    description: Mapped[str] = mapped_column(Text, default="")
+    builtin_key: Mapped[str] = mapped_column(String(64), default="", index=True)    # set on seeded rows (never re-seeded once edited)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TrafficNetwork(Base):
+    """Administrator-defined network ranges: internal / external, site, VLAN and zone (direction, VLAN matrix, policies)."""
+    __tablename__ = "traffic_networks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cidr: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    site: Mapped[str] = mapped_column(String(128), default="")
+    vlan: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    zone: Mapped[str] = mapped_column(String(32), default="corporate")              # corporate | guest | iot | cctv | management | server | dmz | vpn | voice | other
+    internal: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TrafficVlanPolicy(Base):
+    """Allowed / denied communication between zones or VLANs ("zone:guest", "vlan:20", "external", "any")."""
+    __tablename__ = "traffic_vlan_policies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    src: Mapped[str] = mapped_column(String(64))
+    dst: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(8), default="deny")                  # allow | deny
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    builtin_key: Mapped[str] = mapped_column(String(64), default="")
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TrafficRule(Base):
+    """Custom traffic watch rule: matching flows above a volume in a window raise a traffic_custom detection."""
+    __tablename__ = "traffic_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    proto: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ports: Mapped[list] = mapped_column(JSON, default=list)
+    src_cidrs: Mapped[list] = mapped_column(JSON, default=list)
+    dst_cidrs: Mapped[list] = mapped_column(JSON, default=list)
+    exclude_cidrs: Mapped[list] = mapped_column(JSON, default=list)
+    direction: Mapped[str] = mapped_column(String(16), default="any")               # any | inbound | outbound | east_west
+    min_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    window_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TrafficSetting(Base):
+    """Single row: deduplication, LAG handling, authorised services, enrichment switches (app/traffic/settings.py)."""
+    __tablename__ = "traffic_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TrafficIpInfo(Base):
+    """Enrichment cache per IP address, filled by the background enrichment loop (never during an API request)."""
+    __tablename__ = "traffic_ip_info"
+    ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    asn: Mapped[int] = mapped_column(Integer, default=0)
+    as_org: Mapped[str] = mapped_column(String(255), default="")
+    country: Mapped[str] = mapped_column(String(64), default="")
+    rdns: Mapped[str] = mapped_column(String(255), default="")
+    domains: Mapped[list] = mapped_column(JSON, default=list)                       # names this IP resolved from (DNS logs)
+    domain_count: Mapped[int] = mapped_column(Integer, default=0)
+    fw_app: Mapped[str] = mapped_column(String(128), default="")                   # firewall application control
+    fw_app_cat: Mapped[str] = mapped_column(String(64), default="")
+    app: Mapped[str] = mapped_column(String(64), default="")
+    category: Mapped[str] = mapped_column(String(32), default="")
+    confidence: Mapped[str] = mapped_column(String(16), default="unknown")          # confirmed | high | probable | port-based | unknown
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+# ------------------------------------------------------------------ shared: identity index (app/platform/identity.py)
+class HostIdentity(Base):
+    """What is known about one device (by MAC): vendor, type, OS, name, where it connects, who uses it. Each fact keeps
+    the source that supplied it; the product contributors (alerts-style registry) fill it, both products read it."""
+    __tablename__ = "host_identities"
+    mac: Mapped[str] = mapped_column(String(17), primary_key=True)
+    vendor: Mapped[str] = mapped_column(String(128), default="")
+    vendor_source: Mapped[str] = mapped_column(String(32), default="")
+    randomized: Mapped[bool] = mapped_column(Boolean, default=False)      # locally administered (private / random) MAC
+    device_type: Mapped[str] = mapped_column(String(48), default="")
+    device_type_confidence: Mapped[str] = mapped_column(String(16), default="")
+    device_evidence: Mapped[list] = mapped_column(JSON, default=list)
+    os: Mapped[str] = mapped_column(String(64), default="")
+    hostname: Mapped[str] = mapped_column(String(255), default="")
+    hostname_source: Mapped[str] = mapped_column(String(32), default="")
+    last_ip: Mapped[str] = mapped_column(String(64), default="", index=True)
+    last_user: Mapped[str] = mapped_column(String(128), default="")
+    switch: Mapped[str] = mapped_column(String(128), default="")
+    port: Mapped[str] = mapped_column(String(128), default="")
+    vlan: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ap: Mapped[str] = mapped_column(String(128), default="")
+    ssid: Mapped[str] = mapped_column(String(64), default="")
+    site: Mapped[str] = mapped_column(String(128), default="")
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class IpMacBinding(Base):
+    """An IP address used by a MAC during [first_seen, last_seen], per source (timeline of who had an address)."""
+    __tablename__ = "ip_mac_bindings"
+    __table_args__ = (UniqueConstraint("ip", "mac", "source", name="uq_ip_mac_source"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    mac: Mapped[str] = mapped_column(String(17), index=True)
+    source: Mapped[str] = mapped_column(String(32))
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    seen: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class IpUserBinding(Base):
+    """A user signed in from / assigned an IP address during [first_seen, last_seen], per source."""
+    __tablename__ = "ip_user_bindings"
+    __table_args__ = (UniqueConstraint("ip", "username", "source", name="uq_ip_user_source"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    username: Mapped[str] = mapped_column(String(128), index=True)
+    source: Mapped[str] = mapped_column(String(32))
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    seen: Mapped[int] = mapped_column(Integer, default=1)

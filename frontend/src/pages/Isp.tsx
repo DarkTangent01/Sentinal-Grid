@@ -4,7 +4,7 @@ import { api, downloadUrl } from "../lib/api";
 import { useGlobal, useMe } from "../lib/context";
 import { useTheme } from "../lib/theme";
 import { escHtml, fmtBytes, fmtDuration, fmtNum, fmtTime, getTimezone } from "../lib/format";
-import { CHART_THEME, Chart, PALETTES, SERIES_ROLE, axisStyle } from "../components/Chart";
+import { Chart, CHART_THEME, PALETTES, SERIES_ROLE, STATUS_HEX, axisStyle } from "../components/Chart";
 import { Card, Drawer, Empty, Kpi, Loading, TableWrap, Tabs, Time, rowProps } from "../components/ui";
 import { useSearchParams } from "react-router-dom";
 import { WanOverview } from "./wan/Overview";
@@ -193,7 +193,7 @@ function Heatmap({ d, onPick }: { d: any; onPick: (key: string) => void }) {
       xAxis: { type: "category", data: days.map((x) => x.slice(5)), ...axisStyle, splitArea: { show: false } },
       yAxis: { type: "category", data: rows, ...axisStyle, axisLabel: { color: CHART_THEME[theme].strong, fontSize: 11, width: 170, overflow: "truncate" } },
       visualMap: { dimension: 2, min: 98, max: 100, calculable: false, orient: "horizontal", left: "center", bottom: 0, itemHeight: 120, textStyle: { color: CHART_THEME[theme].text },
-        inRange: { color: [SERIES_ROLE[theme].alert, "#eda100", PALETTES[theme][2]] }, formatter: (v: number) => `${v.toFixed(1)}%` },
+        inRange: { color: [STATUS_HEX[theme].bad, STATUS_HEX[theme].warn, STATUS_HEX[theme].ok] }, formatter: (v: number) => `${v.toFixed(1)}%` },
       series: [{ type: "heatmap", data, itemStyle: { borderColor: CHART_THEME[theme].surface, borderWidth: 2 } }],
     };
   }, [d, theme, days]);
@@ -227,7 +227,7 @@ function LinkDrawer({ l, range, minOut, admin, onClose }: { l: any; range: strin
         <div className="text-xs text-muted">Outage = all of: <span className="font-mono">{d.link.outage_checks.join(", ")}</span> · gateway <span className="font-mono">{d.link.gateway || "—"}</span>
           {d.link.as_org && <> · ASN {d.link.as_org}</>}{d.link.alias && <> · alias {d.link.alias}</>}{d.link.description && <> · {d.link.description}</>}</div>
         {d.timeseries.length > 0 ? <>
-          <Card title="Latency & jitter"><Chart height={200} option={line([["latency", "latency avg"], ["latency_max", "latency max", "#9c9c9c"], ["jitter", "jitter"]], (v) => `${v.toFixed(0)} ms`)!} /></Card>
+          <Card title="Latency & jitter"><Chart height={200} option={line([["latency", "latency avg"], ["latency_max", "latency max", SERIES_ROLE[theme].muted], ["jitter", "jitter"]], (v) => `${v.toFixed(0)} ms`)!} /></Card>
           <div className="grid gap-4 md:grid-cols-2">
             <Card title="Packet loss"><Chart height={180} option={line([["loss", "loss %", SERIES_ROLE[theme].alert]], (v) => `${v.toFixed(1)}%`)!} /></Card>
             <Card title="MOS (voice quality)"><Chart height={180} option={line([["mos", "MOS"]], (v) => v.toFixed(2))!} /></Card>
@@ -260,15 +260,15 @@ function Settings({ l, checks, onSaved }: { l: any; checks: string[]; onSaved: (
   return (
     <Card title="Link settings">
       <div className="grid gap-2 sm:grid-cols-3">
-        <div><label className="label">Provider name</label><input className="input w-full" placeholder={l.as_org || "e.g. Airtel"} value={f.isp_name} onChange={(e) => setF({ ...f, isp_name: e.target.value })} /></div>
-        <div><label className="label">Circuit ID</label><input className="input w-full" value={f.circuit_id} onChange={(e) => setF({ ...f, circuit_id: e.target.value })} /></div>
-        <div><label className="label">Contracted bandwidth (Mb/s)</label><input type="number" min={0} className="input w-full" value={f.bandwidth_mbps} onChange={(e) => setF({ ...f, bandwidth_mbps: e.target.value })} /></div>
-        <div><label className="label">SLA availability target (%)</label><input type="number" min={0} max={100} step={0.01} className="input w-full" value={f.target_availability} onChange={(e) => setF({ ...f, target_availability: Number(e.target.value) })} /></div>
-        <div className="sm:col-span-2"><label className="label">Support contact</label><input className="input w-full" value={f.support_contact} onChange={(e) => setF({ ...f, support_contact: e.target.value })} placeholder="NOC phone / email / ticket portal" /></div>
+        <label className="block min-w-0"><span className="label">Provider name</span><input className="input w-full" placeholder={l.as_org || "e.g. Airtel"} value={f.isp_name} onChange={(e) => setF({ ...f, isp_name: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Circuit ID</span><input className="input w-full" value={f.circuit_id} onChange={(e) => setF({ ...f, circuit_id: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Contracted bandwidth (Mb/s)</span><input type="number" min={0} className="input w-full" value={f.bandwidth_mbps} onChange={(e) => setF({ ...f, bandwidth_mbps: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">SLA availability target (%)</span><input type="number" min={0} max={100} step={0.01} className="input w-full" value={f.target_availability} onChange={(e) => setF({ ...f, target_availability: Number(e.target.value) })} /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Support contact</span><input className="input w-full" value={f.support_contact} onChange={(e) => setF({ ...f, support_contact: e.target.value })} placeholder="NOC phone / email / ticket portal" /></label>
         <div className="sm:col-span-3"><div className="label">Checks that define an outage (none selected = all checks must fail)</div>
           <div className="flex flex-wrap gap-x-4 gap-y-1">{checks.map((c) => <label key={c} className="text-xs flex items-center gap-1.5 font-mono"><input type="checkbox" checked={f.outage_checks.includes(c)}
             onChange={(e) => setF({ ...f, outage_checks: e.target.checked ? [...f.outage_checks, c] : f.outage_checks.filter((x) => x !== c) })} />{c}</label>)}</div></div>
-        <div className="sm:col-span-3"><label className="label">Notes</label><textarea className="input w-full h-16" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
+        <label className="sm:col-span-3 block min-w-0"><span className="label">Notes</span><textarea className="input w-full h-16" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></label>
         <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={f.hidden} onChange={(e) => setF({ ...f, hidden: e.target.checked })} />Hide (not an ISP link, e.g. VPN overlay)</label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}

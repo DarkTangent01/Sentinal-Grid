@@ -4,23 +4,33 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..analytics.ql import QLError, compile_ql
 from ..db.ch import ClickHouse
-from ..db.models import (Alert, AlertRule, Incident, IncidentComment, NotificationChannel, NotificationOutbox, NotificationRule,
-                         ReportDefinition, ReportRun, SavedSearch, User)
+from ..db.models import (
+    Alert,
+    Incident,
+    IncidentComment,
+    SavedSearch,
+    User,
+)
 from ..db.pg import get_session
-from ..incidents import OPEN, SEV, sla_state, set_status
-from ..netguard import DestinationError, check_host_static, check_url_static
-from ..notify import EVENT_TYPES, deliver, seal, secrets_of
-from ..reports import SECTIONS, run_definition
+from ..incidents import (
+    OPEN,
+    SEV,
+    escalate,
+    priority_of,
+    set_stage,
+    set_status,
+    sla_state,
+    stage_of,
+)
 from ..searches import count_matches
 from .alerts import alert_out
-from .deps import audit, ch_dep, current_user, iso, require_admin
+from .deps import audit, ch_dep, current_user, iso
 
 router = APIRouter(prefix="/api", tags=["soc"])
 
@@ -32,16 +42,23 @@ def inc_out(i: Incident) -> dict:
             "asset_criticality": i.asset_criticality, "assignee": i.assignee, "summary": i.summary, "closure_reason": i.closure_reason,
             "evidence": i.evidence, "first_seen": iso(i.first_seen), "last_seen": iso(i.last_seen), "created_at": iso(i.created_at),
             "acknowledged_at": iso(i.acknowledged_at), "resolved_at": iso(i.resolved_at), "sla": sla_state(i),
-            "tasks": i.tasks or [], "linked": i.linked or []}
+            "tasks": i.tasks or [], "linked": i.linked or [], "stage": stage_of(i), "priority": priority_of(i), "priority_set": bool(i.priority),
+            "tags": i.tags or [], "escalated_at": iso(i.escalated_at), "escalated_by": i.escalated_by, "escalated_to": i.escalated_to,
+            "escalation_reason": i.escalation_reason}
 
 
 @router.get("/incidents")
 async def list_incidents(status: list[str] = Query(default=[]), severity: list[str] = Query(default=[]), assignee: str | None = None,
                          q: str | None = Query(None, max_length=128), page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=200),
                          category: str = Query("security", pattern=r"^(security|wan|all)$"),
+                         stage: list[str] = Query(default=[]), escalated: bool | None = None,
                          _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     """category: security cases by default; ISP / WAN incidents live under /api/wan/incidents (category "wan")."""
     qy = select(Incident) if category == "all" else select(Incident).where(Incident.category == category)
+    if stage:
+        qy = qy.where(Incident.stage.in_(stage))
+    if escalated is not None:
+        qy = qy.where(Incident.escalated_at.is_not(None) if escalated else Incident.escalated_at.is_(None))
     if status:
         qy = qy.where(Incident.status.in_(status))
     if severity:
@@ -98,6 +115,78 @@ class IncidentPatch(BaseModel):
     assignee: str | None = Field(None, max_length=64)
     summary: str | None = Field(None, max_length=10_000)
     closure_reason: str | None = Field(None, pattern=r"^(true_positive|false_positive|benign|duplicate)$")
+    stage: str | None = Field(None, pattern=r"^(new|triage|investigation|containment|eradication|recovery|closed)$")
+    priority: str | None = Field(None, pattern=r"^(P1|P2|P3|P4|)$")
+    tags: list[str] | None = Field(None, max_length=20)
+
+
+class EscalateIn(BaseModel):
+    to: str = Field("", max_length=64)
+    reason: str = Field(min_length=5, max_length=2000)
+
+
+class FromAlertIn(BaseModel):
+    note: str = Field("", max_length=2000)
+
+
+@router.post("/incidents/from-alert/{alert_id}", status_code=201)
+async def incident_from_alert(alert_id: int, body: FromAlertIn, request: Request, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Open a security incident from one alert — the way a network (NMS) detection becomes a SIEM investigation."""
+    from ..incidents import compute
+    a = await s.get(Alert, alert_id)
+    if not a:
+        raise HTTPException(404, "not found")
+    if a.incident_id and (cur := await s.get(Incident, a.incident_id)):
+        return inc_out(cur)
+    ent_type, ent = ("ip", a.src_ip) if a.src_ip else ("ip", a.dst_ip) if a.dst_ip else ("firewall", str((a.firewall_ids or [0])[0]))
+    inc = Incident(title=a.name, entity_type=ent_type, entity=ent or "unknown", status="open", category="security", alert_count=1, rule_keys=[a.rule_key],
+                   first_seen=a.first_seen, last_seen=a.last_seen, severity=a.severity)
+    s.add(inc)
+    await s.flush()
+    a.incident_id = inc.id
+    compute(inc, [a])
+    s.add(IncidentComment(incident_id=inc.id, author=user.username, kind="system",
+                          body=f"Opened from alert #{a.id} ({a.rule_key})." + (f" {body.note}" if body.note else "")))
+    await s.commit()
+    await audit(s, request, user.username, "incident_from_alert", str(alert_id), {"incident": inc.id})
+    return inc_out(inc)
+
+
+@router.post("/incidents/{iid}/escalate")
+async def escalate_incident(iid: int, body: EscalateIn, request: Request, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    i = await s.get(Incident, iid)
+    if not i:
+        raise HTTPException(404, "not found")
+    await escalate(s, i, user.username, body.to.strip(), body.reason.strip())
+    await s.commit()
+    await audit(s, request, user.username, "incident_escalate", str(iid), {"to": body.to})
+    return inc_out(i)
+
+
+@router.get("/incidents/{iid}/timeline")
+async def incident_timeline(iid: int, _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """One ordered timeline: detections (first / last seen per alert), every status, stage, assignment and escalation
+    change, comments, evidence and completed tasks."""
+    i = await s.get(Incident, iid)
+    if not i:
+        raise HTTPException(404, "not found")
+    items = [{"at": iso(i.created_at), "kind": "created", "who": "system", "text": f"Incident opened: {i.title}"}]
+    for a in (await s.execute(select(Alert).where(Alert.incident_id == iid).order_by(Alert.first_seen))).scalars():
+        tech = ", ".join((a.mitre or {}).get("techniques") or [])
+        items.append({"at": iso(a.first_seen), "kind": "detection", "who": a.rule_key, "alert_id": a.id, "severity": a.severity,
+                      "text": f"{a.name}: {a.explanation}"[:500], "techniques": (a.mitre or {}).get("techniques") or [], "tactic": (a.mitre or {}).get("tactic_name", "")})
+        if a.last_seen and a.last_seen != a.first_seen:
+            items.append({"at": iso(a.last_seen), "kind": "detection_last", "who": a.rule_key, "alert_id": a.id,
+                          "text": f"{a.name}: last matching event ({a.event_count} events in total)" + (f" [{tech}]" if tech else "")})
+    for c in (await s.execute(select(IncidentComment).where(IncidentComment.incident_id == iid).order_by(IncidentComment.ts))).scalars():
+        items.append({"at": iso(c.ts), "kind": c.kind, "who": c.author, "text": c.body[:2000]})
+    for e in i.evidence or []:
+        items.append({"at": e.get("at"), "kind": "evidence", "who": e.get("added_by", ""), "text": f"Evidence added: {e.get('label') or e.get('ref')}"})
+    for t in i.tasks or []:
+        if t.get("done") and t.get("done_at"):
+            items.append({"at": t["done_at"], "kind": "task", "who": t.get("done_by", ""), "text": f"Task done: {t.get('text')}"})
+    items = sorted((x for x in items if x.get("at")), key=lambda x: x["at"])
+    return {"id": iid, "stage": stage_of(i), "items": items}
 
 
 @router.patch("/incidents/{iid}")
@@ -106,9 +195,11 @@ async def update_incident(iid: int, body: IncidentPatch, request: Request, user:
     if not i:
         raise HTTPException(404, "not found")
     data = body.model_dump(exclude_unset=True)
-    if data.get("status") in ("resolved", "closed") and not (data.get("closure_reason") or i.closure_reason):
+    if (data.get("status") in ("resolved", "closed") or data.get("stage") == "closed") and not (data.get("closure_reason") or i.closure_reason):
         raise HTTPException(422, "closure_reason is required to resolve or close an incident")
-    if "status" in data and data["status"] != i.status:
+    if data.get("stage") and data["stage"] != stage_of(i):
+        await set_stage(s, i, data["stage"], user.username, data.get("closure_reason"))
+    elif "status" in data and data["status"] != i.status:
         await set_status(s, i, data["status"], user.username, data.get("closure_reason"))
     elif data.get("closure_reason"):
         i.closure_reason = data["closure_reason"]
@@ -119,6 +210,11 @@ async def update_incident(iid: int, body: IncidentPatch, request: Request, user:
             await set_status(s, i, "in_progress", user.username)
     if "summary" in data:
         i.summary = data["summary"]
+    if "priority" in data and data["priority"] != (i.priority or ""):
+        s.add(IncidentComment(incident_id=i.id, author=user.username, kind="status", body=f"Priority {priority_of(i)} → {data['priority'] or 'by severity'}"))
+        i.priority = data["priority"] or ""
+    if data.get("tags") is not None:
+        i.tags = sorted({t.strip().lower()[:32] for t in data["tags"] if t and t.strip()})
     await s.commit()
     await audit(s, request, user.username, "incident_update", str(iid), data)
     return inc_out(i)
@@ -277,188 +373,6 @@ async def analyst_workload(days: int = Query(30, ge=1, le=365), _: User = Depend
     return sorted(out, key=lambda r: -(r["open"] + r["in_progress"]))
 
 
-@router.get("/alert-rules/stats")
-async def rule_stats(days: int = Query(90, ge=1, le=365), _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = (await s.execute(select(Alert.rule_key, Alert.disposition, func.count()).where(Alert.created_at >= since)
-                            .group_by(Alert.rule_key, Alert.disposition))).all()
-    out: dict = {}
-    for key, disp, n in rows:
-        r = out.setdefault(key, {"rule_key": key, "alerts": 0, "true_positive": 0, "false_positive": 0, "benign": 0, "undetermined": 0})
-        r["alerts"] += n
-        r[disp if disp in ("true_positive", "false_positive", "benign") else "undetermined"] += n
-    for r in out.values():
-        decided = r["true_positive"] + r["false_positive"] + r["benign"]
-        r["false_positive_rate"] = round(r["false_positive"] / decided, 3) if decided else None
-    names = {x.key: x.name for x in (await s.execute(select(AlertRule))).scalars()}
-    return sorted(({**r, "name": names.get(k, k)} for k, r in out.items()), key=lambda r: -(r["false_positive_rate"] or 0))
-
-
-# ------------------------------------------------------------------ notifications
-def ch_out(c: NotificationChannel) -> dict:
-    sec = secrets_of(c)
-    return {"id": c.id, "name": c.name, "type": c.type, "config": c.config, "enabled": c.enabled,
-            "has_secret": bool(sec), "secret_fields": sorted(sec)}  # secret values are never returned
-
-
-class ChannelIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    type: str = Field(pattern=r"^(email|slack|teams|webhook)$")
-    config: dict = Field(default_factory=dict)  # email: host, port, security, username, from_addr, to[]
-    url: str | None = Field(None, max_length=2048)  # slack/teams/webhook (stored encrypted)
-    password: str | None = Field(None, max_length=512)  # SMTP (stored encrypted)
-    hmac_secret: str | None = Field(None, max_length=512)  # webhook signing (stored encrypted)
-    enabled: bool = True
-
-
-def _validate_channel(body: ChannelIn, existing_secret: dict) -> dict:
-    secret = {**existing_secret, **{k: v for k, v in (("url", body.url), ("password", body.password), ("hmac_secret", body.hmac_secret)) if v}}
-    if body.type in ("slack", "teams", "webhook") and not str(secret.get("url", "")).lower().startswith(("https://", "http://")):
-        raise HTTPException(422, "a webhook URL (https://...) is required")
-    try:
-        if body.type in ("slack", "teams", "webhook"):
-            check_url_static(str(secret["url"]), ("https", "http"))
-        elif body.type == "email" and body.config.get("host"):
-            check_host_static(str(body.config["host"]))
-    except DestinationError as e:
-        raise HTTPException(422, str(e))
-    if body.type == "email":
-        cfg = body.config
-        if not cfg.get("host") or not cfg.get("to"):
-            raise HTTPException(422, "SMTP host and at least one recipient are required")
-        if cfg.get("security", "starttls") not in ("starttls", "ssl", "none"):
-            raise HTTPException(422, "security must be starttls, ssl or none")
-    return secret
-
-
-@router.get("/notifications/channels")
-async def list_channels(_: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    return [ch_out(c) for c in (await s.execute(select(NotificationChannel).order_by(NotificationChannel.name))).scalars()]
-
-
-@router.post("/notifications/channels", status_code=201)
-async def create_channel(body: ChannelIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    secret = _validate_channel(body, {})
-    c = NotificationChannel(name=body.name, type=body.type, config=body.config, secret_ciphertext=seal(secret), enabled=body.enabled)
-    s.add(c)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_channel_create", body.name, {"type": body.type})
-    return ch_out(c)
-
-
-@router.put("/notifications/channels/{cid}")
-async def update_channel(cid: int, body: ChannelIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    c = await s.get(NotificationChannel, cid)
-    if not c:
-        raise HTTPException(404, "not found")
-    secret = _validate_channel(body, secrets_of(c))
-    c.name, c.type, c.config, c.enabled, c.secret_ciphertext = body.name, body.type, body.config, body.enabled, seal(secret)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_channel_update", body.name)
-    return ch_out(c)
-
-
-@router.delete("/notifications/channels/{cid}")
-async def delete_channel(cid: int, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    c = await s.get(NotificationChannel, cid)
-    if not c:
-        raise HTTPException(404, "not found")
-    await s.delete(c)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_channel_delete", c.name)
-    return {"ok": True}
-
-
-@router.post("/notifications/channels/{cid}/test")
-async def test_channel(cid: int, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    c = await s.get(NotificationChannel, cid)
-    if not c:
-        raise HTTPException(404, "not found")
-    payload = {"title": "Sentinel Grid test notification", "text": f"Test message sent by {admin.username}.",
-               "severity": "informational", "fields": {"Channel": c.name}, "event_type": "test"}
-    try:
-        await deliver(c, payload)
-        ok, err = True, None
-    except Exception as e:
-        ok, err = False, f"{type(e).__name__}: {e}"[:300]
-    await audit(s, request, admin.username, "notify_channel_test", c.name, {"ok": ok}, success=ok)
-    return {"ok": ok, "error": err}
-
-
-class RuleIn(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    channel_id: int
-    event_types: list[str] = Field(min_length=1)
-    min_severity: str = Field("high", pattern=r"^(informational|low|medium|high|critical)$")
-    rule_keys: list[str] = Field(default_factory=list)
-    quiet_start: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    quiet_end: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
-    quiet_tz: str = Field("UTC", max_length=64)
-    dedupe_minutes: int = Field(30, ge=0, le=1440)
-    enabled: bool = True
-
-
-def nr_out(r: NotificationRule) -> dict:
-    return {k: getattr(r, k) for k in ("id", "name", "channel_id", "event_types", "min_severity", "rule_keys", "quiet_start", "quiet_end",
-                                       "quiet_tz", "dedupe_minutes", "enabled")}
-
-
-@router.get("/notifications/rules")
-async def list_nrules(_: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    return {"rules": [nr_out(r) for r in (await s.execute(select(NotificationRule).order_by(NotificationRule.id))).scalars()],
-            "event_types": list(EVENT_TYPES)}
-
-
-async def _save_rule(s, r: NotificationRule, body: RuleIn):
-    bad = set(body.event_types) - set(EVENT_TYPES)
-    if bad:
-        raise HTTPException(422, f"unknown event types {sorted(bad)}")
-    if not await s.get(NotificationChannel, body.channel_id):
-        raise HTTPException(422, "channel not found")
-    for k, v in body.model_dump().items():
-        setattr(r, k, v)
-
-
-@router.post("/notifications/rules", status_code=201)
-async def create_nrule(body: RuleIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    r = NotificationRule()
-    await _save_rule(s, r, body)
-    s.add(r)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_rule_create", body.name)
-    return nr_out(r)
-
-
-@router.put("/notifications/rules/{rid}")
-async def update_nrule(rid: int, body: RuleIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    r = await s.get(NotificationRule, rid)
-    if not r:
-        raise HTTPException(404, "not found")
-    await _save_rule(s, r, body)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_rule_update", body.name)
-    return nr_out(r)
-
-
-@router.delete("/notifications/rules/{rid}")
-async def delete_nrule(rid: int, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    r = await s.get(NotificationRule, rid)
-    if not r:
-        raise HTTPException(404, "not found")
-    await s.delete(r)
-    await s.commit()
-    await audit(s, request, admin.username, "notify_rule_delete", r.name)
-    return {"ok": True}
-
-
-@router.get("/notifications/log")
-async def notify_log(_: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    rows = (await s.execute(select(NotificationOutbox).order_by(NotificationOutbox.id.desc()).limit(200))).scalars()
-    return [{"id": o.id, "created_at": iso(o.created_at), "channel_id": o.channel_id, "rule_id": o.rule_id, "event_type": o.event_type,
-             "title": (o.payload or {}).get("title"), "severity": (o.payload or {}).get("severity"), "status": o.status,
-             "attempts": o.attempts, "sent_at": iso(o.sent_at), "error": o.error} for o in rows]
-
-
 # ------------------------------------------------------------------ saved searches
 class SearchIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
@@ -550,88 +464,3 @@ async def run_search(sid: int, user: User = Depends(current_user), s: AsyncSessi
     except QLError as e:
         raise HTTPException(422, str(e))
     return {"count": n, "query": x.query, "range": x.range}
-
-
-# ------------------------------------------------------------------ reports
-class ReportIn(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    period: str = Field("daily", pattern=r"^(daily|weekly|monthly)$")
-    sections: list[str] = Field(default_factory=lambda: list(SECTIONS))
-    channel_ids: list[int] = Field(default_factory=list)
-    enabled: bool = True
-    send_hour: int = Field(7, ge=0, le=23)
-    tz: str = Field("UTC", max_length=64)
-
-
-def rd_out(d: ReportDefinition) -> dict:
-    return {"id": d.id, "name": d.name, "period": d.period, "sections": d.sections, "channel_ids": d.channel_ids, "enabled": d.enabled,
-            "send_hour": d.send_hour, "tz": d.tz, "last_run": iso(d.last_run), "created_by": d.created_by}
-
-
-@router.get("/reports")
-async def list_reports(_: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    defs = (await s.execute(select(ReportDefinition).order_by(ReportDefinition.name))).scalars()
-    runs = (await s.execute(select(ReportRun).order_by(ReportRun.generated_at.desc()).limit(50))).scalars()
-    return {"definitions": [rd_out(d) for d in defs], "sections": SECTIONS,
-            "runs": [{"id": r.id, "name": r.name, "generated_at": iso(r.generated_at), "period_start": iso(r.period_start),
-                      "period_end": iso(r.period_end), "summary": r.summary} for r in runs]}
-
-
-async def _save_def(d: ReportDefinition, body: ReportIn):
-    bad = set(body.sections) - set(SECTIONS)
-    if bad:
-        raise HTTPException(422, f"unknown sections {sorted(bad)}")
-    for k, v in body.model_dump().items():
-        setattr(d, k, v)
-
-
-@router.post("/reports", status_code=201)
-async def create_report(body: ReportIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    d = ReportDefinition(created_by=admin.username)
-    await _save_def(d, body)
-    s.add(d)
-    await s.commit()
-    await audit(s, request, admin.username, "report_create", body.name)
-    return rd_out(d)
-
-
-@router.put("/reports/{rid}")
-async def update_report(rid: int, body: ReportIn, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    d = await s.get(ReportDefinition, rid)
-    if not d:
-        raise HTTPException(404, "not found")
-    await _save_def(d, body)
-    await s.commit()
-    await audit(s, request, admin.username, "report_update", body.name)
-    return rd_out(d)
-
-
-@router.delete("/reports/{rid}")
-async def delete_report(rid: int, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session)):
-    d = await s.get(ReportDefinition, rid)
-    if not d:
-        raise HTTPException(404, "not found")
-    await s.delete(d)
-    await s.commit()
-    await audit(s, request, admin.username, "report_delete", d.name)
-    return {"ok": True}
-
-
-@router.post("/reports/{rid}/run")
-async def run_report(rid: int, request: Request, admin: User = Depends(require_admin), s: AsyncSession = Depends(get_session),
-                     ch: ClickHouse = Depends(ch_dep)):
-    d = await s.get(ReportDefinition, rid)
-    if not d:
-        raise HTTPException(404, "not found")
-    run = await run_definition(s, ch, d)
-    await audit(s, request, admin.username, "report_run", d.name)
-    return {"id": run.id}
-
-
-@router.get("/reports/runs/{run_id}.html", response_class=HTMLResponse)
-async def report_html(run_id: int, _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    r = await s.get(ReportRun, run_id)
-    if not r:
-        raise HTTPException(404, "not found")
-    # static document: no scripts allowed
-    return HTMLResponse(r.html, headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})

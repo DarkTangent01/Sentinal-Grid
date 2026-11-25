@@ -1,0 +1,40 @@
+id: COR-1004
+name: IPS detection followed by allowed traffic from the same source
+description: >
+  The firewall's intrusion prevention reported an attack from an external address, and traffic from that same
+  address was allowed afterwards. Either the attack was only detected (not blocked), or the source moved on to a
+  service that is open.
+version: 1
+severity: high
+confidence: medium
+category: network_intrusion
+author: sentinel
+log_source: {category: security}
+detection:
+  selection: {src_ip: {internal: false}, threat: {exists: true}}
+  condition: {group_by: [src_ip], count: 1, timeframe: 30m}
+  followed_by:
+    category: traffic
+    selection: {action: [accept, close], dst_ip: {internal: true}, rcvd_bytes: {gt: 0}}
+    within: 30m
+explanation: "{src_ip}: {metric} IPS / security detection(s) ({samples}), then inbound traffic from it was allowed"
+data_sources: [Firewall security (IPS / UTM) logs and traffic logs from the same firewall]
+falsepositives:
+  - Low-severity IPS signatures on normal traffic to a public service
+  - Signatures in monitor (detect-only) mode by design
+investigation:
+  - Open the IPS event - which signature, which target, was it blocked or only detected?
+  - Review what the allowed sessions reached and how much data moved
+  - Consider blocking the source and setting the signature to block
+mitre: {tactic: TA0001, techniques: [T1190]}
+tests:
+  - name: IPS hit then accepted session
+    events:
+      - {src_ip: 203.0.113.70, dst_ip: 10.1.1.10, threat: "Apache.Struts.RCE", msg: ips, at: "-20m"}
+      - {category: traffic, src_ip: 203.0.113.70, dst_ip: 10.1.1.10, action: accept, rcvd_bytes: 900, at: "-10m"}
+    expect_alerts: 1
+  - name: IPS hit and nothing allowed after
+    events:
+      - {category: traffic, src_ip: 203.0.113.70, dst_ip: 10.1.1.10, action: accept, rcvd_bytes: 900, at: "-25m"}
+      - {src_ip: 203.0.113.70, dst_ip: 10.1.1.10, threat: "Apache.Struts.RCE", msg: ips, at: "-20m"}
+    expect_alerts: 0

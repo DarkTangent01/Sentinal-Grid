@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useData, useGlobal, useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, IpLink, Kpi, Loading, Modal, TableWrap, Tabs, Time, Trunc, useExplore } from "../components/ui";
+import { Card, Empty, IpLink, Kpi, Loading, Modal, Pager, rowProps, TableWrap, Tabs, Time, Trunc, useExplore } from "../components/ui";
 import { Donut, TimeChart } from "../components/charts";
 
 export function ThreatIntel() {
@@ -11,9 +11,10 @@ export function ThreatIntel() {
   return (
     <div className="space-y-4 min-w-0">
       <p className="text-xs text-muted">Events are matched against enabled feeds and the manual IOC list as they arrive (destination/source IP, CIDR, DNS query and web hostname, including parent domains). Matching events raise the <b>Traffic to/from threat-intel indicator</b> detection. Use Hunt to search past events for new indicators.</p>
-      <Tabs value={tab} onChange={setTab} tabs={[{ key: "matches", label: "Matches" }, { key: "hunt", label: "Hunt" }, { key: "feeds", label: "Feeds" }, { key: "manual", label: "Manual IOCs" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ key: "matches", label: "Matches" }, { key: "hunt", label: "Hunt" }, { key: "indicators", label: "Indicators" }, { key: "feeds", label: "Feeds" }, { key: "manual", label: "Manual IOCs" }]} />
       {tab === "matches" && <Matches />}
       {tab === "hunt" && <Hunt />}
+      {tab === "indicators" && <Indicators />}
       {tab === "feeds" && <Feeds />}
       {tab === "manual" && <Manual />}
     </div>
@@ -38,7 +39,7 @@ function Matches() {
     </div>
     <Card title="Indicators">
       {d?.indicators?.length ? <TableWrap><table className="tbl"><thead><tr><th className="w-full">Indicator</th><th>Category</th><th>Feed</th><th className="num">Events</th><th className="num">Blocked</th><th className="num">Hosts</th><th>Last seen</th></tr></thead>
-        <tbody>{d.indicators.map((r: any) => <tr key={r.indicator} tabIndex={0} onClick={() => explore({ ql: `ti:"${r.indicator}"` })} onKeyDown={(e) => e.key === "Enter" && explore({ ql: `ti:"${r.indicator}"` })}>
+        <tbody>{d.indicators.map((r: any) => <tr key={r.indicator} {...rowProps(() => explore({ ql: `ti:"${r.indicator}"` }))}>
           <td className="font-mono text-xs cell-wrap">{r.indicator}</td><td className="nowrap text-xs">{r.category}</td><td className="text-xs"><Trunc text={r.feed} max="max-w-[14rem]" /></td>
           <td className="num">{fmtNum(r.events)}</td><td className="num">{fmtNum(r.blocked)}</td><td className="num">{fmtNum(r.hosts)}</td><td><Time v={r.last_seen} /></td></tr>)}</tbody></table></TableWrap>
         : <Empty text="No events matched threat intelligence in this range." />}
@@ -99,16 +100,23 @@ function Feeds() {
 }
 
 function AddFeed({ onClose }: { onClose: () => void }) {
-  const [f, setF] = useState({ name: "", url: "https://", kind: "ip", category: "malicious", refresh_hours: 6 });
-  const m = useMutation({ mutationFn: () => api("/ti/feeds", { method: "POST", body: { ...f, refresh_hours: Number(f.refresh_hours) } }), onSuccess: onClose });
+  const [f, setF] = useState({ name: "", url: "https://", kind: "ip", category: "malicious", refresh_hours: 6, auth_value: "", default_confidence: 50, expire_days: 0 });
+  const connector = ["stix", "taxii", "misp", "otx"].includes(f.kind);
+  const m = useMutation({ mutationFn: () => api("/ti/feeds", { method: "POST", body: { ...f, refresh_hours: Number(f.refresh_hours), default_confidence: Number(f.default_confidence),
+    expire_days: Number(f.expire_days) } }), onSuccess: onClose });
   return (
     <Modal title="Add custom feed" onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className="label">Name</label><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-        <div className="sm:col-span-2"><label className="label">HTTPS URL (plain text, CSV, hosts file or JSON lines)</label><input className="input w-full font-mono" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} /></div>
-        <div><label className="label">Indicator type</label><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>{["ip", "cidr", "domain", "mixed"].map((k) => <option key={k}>{k}</option>)}</select></div>
-        <div><label className="label">Category</label><input className="input w-full" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} /></div>
-        <div><label className="label">Refresh every (hours)</label><input type="number" min={1} max={168} className="input w-full" value={f.refresh_hours} onChange={(e) => setF({ ...f, refresh_hours: Number(e.target.value) })} /></div>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Source format</span><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+          {[["ip", "list: IP addresses"], ["cidr", "list: networks"], ["domain", "list: domains"], ["mixed", "list: mixed"], ["stix", "STIX 2.1 bundle"], ["taxii", "TAXII 2.1 collection"],
+            ["misp", "MISP server"], ["otx", "AlienVault OTX"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Default confidence (when the source gives none)</span><input type="number" min={0} max={100} className="input w-full" value={f.default_confidence} onChange={(e) => setF({ ...f, default_confidence: Number(e.target.value) })} /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">{f.kind === "taxii" ? "Collection URL (https://server/api/collections/<id>)" : f.kind === "misp" ? "MISP base URL" : f.kind === "otx" ? "OTX base URL (https://otx.alienvault.com)" : "HTTPS URL (plain text, CSV, hosts file, JSON lines or STIX JSON)"}</span><input className="input w-full font-mono" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} /></label>
+        {connector && <label className="sm:col-span-2 block min-w-0"><span className="label">API key / token (stored encrypted, never shown again)</span><input type="password" autoComplete="off" className="input w-full" value={f.auth_value} onChange={(e) => setF({ ...f, auth_value: e.target.value })} /></label>}
+        <label className="block min-w-0"><span className="label">Expire indicators after (days, 0 = when the feed drops them)</span><input type="number" min={0} max={3650} className="input w-full" value={f.expire_days} onChange={(e) => setF({ ...f, expire_days: Number(e.target.value) })} /></label>
+        <label className="block min-w-0"><span className="label">Category</span><input className="input w-full" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Refresh every (hours)</span><input type="number" min={1} max={168} className="input w-full" value={f.refresh_hours} onChange={(e) => setF({ ...f, refresh_hours: Number(e.target.value) })} /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.name || !f.url.startsWith("https://")} onClick={() => m.mutate()}>Add feed</button>
@@ -138,4 +146,42 @@ function Manual() {
         : <Empty text="No manual indicators." />}
     </Card>
   </>);
+}
+
+/** The indicator store: type, source attribution, confidence (from the source, else the feed default), first / last seen,
+ *  expiry, and the analyst verdict. A false positive stops matching within 5 minutes and survives feed refreshes. */
+function Indicators() {
+  const qc = useQueryClient();
+  const [f, setF] = useState({ q: "", type: "", fp: "" });
+  const [page, setPage] = useState(1);
+  const st = useQuery({ queryKey: ["ti-stats"], queryFn: () => api<any>("/ti/stats") });
+  const q = useQuery({ queryKey: ["ti-ind", f, page], queryFn: () => api<any>("/ti/indicators", { params: { q: f.q || undefined, type: f.type || undefined,
+    false_positive: f.fp === "" ? undefined : f.fp === "yes", page, size: 50 } }) });
+  const m = useMutation({ mutationFn: ({ id, fp }: { id: number; fp: boolean }) => api(`/ti/indicators/${id}`, { method: "PATCH", body: { false_positive: fp } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ti-ind"] }); qc.invalidateQueries({ queryKey: ["ti-stats"] }); } });
+  const s = st.data;
+  return <div className="space-y-4">
+    {s && <div className="kpi-grid"><Kpi label="Indicators" value={fmtNum(s.total)} sub={`${fmtNum(s.distinct)} distinct · ${fmtNum(s.in_several_feeds)} listed by several feeds`} />
+      <Kpi label="Marked false positive" value={fmtNum(s.false_positives)} /><Kpi label="Expired" value={fmtNum(s.expired)} />
+      {s.by_type.slice(0, 4).map((t: any) => <Kpi key={t.type} label={t.type} value={fmtNum(t.count)} />)}</div>}
+    {s && <p className="text-2xs text-muted">{s.note}</p>}
+    <div className="flex flex-wrap gap-2">
+      <input aria-label="Search indicators" className="input py-1 w-64" placeholder="Indicator contains…" value={f.q} onChange={(e) => { setF({ ...f, q: e.target.value }); setPage(1); }} />
+      <select aria-label="Type" className="input py-1" value={f.type} onChange={(e) => { setF({ ...f, type: e.target.value }); setPage(1); }}><option value="">All types</option>
+        {["ip", "cidr", "domain", "url", "sha256", "sha1", "md5", "email", "asn"].map((t) => <option key={t}>{t}</option>)}</select>
+      <select aria-label="Verdict" className="input py-1" value={f.fp} onChange={(e) => { setF({ ...f, fp: e.target.value }); setPage(1); }}><option value="">Any verdict</option><option value="no">Active</option><option value="yes">False positive</option></select>
+    </div>
+    <Card bodyClass="p-0"><Loading q={q} />
+      {q.data && (!q.data.items.length ? <Empty text="No indicator matches." /> : <><TableWrap><table className="tbl">
+        <thead><tr><th>Indicator</th><th>Type</th><th>Feed</th><th>Threat</th><th className="num">Confidence</th><th>First / last seen</th><th>Expires</th><th>Verdict</th></tr></thead>
+        <tbody>{q.data.items.map((r: any) => <tr key={r.id} className={r.false_positive || r.expired ? "opacity-60" : ""}>
+          <td className="font-mono text-xs"><Trunc text={r.indicator} /></td><td>{r.type}</td><td className="text-xs">{r.feed}<div className="text-2xs text-muted">{r.category}</div></td>
+          <td className="text-xs"><Trunc text={r.threat || "—"} max="max-w-[12rem]" /></td>
+          <td className="num">{r.confidence ?? "—"}{!r.confidence_from_source && r.confidence != null && <span className="text-2xs text-muted"> (default)</span>}</td>
+          <td className="text-xs">{r.first_seen ? <Time v={r.first_seen} /> : "—"} / {r.last_seen ? <Time v={r.last_seen} /> : "—"}</td>
+          <td>{r.expires_at ? <><Time v={r.expires_at} />{r.expired && <span className="text-2xs text-muted"> expired</span>}</> : "—"}</td>
+          <td className="nowrap">{r.false_positive ? <><span className="text-xs">false positive ({r.fp_by})</span> <button type="button" className="btn py-0.5 text-xs" aria-label={`Restore ${r.indicator}`} onClick={() => m.mutate({ id: r.id, fp: false })}>Restore</button></>
+            : <button type="button" className="btn py-0.5 text-xs" aria-label={`Mark ${r.indicator} as a false positive`} onClick={() => m.mutate({ id: r.id, fp: true })}>False positive</button>}</td></tr>)}</tbody></table></TableWrap>
+        <Pager page={page} size={50} total={q.data.total} onPage={setPage} /></>)}</Card>
+  </div>;
 }

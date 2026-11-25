@@ -1,0 +1,8 @@
+# only the files the Dockerfile copies
+*
+!Dockerfile
+!agent.py
+!entrypoint.sh
+!bootstrap.cfg
+!rsyslog.conf
+!fix-conntrack.sh

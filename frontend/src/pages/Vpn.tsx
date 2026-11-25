@@ -1,6 +1,6 @@
 import { useData } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, IpLink, Kpi, Loading, TableWrap, Time, useExplore } from "../components/ui";
+import { Card, Empty, IpLink, Kpi, Loading, rowProps, TableWrap, Time, useExplore } from "../components/ui";
 import { TimeChart } from "../components/charts";
 
 export function Vpn() {
@@ -32,7 +32,7 @@ export function Vpn() {
       <div className="grid-cards xl:grid-cols-2">
         <Card title="Users">
           {d?.users?.length ? <TableWrap maxH="max-h-96"><table className="tbl"><thead><tr><th>User</th><th className="num">Logins</th><th className="num">Failures</th><th className="num">Sources</th><th>Countries</th><th>Last</th></tr></thead>
-            <tbody>{d.users.map((u: any) => <tr key={u.user} tabIndex={0} onClick={() => explore({ user: u.user, category: ["system"], event_subtype: "vpn" })}>
+            <tbody>{d.users.map((u: any) => <tr key={u.user} {...rowProps(() => explore({ user: u.user, category: ["system"], event_subtype: "vpn" }))}>
               <td>{u.user}{d.active.some((a: any) => a.user === u.user) && <span className="pill bg-emerald-500/15 text-emerald-300 ml-1">active</span>}</td>
               <td className="num">{fmtNum(u.logins)}</td><td className={`num ${u.failures ? "text-red-400" : ""}`}>{fmtNum(u.failures)}</td><td className="num">{fmtNum(u.sources)}</td>
               <td className="text-xs">{(u.countries || []).join(", ") || "—"}</td><td><Time v={u.last_seen} /></td></tr>)}</tbody></table></TableWrap>

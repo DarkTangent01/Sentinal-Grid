@@ -19,6 +19,30 @@ from ..config import get_settings
 _PARAM = re.compile(r"\{(\w+):([^}]+)\}")
 
 
+def query_limits(s) -> dict:
+    """Settings sent with every server-mode query: a time limit, a per-query memory limit, and spilling of large
+    aggregations / sorts to disk at half of it, so a heavy analytical query degrades (slower) instead of failing or
+    starving the inserts that run beside it."""
+    out = {"max_execution_time": max(1, int(s.clickhouse_query_timeout_seconds))}
+    mem = int(s.clickhouse_query_max_memory or 0)
+    if mem > 0:
+        out.update(max_memory_usage=mem, max_bytes_before_external_group_by=mem // 2, max_bytes_before_external_sort=mem // 2)
+    return out
+
+
+def _server_params(params: dict | None) -> dict:
+    """clickhouse-connect binds a datetime at whole-second precision ('%Y-%m-%d %H:%M:%S'), so a DateTime64(3)
+    parameter silently lost its milliseconds in production (e.g. a TACACS+ session window [10:19:45.346, .347] became
+    [10:19:45, 10:19:45] and matched none of its commands). Send datetimes as UTC text with milliseconds instead."""
+    def conv(v):
+        if isinstance(v, datetime):
+            return v.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        if isinstance(v, (list, tuple)):
+            return type(v)(conv(x) for x in v)
+        return v
+    return {k: conv(v) for k, v in (params or {}).items()}
+
+
 def _literal(value: Any, typ: str) -> str:
     if value is None:
         return "NULL"
@@ -82,7 +106,7 @@ class ClickHouse:
                 return clickhouse_connect.get_client(
                     host=s.clickhouse_host, port=s.clickhouse_port, username=s.clickhouse_user,
                     password=s.clickhouse_password, database=s.clickhouse_database,
-                    settings={"max_execution_time": 60}, connect_timeout=10, send_receive_timeout=120,
+                    settings=query_limits(s), connect_timeout=10, send_receive_timeout=120,
                 )
             size = max(1, s.clickhouse_pool_size)
             self._new_client = new_client
@@ -113,7 +137,7 @@ class ClickHouse:
             text = res.bytes().decode() if hasattr(res, "bytes") else str(res)
             return [json.loads(line) for line in text.splitlines() if line.strip()]
         with self._client() as c:
-            r = c.query(sql, parameters=params or {})
+            r = c.query(sql, parameters=_server_params(params))
         return [dict(zip(r.column_names, row)) for row in r.result_rows]
 
     def command(self, sql: str, params: dict | None = None) -> None:
@@ -122,7 +146,7 @@ class ClickHouse:
                 self._sess.query(render_params(sql, params))
             return
         with self._client() as c:
-            c.command(sql, parameters=params or {})
+            c.command(sql, parameters=_server_params(params))
 
     def insert(self, table: str, rows: list[dict], columns: list[str]) -> None:
         if not rows:
@@ -159,10 +183,18 @@ class ClickHouse:
 _ch: ClickHouse | None = None
 
 
+_ch_lock = threading.Lock()
+
+
 def get_ch() -> ClickHouse:
+    """Process-wide client. Locked: FastAPI resolves the (synchronous) dependency on worker threads, so two first
+    requests could otherwise both create a client (a second embedded session closes the first; with a server, a
+    second pool leaks)."""
     global _ch
     if _ch is None:
-        _ch = ClickHouse()
+        with _ch_lock:
+            if _ch is None:
+                _ch = ClickHouse()
     return _ch
 
 

@@ -1,0 +1,28 @@
+# Production. Before applying, replace every REPLACE value:
+#   - image digests (CI publishes them; the admission policy refuses images without a digest or from another registry)
+#   - the ReadWriteMany storage class for the TACACS+ volumes, the encrypted default class for the rest
+#   - loadBalancerSourceRanges: the device / management networks allowed to reach each external Service
+#   - the management CIDRs in network-policy-management-cidrs.yaml
+# Database credentials: create the least-privilege roles (k8s/README.md) and keep the siem_app users below.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - ../../security/admission-policies
+images:
+  - { name: sentinel/backend, newName: registry.sentinel.internal/sentinel/backend, digest: "sha256:REPLACE_WITH_BACKEND_DIGEST_FROM_CI_0000000000000000000000000000" }
+  - { name: sentinel/web, newName: registry.sentinel.internal/sentinel/web, digest: "sha256:REPLACE_WITH_WEB_DIGEST_FROM_CI_000000000000000000000000000000000" }
+  - { name: sentinel/ingress, newName: registry.sentinel.internal/sentinel/ingress, digest: "sha256:REPLACE_WITH_INGRESS_DIGEST_FROM_CI_000000000000000000000000000" }
+  - { name: sentinel/tacacs, newName: registry.sentinel.internal/sentinel/tacacs, digest: "sha256:REPLACE_WITH_TACACS_DIGEST_FROM_CI_0000000000000000000000000000" }
+patches:
+  - path: network-policy-management-cidrs.yaml
+  - target: { kind: PersistentVolumeClaim, name: "tacacs-.*" }
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: REPLACE-rwx-storage-class
+  - target: { kind: Service, name: ".*-external" }
+    patch: |-
+      - op: add
+        path: /spec/loadBalancerSourceRanges
+        value: ["10.0.0.0/8"]   # REPLACE: device / user networks only

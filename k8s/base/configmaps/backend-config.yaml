@@ -1,0 +1,39 @@
+# Non-secret settings (the .env of docker-compose.yml). Secrets are never here: services read them from files under
+# /run/secrets (Secret volumes). Overlays patch the values per environment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  labels:
+    app.kubernetes.io/part-of: sentinel
+data:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  DATABASE_URL: postgresql+asyncpg://siem_app@postgres:5432/siem
+  POSTGRES_DB: siem
+  POSTGRES_USER: siem
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_USER: siem_app
+  CLICKHOUSE_DATABASE: siem
+  CLICKHOUSE_DB: siem
+  INGEST_DEADLETTER_DIR: /var/lib/siem/deadletter
+  BOOTSTRAP_ADMIN_USERNAME: admin
+  SESSION_TTL_MINUTES: '480'
+  COOKIE_SECURE: 'true'
+  LOGIN_RATE_LIMIT_PER_MINUTE: '10'
+  FORTIGATE_CA_DIR: /certs
+  GEOIP_DIR: /geoip
+  SYSLOG_ALLOW_UNKNOWN_DEVICES: 'false'
+  INTERNAL_CIDRS: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  WORKER_SHARD: '0'
+  WORKER_SHARDS: '1'
+  AI_ALLOW_DATA_SHARING: 'false'
+  IAC_DEVICE_WRITES: 'false'
+  SWITCH_ALLOW_SNMPV2C: 'false'
+  SWITCH_MAX_CONCURRENT_POLLS: '5'
+  DEMO_MODE: 'false'
+  PUBLIC_BASE_URL: ''
+  DB_POOL_SIZE: '4'
+  DB_MAX_OVERFLOW: '4'
+  CLICKHOUSE_POOL_SIZE: '4'
+  XDG_CACHE_HOME: /tmp/.cache

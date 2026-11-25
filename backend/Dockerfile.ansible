@@ -1,0 +1,20 @@
+# Ansible runner (docker-compose service "ansible", app/playbooks/runner.py): the backend's Python environment plus
+# ansible-core and the network collections. Only this image carries Ansible.
+FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections XDG_CACHE_HOME=/tmp/.cache
+WORKDIR /app
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --home /app siem
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY ansible/requirements.txt ansible/collections.yml ./ansible/
+RUN pip install -r ansible/requirements.txt \
+    && ansible-galaxy collection install -r ansible/collections.yml -p /usr/share/ansible/collections \
+    && rm -rf /root/.ansible
+COPY alembic.ini .
+COPY migrations ./migrations
+COPY app ./app
+COPY rules ./rules
+USER 10001
+CMD ["python", "-m", "app.playbooks.runner"]

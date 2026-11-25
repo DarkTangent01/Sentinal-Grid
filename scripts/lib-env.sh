@@ -1,4 +1,4 @@
-# Shared helpers for the operational scripts (sourced, not executed). docs/SECRET_MANAGEMENT.md
+# Shared helpers for the operational scripts (sourced, not executed). security/SECRETS_MANAGEMENT.md
 # * envval KEY      one non-secret setting from .env, without `source .env` (which would export every line into the shell)
 # * chq "QUERY"     run a ClickHouse query inside the clickhouse container. The password is read there from
 #                   /run/secrets/clickhouse_password into a 0600 client config file on the container's /tmp, so it never

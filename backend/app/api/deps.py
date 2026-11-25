@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..config import get_settings
 from ..db.ch import ClickHouse, get_ch
 from ..db.models import AuditLog, User

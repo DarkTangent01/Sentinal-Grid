@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, IpLink, Kpi, Loading, Modal, TableWrap, Time, Trunc, rowProps, useDebounced } from "../components/ui";
+import { Card, Empty, IpLink, Kpi, Loading, Modal, Pager, rowProps, TableWrap, Time, Trunc, useDebounced } from "../components/ui";
 
 export const CRIT_CLS: Record<string, string> = {
   critical: "bg-red-500/15 text-red-300", high: "bg-orange-500/15 text-orange-300", normal: "bg-slate-700/60 text-slate-300", low: "bg-slate-800 text-slate-400",
@@ -18,7 +18,6 @@ export function Assets() {
   const [edit, setEdit] = useState<any>(null);
   const r = useQuery({ queryKey: ["assets", dq, crit, page], queryFn: () => api<any>("/assets", { params: { q: dq, criticality: crit, page, size: 50 } }), placeholderData: (p) => p });
   const c = r.data?.counts || {};
-  const pages = r.data ? Math.max(1, Math.ceil(r.data.total / 50)) : 1;
   return (
     <div className="space-y-4 min-w-0">
       <p className="text-xs text-muted">Internal hosts are learned every 10 minutes from traffic (FortiGate device identification: host name, MAC, OS; user from firewall authentication). Mark business-critical assets: alerts involving a <b>critical</b> asset are raised one severity level, and incidents show the asset context.</p>
@@ -29,7 +28,7 @@ export function Assets() {
       <Card title={`Inventory${crit ? ` · ${crit}` : ""}`} right={<div className="flex flex-wrap gap-2 items-center">
         <input aria-label="Search assets" className="input w-64" placeholder="IP, hostname, MAC, user, owner" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         {me.role === "admin" && <button className="btn btn-primary" onClick={() => setEdit({ ip: "", criticality: "critical", tags: [], owner: "", notes: "", hostname: "" })}>+ Add asset</button>}
-        <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button><span className="text-muted text-sm">{page}/{pages}</span><button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>›</button>
+        <Pager className="" page={page} size={50} total={r.data?.total} onPage={setPage} />
       </div>}>
         <Loading q={r} />
         {r.data && !r.data.items.length && <Empty text={dq || crit ? "No assets match." : "No assets learned yet. They appear after traffic from internal hosts is ingested."} />}
@@ -57,12 +56,12 @@ function EditAsset({ a, onClose }: { a: any; onClose: () => void }) {
   return (
     <Modal title={a.ip ? `Asset ${a.ip}` : "Add asset"} onClose={onClose}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div><label className="label">IP address</label><input className="input w-full font-mono" disabled={!!a.ip} value={f.ip} onChange={(e) => setF({ ...f, ip: e.target.value })} /></div>
-        <div><label className="label">Criticality</label><select className="input w-full" value={f.criticality} onChange={(e) => setF({ ...f, criticality: e.target.value })}>{["low", "normal", "high", "critical"].map((k) => <option key={k}>{k}</option>)}</select></div>
-        <div><label className="label">Hostname</label><input className="input w-full" value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} /></div>
-        <div><label className="label">Owner / team</label><input className="input w-full" value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })} /></div>
-        <div className="sm:col-span-2"><label className="label">Tags (comma-separated)</label><input className="input w-full" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} placeholder="pci, database, finance" /></div>
-        <div className="sm:col-span-2"><label className="label">Notes</label><textarea className="input w-full h-20" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
+        <label className="block min-w-0"><span className="label">IP address</span><input className="input w-full font-mono" disabled={!!a.ip} value={f.ip} onChange={(e) => setF({ ...f, ip: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Criticality</span><select className="input w-full" value={f.criticality} onChange={(e) => setF({ ...f, criticality: e.target.value })}>{["low", "normal", "high", "critical"].map((k) => <option key={k}>{k}</option>)}</select></label>
+        <label className="block min-w-0"><span className="label">Hostname</span><input className="input w-full" value={f.hostname} onChange={(e) => setF({ ...f, hostname: e.target.value })} /></label>
+        <label className="block min-w-0"><span className="label">Owner / team</span><input className="input w-full" value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })} /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Tags (comma-separated)</span><input className="input w-full" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} placeholder="pci, database, finance" /></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Notes</span><textarea className="input w-full h-20" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></label>
       </div>
       {a.users?.length > 0 && <p className="text-xs text-muted mt-2">Users seen: {a.users.join(", ")} · first seen <Time v={a.first_seen} /></p>}
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}

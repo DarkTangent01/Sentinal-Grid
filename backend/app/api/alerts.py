@@ -5,11 +5,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import false, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..alerts.rules import DEFAULT_RULES
+from ..alerts.engine import product_of
 from ..db.models import Alert, AlertRule, Suppression, User
 from ..db.pg import get_session
 from ..products import alert_product, nms_rule_clause, products_of
-from .deps import iso, audit, current_user, require_admin
+from .deps import audit, current_user, iso, require_admin
 
 router = APIRouter(prefix="/api", tags=["alerts"])
 STATUSES = ("new", "investigating", "resolved", "suppressed")
@@ -128,7 +128,8 @@ async def update_rule(key: str, body: RuleIn, request: Request, admin: User = De
     if not r:
         raise HTTPException(404, "not found")
     if body.params is not None:
-        defaults = next((d["params"] for d in DEFAULT_RULES if d["key"] == key), None)
+        prod = product_of(key)
+        defaults = next((d["params"] for d in prod.defaults if d["key"] == key), None) if prod else None
         if defaults is None:
             if not key.startswith("yml_"):
                 raise HTTPException(422, "this rule has no tunable parameters here")
@@ -151,3 +152,20 @@ async def update_rule(key: str, body: RuleIn, request: Request, admin: User = De
     await s.commit()
     await audit(s, request, admin.username, "rule_update", key, body.model_dump(exclude_unset=True))
     return {"key": r.key, "enabled": r.enabled, "severity": r.severity, "params": r.params}
+
+
+@router.get("/alert-rules/stats")
+async def rule_stats(days: int = Query(90, ge=1, le=365), _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await s.execute(select(Alert.rule_key, Alert.disposition, func.count()).where(Alert.created_at >= since)
+                            .group_by(Alert.rule_key, Alert.disposition))).all()
+    out: dict = {}
+    for key, disp, n in rows:
+        r = out.setdefault(key, {"rule_key": key, "alerts": 0, "true_positive": 0, "false_positive": 0, "benign": 0, "undetermined": 0})
+        r["alerts"] += n
+        r[disp if disp in ("true_positive", "false_positive", "benign") else "undetermined"] += n
+    for r in out.values():
+        decided = r["true_positive"] + r["false_positive"] + r["benign"]
+        r["false_positive_rate"] = round(r["false_positive"] / decided, 3) if decided else None
+    names = {x.key: x.name for x in (await s.execute(select(AlertRule))).scalars()}
+    return sorted(({**r, "name": names.get(k, k)} for k, r in out.items()), key=lambda r: -(r["false_positive_rate"] or 0))

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useTheme } from "../../lib/theme";
 import { escHtml, fmtNum, getTimezone } from "../../lib/format";
-import { CHART_THEME, Chart, PALETTES, axisStyle } from "../../components/Chart";
+import { Chart, CHART_THEME, PALETTES, STATUS_HEX, axisStyle } from "../../components/Chart";
 import { Card, Drawer, Empty, Kpi, Loading, Sev, TableWrap, Time, rowProps } from "../../components/ui";
 import { KV, SeriesChart } from "../switches/common";
 import { Band, WState, dash, dbm, pctv, useWlGo, useWlMeta } from "./common";
@@ -151,8 +151,8 @@ export function RfHeatmap() {
     const data = d.cells.filter((c: any) => ri.has(c.radio_id)).map((c: any) => [ti.get(c.t), ri.get(c.radio_id), c.value ?? "-"]);
     const ct = CHART_THEME[theme];
     const util = metric === "channel_util_pct";
-    const pieces = util ? [{ lt: 50, color: "#1baf7a", label: "< 50%" }, { gte: 50, lt: 70, color: "#c9b400", label: "50-70%" }, { gte: 70, lt: 80, color: "#eb6834", label: "70-80%" },
-      { gte: 80, color: "#e23744", label: "≥ 80%" }] : undefined;
+    const pieces = util ? [{ lt: 50, color: STATUS_HEX[theme].ok, label: "< 50%" }, { gte: 50, lt: 70, color: STATUS_HEX[theme].warn, label: "50-70%" }, { gte: 70, lt: 80, color: PALETTES[theme][1], label: "70-80%" },
+      { gte: 80, color: STATUS_HEX[theme].bad, label: "≥ 80%" }] : undefined;
     return { tooltip: { confine: true, formatter: (p: any) => { const r = rows[p.value[1]]; return `<b>${escHtml(r.ap)}</b> radio ${r.slot} (${r.band} GHz, ch ${r.channel ?? "?"})<br/>${escHtml(times[p.value[0]])}<br/>${p.value[2] === "-" ? "no data" : p.value[2]}`; } },
       grid: { left: 8, right: 16, top: 8, bottom: 56, containLabel: true },
       xAxis: { type: "category", data: times.map((t) => new Date(t).toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })), axisLabel: { color: ct.text } },
@@ -269,7 +269,7 @@ function DbmChart({ points }: { points: any[] }) {
 function EventTable({ items }: { items: any[] }) {
   return <TableWrap maxH="max-h-[34rem]"><table className="tbl"><thead><tr><th>Time</th><th>Event</th><th>AP</th><th className="w-full">Detail</th><th>Source</th></tr></thead>
     <tbody>{items.map((e: any) => <tr key={e.id}><td><Time v={e.at} /></td><td className="text-xs whitespace-nowrap"><Sev s={e.severity} /> {EVENT_LABEL[e.kind] || e.kind}</td><td>{e.ap || e.component}</td>
-      <td className="text-xs">{e.detail}{e.data?.reason_confidence && <span className="text-muted"> · reason confidence {e.data.reason_confidence}</span>}</td>
+      <td className="text-xs cell-wrap min-w-[14rem]">{e.detail}{e.data?.reason_confidence && <span className="text-muted"> · reason confidence {e.data.reason_confidence}</span>}</td>
       <td className="text-xs">{e.source === "alert" ? `alert (${e.status})` : "telemetry"}</td></tr>)}</tbody></table></TableWrap>;
 }
 

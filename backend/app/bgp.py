@@ -627,16 +627,26 @@ async def _window_events(ch, s, t0: datetime, t1: datetime, fw_ids: list[int] | 
     return _merge_duplicates(sorted(evs, key=lambda e: e["t"])), names
 
 
-async def _critical_nets(s, name: str) -> tuple[bool, list]:
-    from .watchlists import load_watchlists
-    wl = (await load_watchlists(s, [name])).get(name)
-    if not wl:
+CRITICAL_KEY = "bgp_critical_prefixes"     # NMS setting (wan_settings.data); migration 0037 copied the former SIEM watchlist
+
+
+async def critical_prefixes(s) -> list[dict]:
+    from .db.models import WanSetting
+    row = (await s.execute(select(WanSetting).order_by(WanSetting.id).limit(1))).scalars().first()
+    return list(((row.data or {}) if row else {}).get(CRITICAL_KEY) or [])
+
+
+async def _critical_nets(s, name: str = CRITICAL_KEY) -> tuple[bool, list]:
+    """The critical prefixes configured in NMS (BGP page). `name` is kept for callers that still pass the old
+    watchlist name; NMS no longer reads SIEM watchlists."""
+    items = await critical_prefixes(s)
+    if not items:
         return False, []
-    return True, [n for n in (BA._net(v) for v in wl["values"]) if n]
+    return True, [n for n in (BA._net(x.get("prefix", "")) for x in items) if n]
 
 
 async def prefixes_report(ch, s, t0: datetime, t1: datetime, fw_ids: list[int] | None = None,
-                          watchlist: str = "bgp_critical_prefixes") -> dict:
+                          watchlist: str = CRITICAL_KEY) -> dict:
     """Installed BGP routes (which neighbor / tunnel each prefix uses, ECMP, route age) and prefix stability."""
     events, names = await _window_events(ch, s, t0, t1, fw_ids)
     now = datetime.now(timezone.utc)

@@ -1,0 +1,92 @@
+# rsync filter for scripts/deploy.sh: what the production server receives. Only what the stack needs to build and run,
+# plus the operational scripts run on the server. Everything else (docs, tests, CI, Kubernetes manifests, lab and dev
+# tooling) stays in the repository. Rules are matched top to bottom; the first match wins.
+#
+# Use with plain --delete only, never --delete-excluded: excluded paths on the server are then left alone, which is what
+# keeps its own state safe (macOS ships openrsync, which does not honour "P" protect rules).
+#
+# 1. Server-owned state: excluded, so never sent and never deleted.
+- /.env
+- /.env.*.bak
+- /.env.bak*
+- /secrets/
+- /backups/
+- /.git/
+- /deploy/certs/*
+- /deploy/certs/fortigate-ca/*
+- /deploy/geoip/*
+#
+# 2. Never sent, wherever they are.
+- __pycache__/
+- *.pyc
+- .DS_Store
+- .pytest_cache/
+- .ruff_cache/
+- node_modules/
+- *.db
+- *.key
+- *.crt
+- *.pem
+- *.mmdb
+- .claude/
+#
+# 3. The allowlist.
++ /docker-compose.yml
++ /.env.example
+# backend image (backend/Dockerfile copies requirements.txt, alembic.ini, migrations/, app/, rules/)
++ /backend/
++ /backend/Dockerfile
++ /backend/Dockerfile.ansible
++ /backend/ansible/***
++ /backend/.dockerignore
++ /backend/requirements.txt
++ /backend/alembic.ini
++ /backend/app/***
++ /backend/migrations/***
++ /backend/rules/***
+# web image (frontend/Dockerfile: npm ci, vite build, nginx configuration); unit tests are not part of the build
++ /frontend/
++ /frontend/Dockerfile
++ /frontend/.dockerignore
++ /frontend/package.json
++ /frontend/package-lock.json
++ /frontend/index.html
++ /frontend/vite.config.ts
++ /frontend/tsconfig.json
++ /frontend/tailwind.config.js
++ /frontend/postcss.config.js
++ /frontend/nginx-main.conf
++ /frontend/nginx.conf
++ /frontend/proxy_params.inc
++ /frontend/upstream.inc
++ /frontend/proxy_access.inc
++ /frontend/security_headers.inc
++ /frontend/public/***
+- /frontend/src/**.test.ts
+- /frontend/src/**.test.tsx
++ /frontend/src/***
+# service configuration and images built from deploy/ (certificates and GeoIP databases live only on the server)
++ /deploy/
++ /deploy/clickhouse/***
++ /deploy/ingress/***
++ /deploy/tacacs/***
++ /deploy/certs/
++ /deploy/certs/fortigate-ca/
++ /deploy/geoip/
+# operational scripts run on the server (deploy.sh itself runs from a workstation)
++ /scripts/
++ /scripts/lib-env.sh
++ /scripts/backup.sh
++ /scripts/restore.sh
++ /scripts/gen-secrets.sh
++ /scripts/gen-selfsigned-cert.sh
++ /scripts/migrate-secrets.sh
++ /scripts/create-app-db-role.sh
++ /scripts/create-clickhouse-app-user.sh
++ /scripts/fix-syslog-conntrack.sh
++ /scripts/security/
++ /scripts/security/docker-security-audit.sh
++ /scripts/security/container_audit.py
+#
+# 4. Nothing else.
+- *

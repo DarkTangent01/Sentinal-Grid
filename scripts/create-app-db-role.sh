@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Gives the services their own PostgreSQL role instead of the superuser (docs/SECRET_MANAGEMENT.md, "Database accounts").
+# Gives the services their own PostgreSQL role instead of the superuser (security/SECRETS_MANAGEMENT.md, "Database accounts").
 # The role owns the application schema (so migrations still work) but is not a superuser: it cannot read other
 # databases' files, run COPY ... PROGRAM or create roles. Idempotent. Never prints the password.
 #   ./scripts/create-app-db-role.sh [role]        default role: siem_app

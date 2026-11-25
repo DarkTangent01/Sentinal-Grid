@@ -26,9 +26,9 @@
 - [ ] Deploy on a management or security network segment. Set `WEB_BIND_IP`/`SYSLOG_BIND_IP` to that interface's address (they default to 127.0.0.1), and restrict 443/tcp to SOC networks and 514 to FortiGate source addresses with the host firewall.
 - [ ] For each firewall whose syslog arrives from an address other than its management `host` (NAT, a log relay or FortiAnalyzer forwarding), list that address in `syslog_source_ips`. Otherwise its logs are counted as `source_mismatch` and dropped.
 - [ ] Replace the self-signed certificate with one from your internal CA.
-- [ ] Run `scripts/gen-secrets.sh` (or `scripts/migrate-secrets.sh` on an existing install); keep `.env` free of secrets; back up `./secrets` to a vault, separate from data backups ([SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md)).
+- [ ] Run `scripts/gen-secrets.sh` (or `scripts/migrate-secrets.sh` on an existing install); keep `.env` free of secrets; back up `./secrets` to a vault, separate from data backups ([SECRET_MANAGEMENT.md](../security/SECRETS_MANAGEMENT.md)).
 - [ ] Run `scripts/create-app-db-role.sh` so the services use a non-superuser database role.
-- [ ] After migrating secrets out of `.env`, rotate them ([CREDENTIAL_ROTATION.md](CREDENTIAL_ROTATION.md)): the old values remain in old backups and captured container metadata.
+- [ ] After migrating secrets out of `.env`, rotate them ([CREDENTIAL_ROTATION.md](../security/CREDENTIAL_ROTATION.md)): the old values remain in old backups and captured container metadata.
 - [ ] Change the admin password after the first login, then overwrite `secrets/bootstrap_admin_password`.
 - [ ] On every FortiGate, create a dedicated **REST API admin** with a read-only access profile and **trusted hosts** limited to the SIEM IP (see README). Never use a super_admin token.
 - [ ] Never expose the FortiGate management interface (HTTPS/SSH) to the internet; allow it only from management networks.
@@ -38,4 +38,4 @@
 - [ ] Egress-filter the backend containers to FortiGate management networks, the TI feed hosts and the notification endpoints. The SSRF guard checks DNS before connecting but cannot fully prevent DNS rebinding.
 - [ ] Schedule `scripts/backup.sh` and test `scripts/restore.sh` regularly.
 
-See `docs/SECURITY_AUDIT_REPORT.md` for the latest audit, its findings and the open items, and `docs/DOCKER_SECRETS_SECURITY_AUDIT.md` for secret handling in the containers. Incident runbook: `docs/SECURITY_INCIDENT_RESPONSE.md`.
+See `docs/SECURITY_AUDIT_REPORT.md` for the latest audit, its findings and the open items, and `security/DOCKER_SECURITY_AUDIT.md` for secret handling in the containers. Incident runbook: `security/INCIDENT_RESPONSE.md`.

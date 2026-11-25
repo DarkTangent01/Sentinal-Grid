@@ -43,7 +43,7 @@ export function WorldMap({ rows, metric = "events", height = 360, onClick, label
       visualMap: { min: 0, max, left: 8, bottom: 8, calculable: true, text: ["high", "low"], textStyle: { color: c.text },
         inRange: { color: SEQUENTIAL[theme] } },
       series: [{ type: "map", map: "world", roam: true, scaleLimit: { min: 1, max: 8 }, data, emphasis: { label: { show: false } },
-        itemStyle: { areaColor: theme === "light" ? "#f0f0f0" : "#2a2a2a", borderColor: c.surface, borderWidth: 0.5 },
+        itemStyle: { areaColor: c.land, borderColor: c.surface, borderWidth: 0.5 },
         nameProperty: "name" }],
     };
   }, [rows, metric, theme, label]);

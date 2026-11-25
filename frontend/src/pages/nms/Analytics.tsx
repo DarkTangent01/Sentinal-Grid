@@ -187,6 +187,24 @@ function Capacity({ scope }: { scope: any }) {
             <tbody>{d.poe.map((x: any) => <tr key={x.switch_id}><td><DevLink id={x.switch_id} name={x.switch} /></td><td className="num">{x.budget_w} W</td>
               <td className="num"><Tn tone={x.pct >= 90 ? "bad" : x.pct >= 75 ? "warn" : "ok"}>{x.used_w} W ({x.pct}%)</Tn></td><td className="num">{x.headroom_w} W</td></tr>)}</tbody></table></TableWrap>}</Card>
       </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card title={`PoE budget trend (reaches ${d.poe_threshold_pct}%)`} bodyClass="p-0">{!d.poe_forecast?.length ? <Empty text="No PoE budget is over, or trending toward, the threshold." /> :
+          <TableWrap maxH="max-h-96"><table className="tbl"><thead><tr><th>Device</th><th className="num">Budget</th><th className="num">% now</th><th className="num">Trend</th>
+            <th className="num">Reaches {d.poe_threshold_pct}%</th><th>Confidence</th></tr></thead>
+            <tbody>{d.poe_forecast.map((x: any) => <tr key={`${x.switch_id}-${x.component}`}><td><DevLink id={x.switch_id} name={x.switch} />
+              {x.component && <div className="text-2xs text-muted">{x.component}</div>}</td><td className="num">{x.budget_w} W</td><Trend x={x} /></tr>)}</tbody></table></TableWrap>}</Card>
+        <Card title="Access point client load" bodyClass="p-0">{!d.ap_load?.length ? <Empty text="No AP is near, or trending toward, its client limit." /> :
+          <TableWrap maxH="max-h-96"><table className="tbl"><thead><tr><th>AP</th><th className="num">Limit</th><th className="num">Peak now</th><th className="num">Trend</th>
+            <th className="num">Reaches limit</th><th>Confidence</th></tr></thead>
+            <tbody>{d.ap_load.map((x: any) => <tr key={x.ap_id}><td><Link className="link" to={`/wireless?tab=aps&ap=${x.ap_id}`}>{x.ap}</Link>
+              {x.site && <div className="text-2xs text-muted">{x.site}</div>}</td><td className="num">{x.threshold}</td><Trend x={x} /></tr>)}</tbody></table></TableWrap>}
+          <p className="text-2xs text-muted px-3 pb-2">Daily peak concurrent clients against the controller's AP client limit (wireless threshold ap_clients_max).</p></Card>
+      </div>
+      {d.ssid_load?.length > 0 && <Card title="SSID client load" bodyClass="p-0">
+        <TableWrap><table className="tbl"><thead><tr><th>SSID</th><th className="num">Configured maximum</th><th className="num">Peak now</th><th className="num">Trend</th>
+          <th className="num">Reaches maximum</th><th>Confidence</th></tr></thead>
+          <tbody>{d.ssid_load.map((x: any) => <tr key={x.ssid}><td>{x.ssid}</td><td className="num">{x.threshold}</td><Trend x={x} /></tr>)}</tbody></table></TableWrap></Card>}
+      <p className="text-2xs text-muted">DHCP scope and IP-pool usage are not forecast: no DHCP server or IPAM data is collected yet.</p>
     </>}
   </div>;
 }
@@ -206,7 +224,7 @@ function TopN({ scope }: { scope: any }) {
     queryFn: () => api<any>("/nms/analytics/top/devices", { params: { ...scope, range, by: devBy, limit: 25 } }) });
   const fmtIf = (v: number) => ["peak_util", "avg_util"].includes(ifBy) ? `${v}%` : ["traffic", "p95"].includes(ifBy) ? fmtBps(v) : fmtNum(v);
   const unitDev = devBy === "temperature" ? " °C" : devBy === "poll_time" ? " s" : "%";
-  const sel = (v: string, set: (s: string) => void, opts: [string, string][]) => <select className="input py-1 text-xs" value={v} onChange={(e) => set(e.target.value)}>
+  const sel = (v: string, set: (s: string) => void, opts: [string, string][]) => <select aria-label="Rank by" className="input py-1 text-xs" value={v} onChange={(e) => set(e.target.value)}>
     {opts.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>;
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-3"><p className="text-xs text-muted flex-1 min-w-[16rem]">95th percentile uses raw per-poll samples (kept 35 days), nearest-rank on the

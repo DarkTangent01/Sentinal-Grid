@@ -79,12 +79,20 @@ async def sync_firewall(s: AsyncSession, ch: ClickHouse, fw: Firewall, vdom: str
             log.exception("config snapshot failed for %s/%s", fw_name, vdom)
             details["drift_error"] = f"{type(e).__name__}: {e}"[:300]
             st = await s.get(PolicySync, (fw_id, vdom))
-        run = await run_analysis(s, fw.id, vdom)
+            if st is None:  # first sync: the rollback also discarded the new status row
+                st = PolicySync(firewall_id=fw_id, vdom=vdom, details={}, last_attempt=datetime.now(timezone.utc))
+                s.add(st)
+        run = await run_analysis(s, fw_id, vdom)
         details["analysis_run"] = run.id
+        counters_supported = st.counters_supported
+        await s.commit()  # configuration, objects, counters and analysis are kept even if the assessment below fails
         try:
-            await refresh_assessments(s, ch, fw.id, vdom, st.counters_supported)
-        except Exception as e:  # configuration/counters are stored; report the assessment failure, don't hide it
+            await refresh_assessments(s, ch, fw_id, vdom, counters_supported)
+        except Exception as e:  # report the assessment failure, don't hide it
             await s.rollback()
+            # the rollback expired every loaded object: reload asynchronously (a lazy load here raised MissingGreenlet,
+            # which turned one slow query into a crashed sync and an aborted policy loop)
+            st = await s.get(PolicySync, (fw_id, vdom))
             log.exception("usage assessment failed for %s/%s", fw_name, vdom)
             details["assessment_error"] = f"{type(e).__name__}: {e}"[:500]
         st.policies = len(policies)

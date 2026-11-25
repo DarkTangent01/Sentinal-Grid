@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Concurrent ClickHouse requests per process. One shared client behind a lock serialised every query and insert, so
     # one slow hunt/export query stalled every dashboard in that process; each slot is an independent HTTP client.
     clickhouse_pool_size: int = 4
+    # per-query protection (docs/performance): one query may use this much memory (0 = unlimited); half of it is the
+    # point where GROUP BY / ORDER BY spill to disk instead of failing. Without it one heavy query took the server's
+    # whole budget and concurrent inserts failed with MEMORY_LIMIT_EXCEEDED. Seconds a query may run.
+    clickhouse_query_max_memory: int = 2 * 1024 ** 3
+    clickhouse_query_timeout_seconds: int = 60
     # FINAL collapses not-yet-merged duplicates at query time but is very expensive at tens of millions of rows/day.
     # Duplicates are already suppressed at ingest (fingerprint LRU) and collapsed by background merges, so it is off by default.
     clickhouse_query_final: bool = False
@@ -67,9 +72,14 @@ class Settings(BaseSettings):
     syslog_tcp_port: int = 5514
     # rows per ClickHouse insert: fewer, larger parts keep background merges (the main ClickHouse CPU cost) down
     syslog_batch_size: int = 10000
-    # Events held in memory while ClickHouse is slow or down (0 = 10 x syslog_batch_size). At the cap, TCP sessions and
+    # Events held in memory per process while ClickHouse is slow or down (0 = 3 x syslog_batch_size; was 10 x, which let six
+    # parsers hold ≈ 1.4 GiB during a ClickHouse stall). At the cap, TCP sessions and
     # parser workers stop reading (backpressure reaches the relay's disk queue); only inline UDP counts drops.
     syslog_buffer_max_events: int = 0
+    # recent event ids each parser remembers to drop retransmitted duplicates (ReplacingMergeTree removes the rest)
+    syslog_dedupe_window: int = 50000
+    # IP -> geo / ASN lookups cached per process (50k ≈ 15 MiB; each parser process has its own)
+    geoip_cache_size: int = 50000
     # A chunk ClickHouse keeps rejecting while other chunks insert fine (e.g. too many partitions, a bad value) is
     # written here as JSON lines after this many attempts instead of blocking ingestion: python -m app.ingest.deadletter
     ingest_insert_max_attempts: int = 3
@@ -103,6 +113,49 @@ class Settings(BaseSettings):
     switch_poll_timeout_seconds: int = 240     # whole poll of one switch
     switch_wlc_poll_timeout_seconds: int = 900       # whole poll of a wireless controller (large AP / client tables walk slowly)
     switch_wireless_group_timeout_seconds: int = 300 # one wireless collection group (e.g. the client table)
+    # large wireless tables of one controller walked at once (1 = one after another, as before)
+    switch_wireless_group_concurrency: int = 5     # one per large wireless table (poller.PARALLEL_GROUPS)
+    # a Cisco controller's large wireless tables are polled as their own job, so they never delay its quick metrics
+    switch_wlc_split_wireless: bool = True
+    # wireless client history (app/wireless/history.py): sessions kept this long after they end; ClickHouse rollups keep 400 days
+    wireless_session_retention_days: int = 400
+    wireless_analytics_interval_seconds: int = 300
+    # read-only configuration backup over SSH (app/configs/backup.py)
+    config_backup_interval_hours: int = 24
+    config_backup_timeout_seconds: int = 60
+    config_backup_concurrency: int = 4
+    config_backup_retention_days: int = 400
+    # Device Access Gateway (app/access, docs/nms/DEVICE_ACCESS_ARCHITECTURE.md). The router is served by the separate
+    # "access" service in production (ACCESS_GATEWAY_INPROCESS=false on the api); in-process for development and tests.
+    access_gateway_inprocess: bool = True
+    access_terminal_enabled: bool = True        # browser SSH terminal (permission nms.device.access.ssh still required)
+    access_telnet_enabled: bool = False         # Telnet (clear text) to legacy devices / console servers; also opt-in per device
+    restconf_timeout_seconds: int = 30
+    access_allowed_origins: str = ""            # comma-separated; empty = the request's own host only
+    access_max_sessions: int = 50               # open terminal sessions, whole gateway
+    access_max_sessions_per_user: int = 5
+    access_max_sessions_per_device: int = 3
+    access_idle_timeout_seconds: int = 900
+    access_max_session_seconds: int = 4 * 3600
+    access_connect_timeout_seconds: int = 15
+    access_ticket_seconds: int = 30
+    access_recording: str = "commands"          # off | commands | full (masked output transcript)
+    access_recording_max_bytes: int = 2_000_000
+    access_recording_retention_days: int = 90
+    access_command_timeout_seconds: int = 60    # one diagnostic command
+    access_bulk_concurrency: int = 10
+    access_bulk_max_devices: int = 500
+    # approved configuration changes (app/access/changes.py): off unless the operator enables them
+    nms_config_changes_enabled: bool = False
+    nms_change_confirm_minutes: int = 5         # Junos commit confirmed window
+    # Ansible automation (app/automation): the runner service executes approved playbooks only
+    ansible_playbook_bin: str = "ansible-playbook"
+    ansible_run_timeout_seconds: int = 1800
+    ansible_forks: int = 10
+    ansible_max_devices: int = 200
+    # wireless controller / cloud integrations (app/wireless/integrations.py)
+    wireless_integration_timeout_seconds: int = 30
+    wireless_integration_max_clients: int = 50000
     switch_discovery_max_hosts: int = 1024     # largest subnet a discovery run may sweep
     switch_discovery_concurrency: int = 16
     switch_event_retention_days: int = 180
@@ -117,6 +170,8 @@ class Settings(BaseSettings):
 
     # Worker
     alert_interval_seconds: int = 60
+    # first-seen rules read their 30-day baselines from hourly rollups (ClickHouse migration 17); false = raw events
+    alert_baseline_from_rollup: bool = True
     retention_interval_seconds: int = 3600
     policy_sync_interval_seconds: int = 900
     # enrichment / next-gen features

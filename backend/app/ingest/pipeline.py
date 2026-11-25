@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from ..config import get_settings
+from ..platform.procstats import release_memory, rss_mib  # noqa: F401  (re-exported for callers of the pipeline)
 from ..db.ch import ClickHouse
 from ..db.ch_schema import EVENT_COLUMNS
 from ..db.models import Firewall, IngestStat, LogSource
@@ -98,25 +99,43 @@ class DeviceRegistry:
 
 class EventSink:
     def __init__(self, ch: ClickHouse, registry: DeviceRegistry, *, batch_size: int | None = None,
-                 dedupe_capacity: int = 200_000, enricher=None, stats_hook=None):
+                 dedupe_capacity: int | None = None, enricher=None, stats_hook=None):
         s = get_settings()
         self.stats_hook = stats_hook  # parser worker processes hand stats to the receiver, which persists them once
         self.ch = ch
         self.registry = registry
         self.enricher = enricher
         self.batch_size = batch_size or s.syslog_batch_size
-        self.buffer_max = s.syslog_buffer_max_events or 10 * self.batch_size
+        # backpressure point: TCP sessions and the relay pause above it (the relay queues on disk), nothing is dropped
+        self.buffer_max = s.syslog_buffer_max_events or 3 * self.batch_size
+        self._peak = 0  # largest backlog since the last memory release
         self.max_attempts = max(1, s.ingest_insert_max_attempts)
         self._retry: list[list[dict]] = []    # chunks whose insert failed, oldest first
         self._attempts: dict[int, int] = {}   # id(chunk) -> rejected inserts while other chunks inserted fine
         self.allow_unknown = s.syslog_allow_unknown_devices
         self.buffer: list[dict] = []
         self._seen: OrderedDict[str, None] = OrderedDict()
-        self._cap = dedupe_capacity
+        self._cap = dedupe_capacity if dedupe_capacity is not None else s.syslog_dedupe_window
         self._lock = asyncio.Lock()
         self.stats: dict[tuple[int, str], dict] = {}
         self.counters = {"received": 0, "parsed": 0, "duplicates": 0, "unknown_device": 0, "source_mismatch": 0, "parse_errors": 0, "inserted": 0,
-                         "insert_failures": 0, "dropped_buffer_full": 0, "dead_lettered": 0}
+                         "insert_failures": 0, "dropped_buffer_full": 0, "dead_lettered": 0, "bad_timestamp": 0, "rss_mib": 0}
+        # Accounting of everything that did not become an event, per (reason, sender, source): a count and one sample
+        # line per flush, written to ClickHouse `ingest_rejects`. Nothing is rejected without a record of who and why.
+        self._rejects: dict[tuple[str, str, str, str], dict] = {}
+
+    def _reject(self, reason: str, *, sender: str | None, source_name: str = "", transport: str = "syslog", raw: str | None = None) -> None:
+        r = self._rejects.get((reason, sender or "", source_name, transport))
+        if r is None:
+            if len(self._rejects) >= 2000:   # a flood from many spoofed senders: fold the rest into one row
+                sender, source_name = "(many)", ""
+                r = self._rejects.setdefault((reason, sender, source_name, transport), {"count": 0, "sample": ""})
+            else:
+                r = self._rejects[(reason, sender or "", source_name, transport)] = {"count": 0, "sample": ""}
+        r["count"] += 1
+        if raw and not r["sample"] and reason != "duplicate":
+            from .netdev import redact
+            r["sample"] = redact(raw.strip()[:2000])
 
     def _stat(self, fw_id: int, source: str) -> dict:
         return self.stats.setdefault((fw_id, source), {"events": 0, "errors": 0, "last_event": None, "last_error": None})
@@ -136,9 +155,11 @@ class EventSink:
         fw = firewall or self.registry.resolve(fields, peer_ip)
         if fw is SOURCE_MISMATCH:
             self.counters["source_mismatch"] += 1
+            self._reject("source_mismatch", sender=peer_ip, source_name=fields.get("devname", "") or fields.get("devid", ""), transport=source, raw=raw)
             return None
         if fw is None and not self.allow_unknown:
             self.counters["unknown_device"] += 1
+            self._reject("unknown_device", sender=peer_ip, source_name=fields.get("devname", "") or fields.get("devid", ""), transport=source, raw=raw)
             return None
         pan = fields.pop("_pan", None)
         if pan:
@@ -151,12 +172,22 @@ class EventSink:
         if self.enricher is not None:
             self.enricher.apply(ev)
         self.counters["parsed"] += 1
+        return self._accept(ev, source, peer_ip, raw)
+
+    def _accept(self, ev: dict, source: str, peer_ip: str | None, raw: str | None) -> dict | None:
+        """Dedupe, backpressure accounting and buffering, shared by every parser path."""
+        name = ev["firewall_name"]
         if self._is_dup(ev["event_id"]):
             self.counters["duplicates"] += 1
+            self._reject("duplicate", sender=peer_ip, source_name=name, transport=source)
             return None
         if self.pending >= self.buffer_max:  # only reachable by inline UDP: TCP and parser workers pause first
             self.counters["dropped_buffer_full"] += 1
+            self._reject("buffer_full", sender=peer_ip, source_name=name, transport=source, raw=raw)
             return None
+        if ev["parser_version"].endswith("+bad-ts"):   # stored with the receive time; counted so the device clock gets fixed
+            self.counters["bad_timestamp"] += 1
+            self._reject("bad_timestamp", sender=peer_ip, source_name=name, transport=source, raw=raw)
         self.buffer.append(ev)
         st = self._stat(ev["firewall_id"], source)
         st["events"] += 1
@@ -167,7 +198,7 @@ class EventSink:
     def add_line(self, line: str, *, source: str = "syslog", peer_ip: str | None = None) -> dict | None:
         gen = self.registry.generic_by_ip.get(peer_ip or "") if peer_ip else None
         if gen is not None:
-            return self._add_generic(gen, line, source)
+            return self._add_generic(gen, line, source, peer_ip)
         pan = panos_detect(line)
         if pan is not None:  # Palo Alto PAN-OS CSV record
             fields = panos_parse(*pan)
@@ -178,6 +209,7 @@ class EventSink:
             self.counters["received"] += 1
             self.counters["parse_errors"] += 1
             fw = self.registry.by_ip.get(peer_ip or "")
+            self._reject("parse_error" if fw else "unknown_device", sender=peer_ip, source_name=(fw or {}).get("name", ""), transport=source, raw=line)
             if fw:
                 st = self._stat(fw["id"], source)
                 st["errors"] += 1
@@ -185,33 +217,31 @@ class EventSink:
             return None
         return self.add_fields(fields, source=source, raw=line.strip(), peer_ip=peer_ip, all_str=True)
 
-    def _add_generic(self, src: dict, line: str, source: str) -> dict | None:
+    def _add_generic(self, src: dict, line: str, source: str, peer_ip: str | None = None) -> dict | None:
         from .generic import parse
         self.counters["received"] += 1
         try:
             ev = parse(src, line)
         except Exception as e:  # a malformed line from a third-party sender must never stop ingestion
-            self.counters["parse_errors"] += 1
             log.debug("generic parse failed for %s: %s", src["name"], e)
-            return None
+            ev = None
         if ev is None:
             self.counters["parse_errors"] += 1
+            self._reject("parse_error", sender=peer_ip, source_name=src["name"], transport=source, raw=line)
             return None
         if self.enricher is not None:
             self.enricher.apply(ev)
         self.counters["parsed"] += 1
-        if self._is_dup(ev["event_id"]):
-            self.counters["duplicates"] += 1
-            return None
-        if self.pending >= self.buffer_max:  # only reachable by inline UDP: TCP and parser workers pause first
-            self.counters["dropped_buffer_full"] += 1
-            return None
-        self.buffer.append(ev)
-        st = self._stat(ev["firewall_id"], source)
-        st["events"] += 1
-        if st["last_event"] is None or ev["event_time"] > st["last_event"]:
-            st["last_event"] = ev["event_time"]
-        return ev
+        return self._accept(ev, source, peer_ip, line)
+
+    async def _flush_rejects(self) -> None:
+        if not self._rejects:
+            return
+        rejects, self._rejects = self._rejects, {}
+        try:
+            await _write_rejects(self.ch, rejects)
+        except Exception as e:   # accounting must never stop ingestion; the totals stay in the counters log line
+            log.warning("could not write %d ingest accounting rows (%s: %s)", len(rejects), type(e).__name__, str(e)[:200])
 
     def should_flush(self) -> bool:
         return len(self.buffer) >= self.batch_size
@@ -231,6 +261,7 @@ class EventSink:
         A chunk that keeps failing while other chunks insert is poison (ClickHouse is up and rejects it): after
         `max_attempts` it is written to the dead-letter spool, counted, and ingestion carries on."""
         async with self._lock:
+            self._peak = max(self._peak, self.pending)
             new, self.buffer = self.buffer, []
             stats, self.stats = self.stats, {}
             chunks = self._retry + [new[i:i + self.batch_size] for i in range(0, len(new), self.batch_size)]
@@ -266,6 +297,11 @@ class EventSink:
                     self._attempts[id(chunk)] = tries
                     self._retry.append(chunk)
             self.counters["inserted"] += inserted
+            await self._flush_rejects()
+            if not self._retry and self._peak > self.batch_size:  # a backlog drained: hand its memory back to the OS
+                self._peak = 0
+                release_memory()
+            self.counters["rss_mib"] = rss_mib()
             if not inserted and chunks:
                 for k, v in stats.items():  # nothing landed: keep the stats for the flush that succeeds
                     self.stats.setdefault(k, v)
@@ -276,6 +312,16 @@ class EventSink:
                 else:
                     await persist_stats(stats)
             return inserted
+
+
+REJECT_COLUMNS = ["ts", "reason", "sender", "source_name", "transport", "count", "sample"]
+
+
+async def _write_rejects(ch: ClickHouse, rejects: dict) -> None:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    rows = [{"ts": now, "reason": reason, "sender": sender, "source_name": name, "transport": transport, "count": r["count"], "sample": r["sample"]}
+            for (reason, sender, name, transport), r in rejects.items()]
+    await ch.ainsert("ingest_rejects", rows, REJECT_COLUMNS)
 
 
 def merge_stats(into: dict, stats: dict) -> None:

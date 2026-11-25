@@ -1,0 +1,8 @@
+# Reviewed Trivy exceptions (security/DOCKER_SECURITY_AUDIT.md, "Scanner results"). Each is scoped to the files named.
+misconfigurations:
+  - id: DS-0002
+    paths: ["deploy/tacacs/Dockerfile"]
+    statement: >-
+      The tacacs entrypoint starts as root only to create and chown the shared volumes, then runs the agent and
+      tac_plus-ng as the unprivileged tacacs user via setpriv (inheritable capabilities cleared); the container keeps
+      only CHOWN SETUID SETGID FOWNER NET_BIND_SERVICE DAC_OVERRIDE (docker-compose.yml).

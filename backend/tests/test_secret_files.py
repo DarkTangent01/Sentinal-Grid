@@ -151,11 +151,15 @@ def test_compose_passes_no_secret_through_environment_or_interpolation():
 
 def test_each_service_mounts_only_the_secrets_it_needs():
     services = _compose()["services"]
-    want = {"api": {"db_app_password", "clickhouse_password", "secret_key", "token_encryption_key", "token_encryption_key_previous", "anthropic_api_key"},
-            "worker": {"db_app_password", "clickhouse_password", "token_encryption_key", "token_encryption_key_previous"},
-            "traps": {"db_app_password", "clickhouse_password", "token_encryption_key", "token_encryption_key_previous"},
-            "syslog": {"db_app_password", "clickhouse_password"},
-            "migrate": {"db_app_password", "clickhouse_password", "bootstrap_admin_password"},
+    want = {"api": {"db_app_password", "clickhouse_app_password", "secret_key", "token_encryption_key", "token_encryption_key_previous", "anthropic_api_key"},
+            # device access gateway: session cookies (secret_key) and the credential vault, nothing else (no AI key)
+            "ansible": {"db_app_password", "clickhouse_app_password", "token_encryption_key", "token_encryption_key_previous"},
+            "access": {"db_app_password", "clickhouse_app_password", "secret_key", "token_encryption_key", "token_encryption_key_previous"},
+            "worker": {"db_app_password", "clickhouse_app_password", "token_encryption_key", "token_encryption_key_previous"},
+            "poller": {"db_app_password", "clickhouse_app_password", "token_encryption_key", "token_encryption_key_previous"},
+            "traps": {"db_app_password", "clickhouse_app_password", "token_encryption_key", "token_encryption_key_previous"},
+            "syslog": {"db_app_password", "clickhouse_app_password"}, "flows": {"db_app_password", "clickhouse_app_password"},
+            "migrate": {"db_app_password", "clickhouse_app_password", "bootstrap_admin_password"},
             "postgres": {"postgres_password"}, "clickhouse": {"clickhouse_password"}, "web": set(), "ingress": set(), "tacacs": set()}
     anchor = set(yaml.safe_load((ROOT / "docker-compose.yml").read_text())["x-backend"]["secrets"])
     for name, svc in services.items():
@@ -177,23 +181,36 @@ def test_network_segmentation_and_container_hardening():
     for db in ("postgres", "clickhouse"):
         assert not c["services"][db].get("ports") and list(c["services"][db]["networks"]) == ["backend"]
     assert c["services"]["web"]["networks"] == ["frontend"] and c["services"]["web"]["read_only"] is True
+    # regression (2026-11-03): segmentation left tacacs alone on the default network, so the worker's health checks and
+    # the api's AAA tests could no longer resolve it. Every name a service connects to must be on a shared network.
+    def nets(svc):
+        n = c["services"][svc].get("networks") or ["default"]
+        return set(n if isinstance(n, list) else n.keys())
+    for client, server in (("api", "tacacs"), ("worker", "tacacs"), ("api", "postgres"), ("api", "clickhouse"), ("worker", "postgres"),
+                           ("syslog", "clickhouse"), ("traps", "postgres"), ("migrate", "postgres"), ("web", "api"), ("ingress", "syslog")):
+        assert nets(client) & nets(server), f"{client} cannot reach {server}"
+    assert not c["networks"]["aaa"].get("internal") and not nets("tacacs") & {"backend"}  # LDAP / AD egress; no database access
     anchor = c["x-backend"]
     assert anchor["read_only"] is True and anchor["cap_drop"] == ["ALL"] and "no-new-privileges:true" in anchor["security_opt"]
 
 
 def test_dockerfiles_bake_in_no_secrets():
-    for df in (ROOT / "backend/Dockerfile", ROOT / "frontend/Dockerfile", ROOT / "deploy/ingress/Dockerfile"):
+    for df in (ROOT / "backend/Dockerfile", ROOT / "frontend/Dockerfile", ROOT / "deploy/ingress/Dockerfile", ROOT / "deploy/tacacs/Dockerfile"):
         text = df.read_text()
         assert not re.search(r"^\s*(ARG|ENV)\s+\S*(PASSWORD|SECRET|TOKEN|_KEY)", text, re.M | re.I), df
         assert not re.search(r"^\s*COPY\s+.*(\.env|secrets)", text, re.M), df
-    assert re.search(r"^USER\s+siem", (ROOT / "backend/Dockerfile").read_text(), re.M)
+    assert re.search(r"^USER\s+10001\s*$", (ROOT / "backend/Dockerfile").read_text(), re.M)
 
 
 def test_env_example_holds_no_secrets_and_secrets_are_ignored():
     keys = re.findall(r"^([A-Z_]+)=", (ROOT / ".env.example").read_text(), re.M)
     assert not [k for k in keys if k in SECRET_ENV], keys
     assert "secrets/" in (ROOT / ".gitignore").read_text()
-    assert "--exclude='/secrets/'" in (ROOT / "scripts/deploy.sh").read_text()
+    # the deploy copies an allowlist; the server's secrets are excluded and plain --delete never touches excluded paths
+    rules = (ROOT / "scripts/deploy-files.rsync").read_text()
+    deploy = (ROOT / "scripts/deploy.sh").read_text()
+    assert "- /secrets/" in rules and "- /.env" in rules and "- /backups/" in rules
+    assert "deploy-files.rsync" in deploy and "--delete-excluded" not in deploy.replace("never --delete-excluded", "")
 
 
 def test_frontend_source_holds_no_secrets():
@@ -215,3 +232,81 @@ def test_settings_default_database_url_has_no_credentials():
     url = Settings.model_fields["database_url"].default
     from sqlalchemy.engine import make_url
     assert make_url(url).password is None
+
+
+# ------------------------------------------------------------------ second hardening pass (security/DOCKER_SECURITY_AUDIT.md, DS2-*)
+def test_every_container_is_non_root_with_minimal_capabilities():
+    s = _compose()["services"]
+    # no capabilities and a non-root user where the image allows it (lab-verified: processes run as these uids)
+    assert s["postgres"]["user"] == "70:70" and s["postgres"]["cap_drop"] == ["ALL"] and not s["postgres"].get("cap_add")
+    assert s["web"]["cap_drop"] == ["ALL"] and not s["web"].get("cap_add") and s["web"]["user"].endswith(":101")
+    assert not s["web"]["user"].startswith(("0:", "root"))
+    # third pass (security/CONTAINER_SECURITY_ASSESSMENT.md): ClickHouse and TACACS+ run as their own users from the
+    # start, so no service adds any capability and every service keeps privilege escalation disabled
+    assert s["clickhouse"]["user"] == "101:101" and s["tacacs"]["user"] == "10003:10050"
+    assert s["tacacs"]["sysctls"] == {"net.ipv4.ip_unprivileged_port_start": 49}   # port 49 without NET_BIND_SERVICE
+    for name, svc in s.items():
+        assert svc.get("cap_drop") == ["ALL"], f"{name} keeps the default capability set"
+        assert not svc.get("cap_add"), f"{name} adds capabilities"
+        assert "seccomp=unconfined" not in " ".join(svc.get("security_opt") or []) and not svc.get("devices"), name
+        assert "no-new-privileges:true" in (svc.get("security_opt") or []), name
+        assert svc.get("init") is True, f"{name}: no init process"
+        assert svc.get("read_only") is True, f"{name}: writable root filesystem"
+        for m in svc.get("tmpfs") or []:
+            assert {"noexec", "nosuid", "nodev"} <= set(m.split(":", 1)[1].split(",")), f"{name}: tmpfs {m} allows exec / suid / devices"
+        assert not svc.get("privileged") and not svc.get("pid") and not svc.get("ipc") and svc.get("network_mode") is None, name
+
+
+def test_process_limits_and_log_rotation_everywhere():
+    s = _compose()["services"]
+    for name, svc in s.items():
+        assert svc.get("logging", {}).get("options", {}).get("max-size"), f"{name}: unbounded json-file log"
+        if name == "migrate":  # a one-shot job
+            continue
+        limit = 4096 if name == "clickhouse" else 512     # ClickHouse threads count as pids (~780 in production)
+        assert int(svc["deploy"]["resources"]["limits"]["pids"]) <= limit, f"{name}: no process limit"
+
+
+def test_images_are_pinned_by_digest():
+    for df in (ROOT / "backend/Dockerfile", ROOT / "frontend/Dockerfile", ROOT / "deploy/ingress/Dockerfile", ROOT / "deploy/tacacs/Dockerfile"):
+        froms = re.findall(r"^FROM\s+(\S+)", df.read_text(), re.M)
+        assert froms and all(re.search(r":[\w.-]+@sha256:[0-9a-f]{64}$", f) for f in froms), (df, froms)
+    s = _compose()["services"]
+    for name in ("postgres", "clickhouse"):
+        assert re.search(r":[\w.-]+@sha256:[0-9a-f]{64}$", s[name]["image"]), name
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    uses = re.findall(r"uses:\s*(\S+)", ci)
+    assert uses and all(re.search(r"@[0-9a-f]{40}$", u) for u in uses), [u for u in uses if not re.search(r"@[0-9a-f]{40}$", u)]
+    assert "persist-credentials: false" in ci and "permissions:\n  contents: read" in ci
+
+
+def test_web_tls_and_request_limits():
+    main = (ROOT / "frontend/nginx-main.conf").read_text()
+    site = (ROOT / "frontend/nginx.conf").read_text()
+    assert not re.search(r"^\s*user\s", main, re.M) and "pid /tmp/nginx.pid" in main
+    assert "listen 8443 ssl" in site and "listen 8080" in site and not re.search(r"listen\s+(80|443)\b", site)
+    assert "ssl_protocols TLSv1.2 TLSv1.3;" in site and "ssl_session_tickets off;" in site
+    ciphers = re.search(r"ssl_ciphers\s+([^;]+);", site).group(1).split(":")
+    assert ciphers and all(c.startswith("ECDHE-") and ("GCM" in c or "CHACHA20" in c) for c in ciphers)  # forward secrecy + AEAD
+    for d in ("client_max_body_size", "client_header_timeout", "client_body_timeout", "limit_conn perip", "limit_req zone=login"):
+        assert d in site, d
+    df = (ROOT / "frontend/Dockerfile").read_text()
+    assert re.search(r"^USER\s+101:101\s*$", df, re.M) and "ENTRYPOINT []" in df
+
+
+def test_dev_override_publishes_on_loopback_only():
+    class Loader(yaml.SafeLoader):
+        pass
+    Loader.add_constructor("!override", lambda ld, node: ld.construct_sequence(node))
+    dev = yaml.load((ROOT / "docker-compose.dev.yml").read_text(), Loader=Loader)
+    ports = [p for svc in dev["services"].values() for p in svc.get("ports") or []]
+    assert ports and all(str(p).startswith("127.0.0.1:") for p in ports), ports
+
+
+def test_ignore_files_keep_secrets_out_of_images_and_git():
+    gi = (ROOT / ".gitignore").read_text()
+    for pat in (".env", "secrets/", "*.key", "*.pem", "backups/", ".env.pre-secrets.*"):
+        assert pat in gi, pat
+    for ctx in ("backend", "frontend", "deploy/tacacs", "deploy/ingress"):
+        di = (ROOT / ctx / ".dockerignore").read_text()
+        assert ".env" in di or di.lstrip().startswith("*") or "# only the files" in di, ctx

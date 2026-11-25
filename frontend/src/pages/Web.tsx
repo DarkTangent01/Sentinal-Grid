@@ -31,8 +31,8 @@ export function Web() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 items-end">
-        <div><label className="label">Domain</label><input className="input" aria-label="Domain" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value.trim())} /></div>
-        <div><label className="label">Source IP</label><input className={`input ${srcValid ? "" : "border-red-500"}`} aria-invalid={!srcValid} placeholder="10.0.0.5" value={src} onChange={(e) => setSrc(e.target.value.trim())} /></div>
+        <label className="block min-w-0"><span className="label">Domain</span><input className="input" aria-label="Domain" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value.trim())} /></label>
+        <label className="block min-w-0"><span className="label">Source IP</span><input className={`input ${srcValid ? "" : "border-red-500"}`} aria-invalid={!srcValid} placeholder="10.0.0.5" value={src} onChange={(e) => setSrc(e.target.value.trim())} /></label>
         <LimitSelect value={limit} onChange={setLimit} />
         <a className="btn" href={downloadUrl("/events/export.csv", { ...g.params, category: "web", domain: dDomain || undefined, src_ip: srcValid ? dSrc || undefined : undefined })}>Export CSV</a>
       </div>

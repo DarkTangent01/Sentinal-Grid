@@ -1,0 +1,28 @@
+id: AUTH-5002
+name: Repeated denied sudo attempts
+description: >
+  A user repeatedly tried to run commands with sudo and was refused (wrong password, not in sudoers, or command not
+  allowed): someone exploring what an account may do.
+version: 1
+severity: medium
+confidence: medium
+category: privilege_escalation
+author: sentinel
+log_source: {category: system, event_type: linux}
+detection:
+  selection: {action: sudo-fail}
+  condition: {group_by: [user, hostname], count: 3, timeframe: 15m}
+explanation: "{user} on {hostname}: {metric} denied sudo attempts in {timeframe}: {samples}"
+data_sources: [Linux auth log (sudo)]
+falsepositives:
+  - A new administrator not yet added to sudoers
+investigation:
+  - Which commands were attempted? Is the account supposed to administer this host?
+mitre: {tactic: TA0004, techniques: [T1548.003]}
+tests:
+  - name: four denials
+    events: [{action: sudo-fail, user: mallory, hostname: web-1, msg: "sudo denied", repeat: 4}]
+    expect_alerts: 1
+  - name: allowed sudo
+    events: [{action: sudo, user: deploy, hostname: web-1, repeat: 10}]
+    expect_alerts: 0

@@ -315,13 +315,17 @@ CLD = ["cldcClientStatus", "cldcClientWlanProfileName", "cldcApMacAddress", "cld
        "cldcClientApRoamMacAddress", "cldcClientCurrentTxRate"]
 BSN = ["bsnMobileStationIpAddress", "bsnMobileStationAPMacAddr", "bsnMobileStationAPIfSlotId", "bsnMobileStationSsid", "bsnMobileStationStatus",
        "bsnMobileStationReasonCode", "bsnMobileStationProtocol", "bsnMobileStationVlanId", "bsnMobileStationUserName"]
-STATS = ["bsnMobileStationRSSI", "bsnMobileStationSnr", "bsnMobileStationBytesReceived", "bsnMobileStationBytesSent",
-         "bsnMobileStationPacketsReceived", "bsnMobileStationPacketsSent"]
+STATS = ["bsnMobileStationRSSI", "bsnMobileStationSnr", "bsnMobileStationBytesReceived", "bsnMobileStationBytesSent"]
+# When the controller answers the CISCO-LWAPP client table, these AIRESPACE columns only repeat it (SSID, status, reason,
+# user name, AP MAC): they are not walked, which cuts the decoding work of a client poll by about a quarter (pyasn1 BER
+# decoding is the poller's CPU, docs/performance). bsnMobileStationIpAddress stays: cldcClientIPAddress is an InetAddress
+# octet string that 9800 releases often leave empty.
+BSN_WITH_CLD = ["bsnMobileStationIpAddress", "bsnMobileStationAPIfSlotId", "bsnMobileStationProtocol", "bsnMobileStationVlanId"]
 
 
 async def collect_clients(ctx: Ctx, max_rows: int = 20_000) -> dict:
     a, c1 = await _walk(ctx, CLD, max_rows)
-    b, c2 = await _walk(ctx, BSN, max_rows)
+    b, c2 = await _walk(ctx, BSN_WITH_CLD if c1.get("cldcClientStatus") else BSN, max_rows)
     s, c3 = await _walk(ctx, STATS, max_rows)
     merged: dict[str, dict] = {}
     for src, rows in (("CISCO-LWAPP-DOT11-CLIENT-MIB", a), (MIB_AIRESPACE, b), (MIB_AIRESPACE, s)):
@@ -363,6 +367,33 @@ async def collect_clients(ctx: Ctx, max_rows: int = 20_000) -> dict:
             "wireless_client_truncated": truncated}
 
 
+ROGUE = ["bsnRogueAPTotalDetectingAPs", "bsnRogueAPLastReported", "bsnRogueAPType", "bsnRogueAPOnNetwork", "bsnRogueAPTotalClients",
+         "bsnRogueAPMaxDetectedRSSI", "bsnRogueAPSSID", "bsnRogueAPDetectingAPMacAddress", "bsnRogueAPState", "bsnRogueAPClassType",
+         "bsnRogueAPChannel", "bsnRogueAPDetectingAPName"]
+
+
+async def collect_rogues(ctx: Ctx, max_rows: int = 20_000) -> dict:
+    """Rogue APs the controller detected (AIRESPACE-WIRELESS-MIB bsnRogueAPTable, indexed by the rogue's BSSID)."""
+    rows, counts = await _walk(ctx, ROGUE, max_rows)
+    out: dict[str, dict] = {}
+    for idx, r in rows.items():
+        m, _ = _idx_mac(idx)
+        if not m:
+            continue
+        rssi = num(r.get("bsnRogueAPMaxDetectedRSSI"))
+        det = r.get("bsnRogueAPDetectingAPMacAddress")
+        out[m] = {"mac": m, "ssid": text(r.get("bsnRogueAPSSID")), "channel": num(r.get("bsnRogueAPChannel")),
+                  "rssi_dbm": rssi if rssi is not None and rssi < 0 else None, "clients": num(r.get("bsnRogueAPTotalClients")),
+                  "detecting_aps": num(r.get("bsnRogueAPTotalDetectingAPs")), "detecting_ap": text(r.get("bsnRogueAPDetectingAPName")),
+                  "detecting_ap_mac": mac(det) if isinstance(det, bytes) else "", "type": enum("bsnRogueAPType", r.get("bsnRogueAPType")),
+                  "on_network": enum("bsnRogueAPOnNetwork", r.get("bsnRogueAPOnNetwork")) == "yes",
+                  "state": enum("bsnRogueAPState", r.get("bsnRogueAPState")), "class_type": enum("bsnRogueAPClassType", r.get("bsnRogueAPClassType")),
+                  "last_reported": text(r.get("bsnRogueAPLastReported"))}
+    _report(ctx, "wireless_rogue", counts)
+    return {"wireless_rogues": out, "wireless_rogue_table_ok": bool(counts.get("bsnRogueAPState")),
+            "wireless_rogue_truncated": max(counts.values() or [0]) >= max_rows}
+
+
 COLLECTORS = {"wireless_ap": collect_aps, "wireless_ap_cdp": collect_ap_cdp, "wireless_radio": collect_radios,
               "wireless_radio_rf": collect_radio_rf, "wireless_wlan": collect_wlans, "wireless_client": collect_clients,
-              "wireless_radio_meta": collect_radio_meta, "wireless_rf_neighbors": collect_rf_neighbors}
+              "wireless_radio_meta": collect_radio_meta, "wireless_rf_neighbors": collect_rf_neighbors, "wireless_rogue": collect_rogues}

@@ -2,42 +2,69 @@ import { useEffect, useRef } from "react";
 import { echarts } from "../lib/echarts";
 import { Theme, useTheme } from "../lib/theme";
 
-/** Categorical slots, assigned in this fixed order (never cycled past 8: fold the rest into "Other").
- *  Validated per theme surface (lightness band, chroma, adjacent-pair CVD and normal-vision separation, contrast).
- *  Zomato red is deliberately not a categorical slot: in a SIEM red means "denied / threat" (see SERIES_ROLE). */
+/** Categorical slots, assigned in this fixed order (never cycled past 8: fold the rest into "Other"). The Sentinel
+ *  chart palette leads with the two product accents and keeps clear of the status hues (no pure green / red / amber),
+ *  so a categorical series is never mistaken for "healthy" or "down". */
 export const PALETTES: Record<Theme, string[]> = {
-  light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
-  dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
+  dark: ["#38bdf8", "#a78bfa", "#2dd4bf", "#f472b6", "#fbbf24", "#818cf8", "#fb923c", "#94a3b8"],
+  light: ["#0284c7", "#7c3aed", "#0d9488", "#db2777", "#d97706", "#4f46e5", "#ea580c", "#64748b"],
 };
-export const SEV_HEX: Record<string, string> = { critical: "#d03b3b", high: "#ec835a", medium: "#eda100", low: "#2a78d6", informational: "#8f8f8f" };
+/** Severity, identical in every module (docs/design-system.md). */
+export const SEV_HEX: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#f59e0b", low: "#38bdf8", informational: "#64748b" };
 
-/** Semantic series colours. primary = neutral traffic/volume, alert = denied/blocked/threat (Zomato red),
- *  warn = degraded (draw it dashed when shown beside alert: the amber/red pair needs a second cue for CVD),
- *  muted = secondary context. */
+/** The product accent as a hex colour (from --chart-primary, set by <html data-product>). */
+function cssColor(name: string, fallback: string): string {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const p = v.split(/\s+/).map(Number);
+    if (p.length === 3 && p.every((n) => Number.isFinite(n))) return "#" + p.map((n) => n.toString(16).padStart(2, "0")).join("");
+  } catch { /* no DOM (tests) */ }
+  return fallback;
+}
+
+/** Semantic series colours. primary = the product's own volume / traffic series (Sentinel NMS cyan, Sentinel Grid
+ *  violet), alert = denied / blocked / threat / down, warn = degraded (draw it dashed beside alert: the amber / red pair
+ *  needs a second cue for colour-blind readers), muted = secondary context. */
 export type SeriesRole = "primary" | "alert" | "warn" | "muted";
 export const SERIES_ROLE: Record<Theme, Record<SeriesRole, string>> = {
-  light: { primary: "#2a78d6", alert: "#e23744", warn: "#c98500", muted: "#9c9c9c" },
-  dark: { primary: "#3987e5", alert: "#ef4f5f", warn: "#c98500", muted: "#737373" },
+  light: { get primary() { return cssColor("--chart-primary", "#0284c7"); }, alert: "#dc2626", warn: "#d97706", muted: "#94a3b8" },
+  dark: { get primary() { return cssColor("--chart-primary", "#38bdf8"); }, alert: "#ef4444", warn: "#f59e0b", muted: "#64748b" },
 };
-export const seriesColor = (theme: Theme, color: string | undefined, i: number) =>
+/** Operational state colours for charts, graphs and status bars (one definition for every module).
+ *  ok = up / established / healthy, warn = degraded, bad = down / failed / lost, unknown = no data, paused = not monitored.
+ *  Pair ok with bad only alongside a second cue (label, icon or dash): the green / red pair alone fails for CVD. */
+export type StatusKey = "ok" | "warn" | "bad" | "unknown" | "paused";
+export const STATUS_HEX: Record<Theme, Record<StatusKey, string>> = {
+  light: { ok: "#16a34a", warn: "#d97706", bad: "#dc2626", unknown: "#94a3b8", paused: "#cbd5e1" },
+  dark: { ok: "#22c55e", warn: "#f59e0b", bad: "#ef4444", unknown: "#64748b", paused: "#334155" },
+};
+const STATUS_OF: Record<string, StatusKey> = {
+  up: "ok", ok: "ok", established: "ok", healthy: "ok", passed: "ok", reachable: "ok",
+  degraded: "warn", warning: "warn", flapping: "warn",
+  down: "bad", failed: "bad", lost: "bad", auth_failed: "bad", unreachable: "bad", critical: "bad",
+  paused: "paused", maintenance: "paused",
+};
+/** Colour for a state string from any module (unrecognised states read as "unknown"). */
+export const statusColor = (theme: Theme, state?: string | null) => STATUS_HEX[theme][STATUS_OF[String(state || "").toLowerCase()] || "unknown"];
+export const seriesColor =(theme: Theme, color: string | undefined, i: number) =>
   (color && color in SERIES_ROLE[theme] ? SERIES_ROLE[theme][color as SeriesRole] : color) ?? PALETTES[theme][i % 8];
 /** Sequential (magnitude) ramp, one hue, low → high. */
-export const SEQUENTIAL: Record<Theme, string[]> = { light: ["#cde2fb", "#5598e7", "#104281"], dark: ["#184f95", "#3987e5", "#b7d3f6"] };
+export const SEQUENTIAL: Record<Theme, string[]> = { light: ["#e0f2fe", "#38bdf8", "#075985"], dark: ["#0c3a5a", "#0ea5e9", "#bae6fd"] };
 
-/** Neutral chart chrome per theme. Mirrors --chart-* tokens in index.css. */
-export const CHART_THEME: Record<Theme, { text: string; strong: string; axis: string; split: string; tooltip: string; tooltipBorder: string; surface: string }> = {
-  dark: { text: "#a3a3a3", strong: "#f0f0f0", axis: "#404040", split: "#262626", tooltip: "#1c1c1c", tooltipBorder: "#2e2e2e", surface: "#1c1c1c" },
-  light: { text: "#696969", strong: "#1c1c1c", axis: "#d6d6d6", split: "#f0f0f0", tooltip: "#ffffff", tooltipBorder: "#e8e8e8", surface: "#ffffff" },
+/** Neutral chart chrome per theme. Mirrors the --chart-* tokens in index.css. */
+export const CHART_THEME: Record<Theme, { text: string; strong: string; axis: string; split: string; tooltip: string; tooltipBorder: string; surface: string; land: string }> = {
+  dark: { text: "#94a3b8", strong: "#f1f5f9", axis: "#263449", split: "#1a263a", tooltip: "#162238", tooltipBorder: "#263449", surface: "#111c2e", land: "#1c2a40" },
+  light: { text: "#475569", strong: "#0f172a", axis: "#cbd5e1", split: "#eef2f7", tooltip: "#ffffff", tooltipBorder: "#e2e8f0", surface: "#ffffff", land: "#e2e8f0" },
 };
 
 for (const [name, c] of Object.entries(CHART_THEME) as [Theme, (typeof CHART_THEME)[Theme]][]) {
   const axis = { axisLine: { lineStyle: { color: c.axis } }, axisTick: { lineStyle: { color: c.axis } },
     splitLine: { lineStyle: { color: c.split } }, axisLabel: { color: c.text } };
   echarts.registerTheme(`siem-${name}`, {
-    color: PALETTES[name], backgroundColor: "transparent", textStyle: { color: c.text },
+    color: PALETTES[name], backgroundColor: "transparent", textStyle: { color: c.text, fontFamily: "Inter Variable, Inter, system-ui, sans-serif" },
     legend: { textStyle: { color: c.text }, pageTextStyle: { color: c.text } },
     tooltip: { backgroundColor: c.tooltip, borderColor: c.tooltipBorder, textStyle: { color: c.strong },
-      extraCssText: "border-radius:10px;box-shadow:0 6px 20px -8px rgba(28,28,28,.25);" },
+      extraCssText: "border-radius:8px;box-shadow:0 12px 32px -12px rgba(2,6,23,.45);font-variant-numeric:tabular-nums;" },
     categoryAxis: axis, valueAxis: axis, timeAxis: axis, logAxis: axis,
   });
 }

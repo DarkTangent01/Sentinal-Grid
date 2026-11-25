@@ -1,6 +1,4 @@
-# A variable makes nginx resolve "api" through the resolver below (every 10 s) instead of once at startup, so a
-# redeployed api container with a new IP is picked up without restarting nginx.
-set $api_upstream http://api:8000;
+# $api_upstream and the resolver come from upstream.inc (Compose default; Kubernetes ConfigMap web-upstream)
 proxy_pass $api_upstream;
 proxy_http_version 1.1;
 proxy_set_header Host $host;

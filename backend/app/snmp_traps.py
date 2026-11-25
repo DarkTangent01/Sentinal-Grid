@@ -35,6 +35,18 @@ DEDUP_MAX_KEYS = 50_000
 SNMP_TRAP_OID = "1.3.6.1.6.3.1.1.4.1.0"
 SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 
+# Wireless controller client notifications (github.com/cisco/cisco-mibs v2): CISCO-LWAPP-DOT11-CLIENT-MIB
+# ciscoLwappDot11ClientMIBNotifs = ciscoMgmt 599 0; AIRESPACE-WIRELESS-MIB bsnTraps = bsnTrap 3 = 14179.2.6.3.
+# They feed the wireless client history (wireless_client_events, precision "controller_trap"), not the trap table / alerts.
+CLD_NOTIF = "1.3.6.1.4.1.9.9.599.0."
+BSN_TRAPS = "1.3.6.1.4.1.14179.2.6.3."
+CLD_ENTRY = "1.3.6.1.4.1.9.9.599.1.3.1.1."            # cldcClientEntry: 1 mac, 8 AP mac, 10 IP, 28 SSID, 37 reason code
+BSN_STATION_MAC, BSN_STATION_AP = "1.3.6.1.4.1.14179.2.6.2.34", "1.3.6.1.4.1.14179.2.6.2.35"
+WLC_CLIENT_TRAPS = {f"{CLD_NOTIF}4": "trap_assoc", f"{CLD_NOTIF}7": "trap_assoc", f"{CLD_NOTIF}9": "trap_assoc", f"{CLD_NOTIF}11": "trap_assoc",
+                    f"{CLD_NOTIF}6": "trap_disassoc", f"{CLD_NOTIF}10": "trap_deauth",
+                    f"{BSN_TRAPS}53": "trap_assoc", f"{BSN_TRAPS}1": "trap_disassoc", f"{BSN_TRAPS}2": "trap_deauth",
+                    f"{BSN_TRAPS}3": "trap_auth_fail", f"{BSN_TRAPS}4": "trap_assoc_fail"}
+
 # notification OID → name (standard, plus vendor notifications whose OIDs are fixed in the public MIBs)
 TRAP_NAMES = {
     "1.3.6.1.6.3.1.1.5.1": "SNMPv2-MIB::coldStart", "1.3.6.1.6.3.1.1.5.2": "SNMPv2-MIB::warmStart",
@@ -56,6 +68,13 @@ TRAP_NAMES = {
     "1.3.6.1.4.1.2636.4.1.3": "JUNIPER-MIB::jnxOverTemperature",
     "1.3.6.1.4.1.2636.4.2.1": "JUNIPER-MIB::jnxPowerSupplyOK", "1.3.6.1.4.1.2636.4.2.2": "JUNIPER-MIB::jnxFanOK",
     "1.3.6.1.4.1.2636.4.2.3": "JUNIPER-MIB::jnxTemperatureOK",
+    **{f"{CLD_NOTIF}{n}": f"CISCO-LWAPP-DOT11-CLIENT-MIB::{name}" for n, (name, _) in {
+        4: ("ciscoLwappDot11ClientMovedToRunState", 0), 6: ("ciscoLwappDot11ClientDisassocDataStatsTrap", 0),
+        7: ("ciscoLwappDot11ClientAssocDataStatsTrap", 0), 9: ("ciscoLwappDot11ClientAssocTrap", 0),
+        10: ("ciscoLwappDot11ClientDeAuthenticatedTrap", 0), 11: ("ciscoLwappDot11ClientMovedToRunStateNewTrap", 0)}.items()},
+    **{f"{BSN_TRAPS}{n}": f"AIRESPACE-WIRELESS-MIB::{name}" for n, name in {
+        1: "bsnDot11StationDisassociate", 2: "bsnDot11StationDeauthenticate", 3: "bsnDot11StationAuthenticateFail",
+        4: "bsnDot11StationAssociateFail", 53: "bsnDot11StationAssociate"}.items()},
 }
 # raising notification → the notification that clears it (the alert rule pairs them per device + component)
 CLEARS = {"1.3.6.1.6.3.1.1.5.3": "1.3.6.1.6.3.1.1.5.4", "1.3.6.1.2.1.15.7.2": "1.3.6.1.2.1.15.7.1",
@@ -148,6 +167,45 @@ def parse_juniper(trap: str, vbs: dict) -> dict | None:
 
 
 PARSERS = {"cisco": parse_cisco, "juniper": parse_juniper}
+
+
+def _mac(v) -> str:
+    if isinstance(v, bytes) and len(v) == 6:
+        return ":".join(f"{b:02x}" for b in v)
+    s = _text(v).strip().lower().replace("-", ":")
+    return s if len(s) == 17 and s.count(":") == 5 else ""
+
+
+def _mac_from_index(oid: str, prefix: str) -> str:
+    parts = oid[len(prefix):].split(".")[1:]           # column number, then the index (the client MAC as 6 sub-ids)
+    try:
+        nums = [int(x) for x in parts[-6:]]
+    except ValueError:
+        return ""
+    return ":".join(f"{n:02x}" for n in nums) if len(nums) == 6 and all(0 <= n <= 255 for n in nums) else ""
+
+
+def parse_wlc_client(trap: str, varbinds: list[tuple[str, object]]) -> dict | None:
+    """A controller client notification → {kind, mac, ap_mac, ssid, reason}; None for any other trap."""
+    kind = WLC_CLIENT_TRAPS.get(canonical(trap))
+    if kind is None:
+        return None
+    mac = ap = ssid = reason = ""
+    for o, v in varbinds:
+        if o.startswith(CLD_ENTRY):
+            col = o[len(CLD_ENTRY):].split(".")[0]
+            mac = mac or (_mac(v) if col == "1" else _mac_from_index(o, CLD_ENTRY))
+            if col == "8":
+                ap = _mac(v)
+            elif col == "28":
+                ssid = _text(v)
+            elif col == "37":
+                reason = _text(v)
+        elif o.startswith(BSN_STATION_MAC):
+            mac = _mac(v) or mac
+        elif o.startswith(BSN_STATION_AP):
+            ap = _mac(v) or ap
+    return {"kind": kind, "mac": mac, "ap_mac": ap, "ssid": ssid[:64], "reason": reason[:64]} if mac else None
 
 
 def canonical(trap: str) -> str:
@@ -246,6 +304,8 @@ class Receiver:
         self.stats = {"received": 0, "stored": 0, "deduplicated": 0, "rejected_source": 0, "rejected_credential": 0, "errors": 0,
                       "dropped_queue_full": 0}
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+        self.ap_ids: dict[str, int] = {}                # AP base radio MAC → WirelessAp id (client notifications)
+        self.stats["client_events"] = 0
 
     def _build(self):
         from pysnmp.carrier.asyncio.dgram import udp
@@ -323,6 +383,21 @@ class Receiver:
                 item = None
             if item:
                 src, d, ver, vbs = item
+                trap_oid = dict(vbs).get(SNMP_TRAP_OID)
+                wc = parse_wlc_client(trap_oid if isinstance(trap_oid, str) else _text(trap_oid or ""), vbs)
+                if wc is not None:                       # controller client notification → wireless client history
+                    from .wireless.history import EVENT_COLS
+                    try:
+                        await self.ch.ainsert("wireless_client_events", [{
+                            "ts": datetime.now(timezone.utc), "wlc_id": d["switch_id"], "mac": wc["mac"], "kind": wc["kind"], "session_id": 0,
+                            "ssid": wc["ssid"], "ap_id": self.ap_ids.get(wc["ap_mac"], 0), "from_ap_id": 0, "band": "", "from_band": "",
+                            "from_ssid": "", "vlan": 0, "reason": wc["reason"], "precision": "controller_trap"}], EVENT_COLS)
+                        self.stats["client_events"] += 1
+                    except Exception:
+                        self.stats["errors"] += 1
+                        log.exception("storing a wireless client notification failed")
+                    item = None
+            if item:
                 n = normalise(d["vendor"], vbs, self.names)
                 key = (d["switch_id"], n["trap_oid"], n["component"])
                 if self.dedup.hit(key, time.monotonic()):
@@ -341,12 +416,21 @@ class Receiver:
                     log.exception("clickhouse insert into snmp_traps failed")
                 batch, last = [], time.monotonic()
 
+    async def _load_aps(self):
+        from sqlalchemy import select
+
+        from .db.models import WirelessAp
+        from .db.pg import session_factory
+        async with session_factory()() as s:
+            self.ap_ids = {m: i for i, m in (await s.execute(select(WirelessAp.id, WirelessAp.mac))).all()}
+
     async def run(self, stop: asyncio.Event):
         from .db.pg import session_factory
         from .snmp_profiles import oid_names
         await self.inv.load()
         async with session_factory()() as s:
             self.names = await oid_names(s)
+        await self._load_aps()
         self._build()
         writer = asyncio.create_task(self._writer())
         log.info("SNMP trap receiver listening on udp %s:%s for %d device(s)", self.host, self.port, len(self.inv.by_ip))
@@ -366,6 +450,7 @@ class Receiver:
                     log.info("trap receiver reloaded: %d device(s)", len(self.inv.by_ip))
                 async with session_factory()() as s:
                     self.names = await oid_names(s)
+                await self._load_aps()
             except Exception:
                 log.exception("trap receiver reload failed")
             log.info("traps: %s", self.stats)

@@ -143,18 +143,18 @@ function PlanEditor({ plan, fws, onSaved, onDeleted }: { plan?: Plan; fws: any[]
           {plan && !readOnly && <button className="btn btn-danger" onClick={() => confirm(`Delete plan "${plan.name}"?`) && del.mutate()}>Delete</button>}
         </div>}>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="xl:col-span-2"><label className="label">Name</label><input className="input w-full" disabled={readOnly} value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><label className="label">Target firewall (for checks)</label>
+          <label className="xl:col-span-2 block min-w-0"><span className="label">Name</span><input className="input w-full" disabled={readOnly} value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label className="block min-w-0"><span className="label">Target firewall (for checks)</span>
             <select className="input w-full" disabled={readOnly} value={firewallId ?? ""} onChange={(e) => setFirewallId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">— none —</option>{realFws.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select></div>
+            </select></label>
           <div className="grid grid-cols-2 gap-2">
-            <div><label className="label">VDOM (multi-VDOM only)</label><input className="input w-full" disabled={readOnly} placeholder="none" value={spec.vdom || ""} onChange={(e) => upd("vdom", e.target.value || null)} /></div>
-            <div><label className="label">Status</label><select className="input w-full" disabled={readOnly} value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="draft">draft</option><option value="ready">ready</option><option value="exported">exported</option></select></div>
+            <label className="block min-w-0"><span className="label">VDOM (multi-VDOM only)</span><input className="input w-full" disabled={readOnly} placeholder="none" value={spec.vdom || ""} onChange={(e) => upd("vdom", e.target.value || null)} /></label>
+            <label className="block min-w-0"><span className="label">Status</span><select className="input w-full" disabled={readOnly} value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="draft">draft</option><option value="ready">ready</option><option value="exported">exported</option></select></label>
           </div>
-          <div className="sm:col-span-2 xl:col-span-4"><label className="label">Description / change reference</label>
-            <input className="input w-full" disabled={readOnly} placeholder="e.g. CHG-1234: restrict guest VLAN to web + DNS" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+          <label className="sm:col-span-2 xl:col-span-4 block min-w-0"><span className="label">Description / change reference</span>
+            <input className="input w-full" disabled={readOnly} placeholder="e.g. CHG-1234: restrict guest VLAN to web + DNS" value={description} onChange={(e) => setDescription(e.target.value)} /></label>
         </div>
         {msg && <div className={`text-xs mt-2 ${msg === "Saved." ? "text-emerald-400" : "text-red-400"}`} role="status">{msg}</div>}
         <ValidationPanel val={val.data} />
@@ -195,9 +195,9 @@ function PlanEditor({ plan, fws, onSaved, onDeleted }: { plan?: Plan; fws: any[]
         <div className="space-y-4">{spec.url_filters.map((u, i) => (
           <div key={i} className="border border-line rounded p-3 space-y-2">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5 items-end">
-              <div><label className="label">Table ID</label><input type="number" min={1} className="input w-full" disabled={readOnly} value={u.table_id} onChange={(e) => updAt("url_filters", i, { table_id: Number(e.target.value) })} /></div>
-              <div><label className="label">Table name</label><input className="input w-full" disabled={readOnly} value={u.name} onChange={(e) => updAt("url_filters", i, { name: e.target.value })} /></div>
-              <div><label className="label">Web-filter profile (optional)</label><input className="input w-full" disabled={readOnly} value={u.profile_name || ""} onChange={(e) => updAt("url_filters", i, { profile_name: e.target.value || null })} /></div>
+              <label className="block min-w-0"><span className="label">Table ID</span><input type="number" min={1} className="input w-full" disabled={readOnly} value={u.table_id} onChange={(e) => updAt("url_filters", i, { table_id: Number(e.target.value) })} /></label>
+              <label className="block min-w-0"><span className="label">Table name</span><input className="input w-full" disabled={readOnly} value={u.name} onChange={(e) => updAt("url_filters", i, { name: e.target.value })} /></label>
+              <label className="block min-w-0"><span className="label">Web-filter profile (optional)</span><input className="input w-full" disabled={readOnly} value={u.profile_name || ""} onChange={(e) => updAt("url_filters", i, { profile_name: e.target.value || null })} /></label>
               <label className="text-sm flex items-center gap-2"><input type="checkbox" disabled={readOnly} checked={u.block_others} onChange={(e) => updAt("url_filters", i, { block_others: e.target.checked })} />Block everything else</label>
               <div className="flex gap-2 justify-end">{!readOnly && <button className="btn" onClick={() => updAt("url_filters", i, { entries: [...u.entries, { url: "", type: "wildcard", action: "allow" }] })}>+ Entry</button>}<Del readOnly={readOnly} onClick={() => delAt("url_filters", i)} /></div>
             </div>
@@ -240,15 +240,15 @@ function PlanEditor({ plan, fws, onSaved, onDeleted }: { plan?: Plan; fws: any[]
         onAdd={() => upd("policies", [...spec.policies, { ...NEW_POLICY, name: `SIEM-Policy-${spec.policies.length + 1}` }])}>
         <div className="space-y-3">{spec.policies.map((p, i) => (
           <div key={i} className="border border-line rounded p-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <div><label className="label">Name (≤35)</label><input className="input w-full" disabled={readOnly} value={p.name} onChange={(e) => updAt("policies", i, { name: e.target.value })} /></div>
-            <div><label className="label">Incoming interface(s)</label><ListInput label="Source interfaces" value={p.srcintf} onChange={(v) => updAt("policies", i, { srcintf: v })} placeholder="port1" /></div>
-            <div><label className="label">Outgoing interface(s)</label><ListInput label="Destination interfaces" value={p.dstintf} onChange={(v) => updAt("policies", i, { dstintf: v })} placeholder="wan1" /></div>
-            <div><label className="label">Action</label><select className="input w-full" disabled={readOnly} value={p.action} onChange={(e) => updAt("policies", i, { action: e.target.value as Policy["action"] })}><option>accept</option><option>deny</option></select></div>
-            <div><label className="label">Source address(es)</label><ListInput label="Source addresses" value={p.srcaddr} onChange={(v) => updAt("policies", i, { srcaddr: v })} /></div>
-            <div><label className="label">Destination address(es)</label><ListInput label="Destination addresses" value={p.dstaddr} onChange={(v) => updAt("policies", i, { dstaddr: v })} /></div>
-            <div><label className="label">Service(s) / group</label><ListInput label="Services" value={p.service} onChange={(v) => updAt("policies", i, { service: v })} /></div>
-            <div><label className="label">Web-filter profile</label><input className="input w-full" disabled={readOnly || p.action === "deny"} value={p.webfilter_profile || ""} onChange={(e) => updAt("policies", i, { webfilter_profile: e.target.value || null })} /></div>
-            <div><label className="label">Log traffic</label><select className="input w-full" disabled={readOnly} value={p.logtraffic} onChange={(e) => updAt("policies", i, { logtraffic: e.target.value as Policy["logtraffic"] })}><option>all</option><option>utm</option><option>disable</option></select></div>
+            <label className="block min-w-0"><span className="label">Name (≤35)</span><input className="input w-full" disabled={readOnly} value={p.name} onChange={(e) => updAt("policies", i, { name: e.target.value })} /></label>
+            <div role="group" aria-label="Incoming interface(s)"><span className="label">Incoming interface(s)</span><ListInput label="Source interfaces" value={p.srcintf} onChange={(v) => updAt("policies", i, { srcintf: v })} placeholder="port1" /></div>
+            <div role="group" aria-label="Outgoing interface(s)"><span className="label">Outgoing interface(s)</span><ListInput label="Destination interfaces" value={p.dstintf} onChange={(v) => updAt("policies", i, { dstintf: v })} placeholder="wan1" /></div>
+            <label className="block min-w-0"><span className="label">Action</span><select className="input w-full" disabled={readOnly} value={p.action} onChange={(e) => updAt("policies", i, { action: e.target.value as Policy["action"] })}><option>accept</option><option>deny</option></select></label>
+            <div role="group" aria-label="Source address(es)"><span className="label">Source address(es)</span><ListInput label="Source addresses" value={p.srcaddr} onChange={(v) => updAt("policies", i, { srcaddr: v })} /></div>
+            <div role="group" aria-label="Destination address(es)"><span className="label">Destination address(es)</span><ListInput label="Destination addresses" value={p.dstaddr} onChange={(v) => updAt("policies", i, { dstaddr: v })} /></div>
+            <div role="group" aria-label="Service(s) / group"><span className="label">Service(s) / group</span><ListInput label="Services" value={p.service} onChange={(v) => updAt("policies", i, { service: v })} /></div>
+            <label className="block min-w-0"><span className="label">Web-filter profile</span><input className="input w-full" disabled={readOnly || p.action === "deny"} value={p.webfilter_profile || ""} onChange={(e) => updAt("policies", i, { webfilter_profile: e.target.value || null })} /></label>
+            <label className="block min-w-0"><span className="label">Log traffic</span><select className="input w-full" disabled={readOnly} value={p.logtraffic} onChange={(e) => updAt("policies", i, { logtraffic: e.target.value as Policy["logtraffic"] })}><option>all</option><option>utm</option><option>disable</option></select></label>
             <label className="text-sm flex items-center gap-2 self-end"><input type="checkbox" disabled={readOnly || p.action === "deny"} checked={p.nat} onChange={(e) => updAt("policies", i, { nat: e.target.checked })} />NAT</label>
             <div className="sm:col-span-2 xl:col-span-1 flex justify-end items-end"><Del readOnly={readOnly} onClick={() => delAt("policies", i)} /></div>
           </div>))}</div>
@@ -334,7 +334,7 @@ function Suggestions({ firewallId, spec, setSpec, readOnly }: { firewallId: numb
     <Card title="Suggestions from observed traffic (selected time range)" right={<button className="btn" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"}</button>}>
       {open && <div className="space-y-3">
         <div className="flex flex-wrap gap-2 items-end">
-          <div><label className="label">Limit to source IP / subnet</label><input className={`input ${validSrc ? "" : "border-red-500"}`} aria-invalid={!validSrc} placeholder="10.10.20.0/24" value={srcCidr} onChange={(e) => setSrcCidr(e.target.value.trim())} /></div>
+          <label className="block min-w-0"><span className="label">Limit to source IP / subnet</span><input className={`input ${validSrc ? "" : "border-red-500"}`} aria-invalid={!validSrc} placeholder="10.10.20.0/24" value={srcCidr} onChange={(e) => setSrcCidr(e.target.value.trim())} /></label>
           <p className="text-xs text-muted flex-1 min-w-[14rem]">{q.data?.note} Firewall filter: {firewallId ? "plan target" : "global selection"}.</p>
         </div>
         <Loading q={q} />

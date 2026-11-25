@@ -1,11 +1,11 @@
 """Database-side aggregations for dashboards, top-N pages, web/DNS analytics, explorer and investigations."""
 import asyncio
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import lru_cache
 
 from ..db.ch import ClickHouse
-from .filters import ALLOWED, DENIED, EventFilter, bucket_seconds, build_where, table
+from ..platform.eventquery import ALLOWED, DENIED, EventFilter, bucket_seconds, build_where, table
 
 ALLOWED_SQL = "(" + ",".join(f"'{a}'" for a in ALLOWED) + ")"
 DENIED_SQL = "(" + ",".join(f"'{a}'" for a in DENIED) + ")"
@@ -21,16 +21,7 @@ def _limit(n: int) -> int:
     return n if n in LIMITS else min(LIMITS, key=lambda x: abs(x - n))
 
 
-def _iso(v):
-    if isinstance(v, datetime):
-        return v.replace(tzinfo=timezone.utc).isoformat() if v.tzinfo is None else v.astimezone(timezone.utc).isoformat()
-    if isinstance(v, str) and len(v) >= 19 and v[4] == "-" and v[10] == " ":
-        return v.replace(" ", "T") + "Z"
-    return v
-
-
-def _clean(rows: list[dict]) -> list[dict]:
-    return [{k: _iso(v) for k, v in r.items()} for r in rows]
+from ..platform.eventquery import _clean, _iso, coverage  # noqa: E402,F401  (moved to the platform package)
 
 
 # Zero-fill every bucket of the requested window so charts show real gaps instead of compressing
@@ -140,13 +131,6 @@ async def data_start(ch: ClickHouse, categories: tuple[str, ...]) -> str | None:
     if not rows or not int(rows[0]["n"]):
         return None
     return _iso(rows[0]["m"])
-
-
-async def coverage(ch: ClickHouse) -> dict:
-    rows = await ch.aquery(f"SELECT category, min(event_time) AS first_event, max(event_time) AS last_event, "
-                           f"max(ingest_time) AS last_ingest, count() AS events, groupUniqArray(source) AS sources "
-                           f"FROM {table()} GROUP BY category")
-    return {r["category"]: _clean([r])[0] for r in rows}
 
 
 KPI_COUNT_AGGS = [

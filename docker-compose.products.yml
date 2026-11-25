@@ -1,0 +1,75 @@
+# Product separation, phase 4 (docs/architecture/MIGRATION_PLAN.md): Sentinel Grid (SIEM) and Sentinel NMS as their own
+# api / worker / web services, built from the same images. NOT used by scripts/deploy.sh: nothing here is deployed
+# until the phase-4 deployment is approved.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.products.yml up -d --build
+#
+# - The combined api / worker / web move to the "combined" profile, so they do not start next to the product services
+#   (no loop runs twice).
+# - Both products still use today's PostgreSQL and ClickHouse databases; phase 6 gives NMS its own.
+# - Notification delivery and retention still read shared tables, so exactly one worker runs them
+#   (WORKER_SHARED_JOBS=1 on grid-worker).
+# - Each web listens on its own host port here (GRID_WEB_PORT / NMS_WEB_PORT); the two host names come with the
+#   deployment (phase 4 step 5).
+# - The poller (SNMP), access gateway, ansible runner, traps and flows receivers are NMS services already; the syslog
+#   receiver and ingress relay stay shared until the relay fan-out (phase 6).
+
+x-product-api-command: &api-command
+  ["uvicorn", "app.main:create_product_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--no-server-header"]
+
+services:
+  api: { profiles: ["combined"] }
+  worker: { profiles: ["combined"] }
+  web: { profiles: ["combined"] }
+
+  poller:
+    environment: { PRODUCT: nms }        # SNMP polling: NMS loops and alert rules only
+
+  grid-api:
+    extends: { file: docker-compose.yml, service: api }
+    command: *api-command
+    environment: { PRODUCT: grid }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  nms-api:
+    extends: { file: docker-compose.yml, service: api }
+    command: *api-command
+    environment: { PRODUCT: nms }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  grid-worker:
+    extends: { file: docker-compose.yml, service: worker }
+    environment: { PRODUCT: grid, WORKER_SHARED_JOBS: "1" }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  nms-worker:
+    extends: { file: docker-compose.yml, service: worker }
+    environment: { PRODUCT: nms, WORKER_SHARED_JOBS: "0" }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  grid-web:
+    extends: { file: docker-compose.yml, service: web }
+    build: { context: ./frontend, args: { PRODUCT: grid } }
+    image: fortisiem-web-grid:1.0.0
+    ports: !override
+      - "${WEB_BIND_IP:-127.0.0.1}:${GRID_WEB_PORT:-8443}:8443"
+    volumes:
+      - ./deploy/products/upstream-grid.inc:/etc/nginx/conf.d/upstream.inc:ro,z
+    depends_on:
+      grid-api: { condition: service_healthy }
+
+  nms-web:
+    extends: { file: docker-compose.yml, service: web }
+    build: { context: ./frontend, args: { PRODUCT: nms } }
+    image: fortisiem-web-nms:1.0.0
+    ports: !override
+      - "${WEB_BIND_IP:-127.0.0.1}:${NMS_WEB_PORT:-9443}:8443"
+    volumes:
+      - ./deploy/products/upstream-nms.inc:/etc/nginx/conf.d/upstream.inc:ro,z
+    depends_on:
+      nms-api: { condition: service_healthy }
+      access: { condition: service_healthy }

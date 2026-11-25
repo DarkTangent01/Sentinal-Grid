@@ -1,0 +1,33 @@
+id: ZEEK-4005
+name: SSH or RDP to the internet on a non-standard port (Zeek)
+description: >
+  Zeek identified SSH or RDP by its protocol (not by port number) leaving the network on a port other than 22 / 3389.
+  Remote-access protocols on odd ports are a way around port-based firewall rules.
+version: 1
+severity: low
+confidence: medium
+category: command_and_control
+author: sentinel
+log_source: {category: zeek}
+detection:
+  selection:
+    - {event_subtype: conn, service: ssh, dst_port: {not_in: [22]}, src_ip: {internal: true}, dst_ip: {internal: false}, action: [SF, S1, S2, S3]}
+    - {event_subtype: conn, service: rdp, dst_port: {not_in: [3389]}, src_ip: {internal: true}, dst_ip: {internal: false}, action: [SF, S1, S2, S3]}
+  condition: {group_by: [src_ip, dst_ip], count: 1, timeframe: 30m}
+explanation: "{src_ip} → {dst_ip}: SSH / RDP on a non-standard port ({metric} connections in {timeframe})"
+data_sources: [Zeek conn.log with protocol detection]
+falsepositives:
+  - Hosting providers and Git services that publish SSH on another port (443, 2222)
+investigation:
+  - Who owns the destination, and does the user have a reason to administer a host there?
+mitre: {tactic: TA0011, techniques: [T1571]}
+tests:
+  - name: ssh on 443 outbound
+    events: [{event_subtype: conn, service: ssh, src_ip: 10.20.1.15, dst_ip: 203.0.113.9, dst_port: 443, action: SF}]
+    expect_alerts: 1
+  - name: ssh on 22
+    events: [{event_subtype: conn, service: ssh, src_ip: 10.20.1.15, dst_ip: 203.0.113.9, dst_port: 22, action: SF}]
+    expect_alerts: 0
+  - name: internal ssh on a custom port
+    events: [{event_subtype: conn, service: ssh, src_ip: 10.20.1.15, dst_ip: 10.20.9.9, dst_port: 2222, action: SF}]
+    expect_alerts: 0

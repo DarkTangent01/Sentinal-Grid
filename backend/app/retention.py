@@ -10,7 +10,7 @@ from .db.ch import ClickHouse
 from .db.models import RetentionPolicy, RetentionRun
 
 log = logging.getLogger("retention")
-DEFAULT_RETENTION_DAYS = {"traffic": 30, "dns": 30, "web": 90, "security": 365, "system": 365}
+DEFAULT_RETENTION_DAYS = {"traffic": 30, "dns": 30, "web": 90, "security": 365, "system": 365, "zeek": 30}
 _PART = re.compile(r"\('(\w+)',\s*(\d{8})\)")
 _PART_ID = re.compile(r"^[0-9A-Za-z_-]{1,128}$")
 

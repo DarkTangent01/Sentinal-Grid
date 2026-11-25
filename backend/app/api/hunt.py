@@ -15,9 +15,9 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..alerts.custom import evaluate as evaluate_detection
-from ..alerts.engine import CUSTOM_PREFIX
+from ..alerts.siem import CUSTOM_PREFIX
 from ..alerts.rules import TACTICS
-from ..analytics.filters import EventFilter
+from ..platform.eventquery import EventFilter
 from ..analytics.pipeline import PipelineError, compile_pipeline, run_pipeline, watchlist_names
 from ..automation import ACTIONS, TRIGGERS, execute, matches, facts, validate_actions
 from ..config import get_settings

@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, downloadUrl } from "../../lib/api";
 import { useTheme } from "../../lib/theme";
 import { getTimezone } from "../../lib/format";
 import { Chart, PALETTES, axisStyle } from "../../components/Chart";
-import { Card, Empty, Loading, Sev, TableWrap, Time, Trunc } from "../../components/ui";
+import { Card, Empty, Loading, rowProps, Sev, TableWrap, Time, Trunc } from "../../components/ui";
 import { Denied, Pager, RangeSelect, Status, useCan, useTacMeta } from "./common";
 
 const SHOW = ["auth_success", "auth_failure", "auth_backend_error", "authz_permit", "authz_deny", "acct_start", "acct_stop"];
@@ -89,14 +89,14 @@ export function Sessions() {
     {q.data && (!q.data.items.length ? <Empty text="No exec sessions recorded in this range." /> :
       <TableWrap><table className="tbl"><thead><tr><th>Started</th><th>Stopped</th><th>State</th><th>User</th><th>Device</th><th>Port / from</th><th className="num">Priv</th>
         <th className="num">Duration</th><th className="num">Commands</th></tr></thead>
-        <tbody>{q.data.items.map((x: any, i: number) => <>
-          <tr key={i} className="cursor-pointer" onClick={() => setOpen(open === i ? null : i)}><td><Time v={x.started} /></td><td><Time v={x.stopped} /></td><td><Status s={x.state === "closed" ? "succeeded" : x.state} /></td>
+        <tbody>{q.data.items.map((x: any, i: number) => <Fragment key={`${x.device_address}|${x.port}|${x.task_id}`}>
+          <tr aria-expanded={open === i} {...rowProps(() => setOpen(open === i ? null : i))}><td><Time v={x.started} /></td><td><Time v={x.stopped} /></td><td><Status s={x.state} /></td>
             <td>{x.username}</td><td className="text-xs">{x.device_name || x.device_address}<div className="text-muted">{x.vendor} {x.site}</div></td>
             <td className="text-xs">{x.port}<div className="text-muted">{x.remote}</div></td><td className="num">{x.priv_lvl ?? "—"}</td>
-            <td className="num">{x.elapsed_s != null ? `${Math.round(x.elapsed_s / 60)} min` : "—"}</td><td className="num">{x.commands.length}</td></tr>
-          {open === i && <tr key={`${i}c`}><td colSpan={9} className="bg-slate-900/30">{!x.commands.length ? <span className="text-xs text-muted">No command accounting for this session.</span> :
+            <td className="num">{x.elapsed_s == null ? "—" : x.elapsed_s < 60 ? `${x.elapsed_s} s` : `${Math.round(x.elapsed_s / 60)} min`}</td><td className="num">{x.commands.length}</td></tr>
+          {open === i && <tr><td colSpan={9} className="bg-slate-900/30">{!x.commands.length ? <span className="text-xs text-muted">No command accounting for this session.</span> :
             <table className="tbl"><tbody>{x.commands.map((c: any, j: number) => <tr key={j}><td><Time v={c.ts} /></td><td className="font-mono text-xs">{c.cmd}</td><td className="text-xs">{c.cmd_category}</td></tr>)}</tbody></table>}</td></tr>}
-        </>)}</tbody></table></TableWrap>)}
-    {q.data && <Pager total={q.data.items.length < 50 ? offset + q.data.items.length : offset + 51} limit={50} offset={offset} onChange={setOffset} />}
+        </Fragment>)}</tbody></table></TableWrap>)}
+    {q.data && <Pager hasMore={q.data.items.length >= 50} limit={50} offset={offset} onChange={setOffset} />}
   </Card>;
 }

@@ -86,7 +86,7 @@ function WhoBox({ onUser }: { onUser: (u: string) => void }) {
     <form onSubmit={(e) => { e.preventDefault(); setGo(ip.trim()); }}>
       <input aria-label="Who had this IP" className="input py-1 w-52 text-sm" placeholder="Who had IP… (VPN / public)" value={ip} onChange={(e) => setIp(e.target.value)} />
     </form>
-    {go && q.data && <div className="absolute right-0 z-20 mt-1 w-80 rounded border border-line bg-[var(--surface,#0f172a)] shadow-lg p-2 text-xs">
+    {go && q.data && <div className="absolute right-0 z-20 mt-1 w-80 rounded border border-line bg-panel shadow-lg p-2 text-xs">
       <div className="flex mb-1"><b className="flex-1">{go}</b><button className="text-muted" onClick={() => setGo("")}>✕</button></div>
       {q.data.sessions.length ? q.data.sessions.slice(0, 8).map((s: any, i: number) => <button key={i} className="block w-full text-left hover:bg-white/5 rounded px-1 py-0.5" onClick={() => { onUser(s.user); setGo(""); }}>
         <b>{s.user}</b> · <Time v={s.start} />{s.end ? <> – <Time v={s.end} /></> : <span className="text-emerald-300"> active</span>}</button>) : <span className="text-muted">No VPN session used this IP in the last 7 days.</span>}

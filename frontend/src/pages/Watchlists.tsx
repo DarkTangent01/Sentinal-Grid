@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, downloadUrl } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum } from "../lib/format";
-import { Card, Empty, Loading, Modal, TableWrap, Time, useDebounced } from "../components/ui";
+import { Card, Empty, Loading, Modal, Pager, TableWrap, Time, useDebounced } from "../components/ui";
 
 interface WL { id: number; name: string; description: string; kind: string; items: number; created_by: string; updated_at: string }
 const KIND_HINT: Record<string, string> = { ip: "IP addresses or CIDR ranges", domain: "domains (matches sub-domains too)", user: "user names (case-insensitive)", string: "any text (case-insensitive)" };
@@ -48,7 +48,6 @@ function Detail({ w, admin, onDeleted }: { w: WL; admin: boolean; onDeleted: () 
   const delItem = useMutation({ mutationFn: (iid: number) => api(`/watchlists/${w.id}/items/${iid}`, { method: "DELETE" }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["wl-items", w.id] }); qc.invalidateQueries({ queryKey: ["watchlists"] }); } });
   const del = useMutation({ mutationFn: () => api(`/watchlists/${w.id}`, { method: "DELETE" }), onSuccess: onDeleted });
-  const pages = items.data ? Math.max(1, Math.ceil(items.data.total / 100)) : 1;
   return (
     <Card title={<span className="font-mono">{w.name}</span>} right={<>
       <a className="btn" href={downloadUrl(`/watchlists/${w.id}/export.csv`)}>Export CSV</a>
@@ -64,8 +63,7 @@ function Detail({ w, admin, onDeleted }: { w: WL; admin: boolean; onDeleted: () 
         <input aria-label="Search items" className="input w-64" placeholder="Search value or label" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         <span className="text-xs text-muted">{fmtNum(items.data?.total)} item(s)</span>
         <span className="flex-1" />
-        <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button><span className="text-muted text-sm">{page}/{pages}</span>
-        <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>›</button>
+        <Pager className="" page={page} size={100} total={items.data?.total} onPage={setPage} />
       </div>
       <Loading q={items} />
       {items.data && !items.data.items.length && <Empty text={dq ? "No items match." : "Empty watchlist."} />}
@@ -95,8 +93,8 @@ function AddItems({ w, onClose }: { w: WL; onClose: () => void }) {
       <textarea aria-label="Items" className="input w-full h-48 font-mono text-xs" value={text} onChange={(e) => setText(e.target.value)} placeholder={w.kind === "ip" ? "10.0.0.5,Domain controller\n192.168.50.0/24,Lab network" : w.kind === "domain" ? "example.org,Partner" : "value,label"} />
       <div className="flex flex-wrap items-end gap-3 mt-2">
         <input type="file" accept=".csv,.txt,text/csv,text/plain" aria-label="Load CSV file" className="text-xs" onChange={onFile} />
-        <div><label className="label">Mode</label><select className="input" value={mode} onChange={(e) => setMode(e.target.value)}><option value="append">Append</option><option value="replace">Replace all items</option></select></div>
-        <div><label className="label">Expire after (hours, 0 = never)</label><input type="number" min={0} className="input w-28" value={ttl} onChange={(e) => setTtl(Number(e.target.value))} /></div>
+        <label className="block min-w-0"><span className="label">Mode</span><select className="input" value={mode} onChange={(e) => setMode(e.target.value)}><option value="append">Append</option><option value="replace">Replace all items</option></select></label>
+        <label className="block min-w-0"><span className="label">Expire after (hours, 0 = never)</span><input type="number" min={0} className="input w-28" value={ttl} onChange={(e) => setTtl(Number(e.target.value))} /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       {m.data && <div className="text-sm mt-2"><b className="text-emerald-300">{fmtNum(m.data.added)} added</b>, {fmtNum(m.data.skipped_existing)} already present
@@ -115,10 +113,10 @@ function CreateModal({ onClose }: { onClose: (id?: number) => void }) {
   return (
     <Modal title="New watchlist" onClose={() => onClose()}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div><label className="label">Name (letters, digits, _ — used in queries)</label><input className="input w-full font-mono" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vip_hosts" /></div>
-        <div><label className="label">Kind</label><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
-          {Object.entries(KIND_HINT).map(([k, v]) => <option key={k} value={k}>{k} — {v}</option>)}</select></div>
-        <div className="sm:col-span-2"><label className="label">Description</label><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
+        <label className="block min-w-0"><span className="label">Name (letters, digits, _ — used in queries)</span><input className="input w-full font-mono" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vip_hosts" /></label>
+        <label className="block min-w-0"><span className="label">Kind</span><select className="input w-full" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+          {Object.entries(KIND_HINT).map(([k, v]) => <option key={k} value={k}>{k} — {v}</option>)}</select></label>
+        <label className="sm:col-span-2 block min-w-0"><span className="label">Description</span><input className="input w-full" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
       </div>
       {m.error && <div role="alert" className="text-sm text-red-400 mt-2">{(m.error as Error).message}</div>}
       <button className="btn btn-primary mt-3" disabled={!f.name || m.isPending} onClick={() => m.mutate()}>Create</button>

@@ -184,7 +184,7 @@ async def test_utilization_alert_hysteresis_and_channel_change_rule(db, ch):
 
 
 # ------------------------------------------------------------------ APIs
-async def test_rf_api_views_rbac_and_site_filter(api, db, ch):  # noqa: F811
+async def test_rf_api_views_rbac_and_site_filter(api, db, ch, monkeypatch):  # noqa: F811
     ch.command("TRUNCATE TABLE rf_telemetry")
     wlc, cred = await _seed(db)
     for i in range(2):
@@ -206,7 +206,11 @@ async def test_rf_api_views_rbac_and_site_filter(api, db, ch):  # noqa: F811
     assert {x["ap"] for x in site} == {"WH1-AP-02"}                         # site filter excludes other sites' radios
     fx = (await an.get("/api/wireless/rf/findings", params={"site": "FC2"})).json()
     assert all(f["site"] == "FC2" for f in fx["findings"])
-    h = (await an.get("/api/wireless/rf/heatmap", params={"range": "7d"})).json()          # fixture polls are timestamped at T0
+    # fixture polls are timestamped at the fixed T0: pin the endpoint's clock to it (a 7-day window from the real
+    # date stopped containing T0 a week after the fixture was written)
+    import app.api.wireless_rf as WRF
+    monkeypatch.setattr(WRF, "_now", lambda: T0 + timedelta(hours=1))
+    h = (await an.get("/api/wireless/rf/heatmap", params={"range": "7d"})).json()
     assert len(h["rows"]) == 4 and h["cells"] and all(c["value"] is None or 0 <= c["value"] <= 100 for c in h["cells"])
     rid = next(x["id"] for x in (await an.get("/api/wireless/rf/radios")).json()["items"] if x["ap"] == "WH1-AP-01" and x["slot"] == 1)
     det = (await an.get(f"/api/wireless/rf/radios/{rid}")).json()

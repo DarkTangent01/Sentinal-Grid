@@ -1,5 +1,6 @@
 """Wireless Analysis (Cisco Catalyst 9800 WLC over SNMP): registry, collectors, normalisation, persistence, state
 machines, roaming, scoring, switch correlation, troubleshooting, alerts and APIs. Mocked SNMP only."""
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -233,3 +234,71 @@ async def test_wireless_api_rbac_identity_and_views(api, db, ch):
     t = await N.post("/api/wireless/troubleshoot", json={"scenario": "high_load", "ap_id": ap1["id"]})
     assert t.status_code == 200 and t.json()["evidence"]
     assert len((await N.get("/api/wireless/oids")).json()["items"]) == len(OBJ)
+
+
+async def test_controller_quick_poll_and_heavy_wireless_job_are_split(db):
+    """Regression (WLC-ZOMATO-1 quick metrics 4–6 min old): the client / RF tables (minutes of SNMP decoding) are a
+    separate job, so the controller's quick poll never waits for them, and neither job overwrites the other's state."""
+    wlc, cred = await _seed(db)
+    ch = _CH()
+    fast = await P.poll_switch(db, ch, wlc, cred, client=FakeClient(c9800(0)), now=T0, lane="fast")
+    assert fast["ok"] and "wireless_ap" in fast["groups"] and "wireless_radio" in fast["groups"]
+    assert not P.WIRELESS_HEAVY & set(fast["groups"])                         # no client / RF walks in the quick poll
+    assert wlc.vendor == "cisco" and P.split_wireless(wlc)
+    assert set(P.wireless_due(wlc, T0)) == P.WIRELESS_HEAVY
+    quick_success = wlc.last_success_at
+    w = await P.poll_wireless(db, ch, wlc, cred, client=FakeClient(c9800(0)), now=T0 + timedelta(seconds=10))
+    assert w["ok"] and set(w["groups"]) == P.WIRELESS_HEAVY & set(P.intervals_of(wlc))
+    assert P._aware(wlc.last_success_at) == P._aware(quick_success)                                # reachability stays with the quick poll
+    aps = {a.mac: a for a in (await db.execute(select(WirelessAp))).scalars()}
+    r5 = (await db.execute(select(WirelessRadio).where(WirelessRadio.ap_id == aps[AP1].id, WirelessRadio.slot == 1))).scalar_one()
+    assert r5.noise_dbm == -95                                                 # current channel taken from the stored radio
+    assert len((await db.execute(select(WirelessClient))).scalars().all()) == 3
+    assert wlc.health["wireless"]["clients"] == 3 and not P.wireless_due(wlc, T0 + timedelta(seconds=20))
+    run = (await db.execute(select(P.SwitchPollRun).where(P.SwitchPollRun.kind == "wireless"))).scalars().one()
+    assert run.ok and run.switch_id == wlc.id
+    # the next quick poll keeps what the wireless job wrote
+    await P.poll_switch(db, ch, wlc, cred, client=FakeClient(c9800(1)), now=T0 + timedelta(seconds=40), lane="fast")
+    assert wlc.health["wireless"]["clients"] == 3
+    assert all(g in wlc.group_state for g in P.WIRELESS_HEAVY & set(P.intervals_of(wlc)))
+    assert not P.wireless_due(wlc, T0 + timedelta(seconds=40))
+
+
+async def test_worker_runs_the_controller_heavy_job_beside_its_quick_poll(db, monkeypatch):
+    from app.db import pg as _pg
+    wlc, cred = await _seed(db)
+    wlc.vendor, wlc.state = "cisco", "up"
+    await db.commit()
+    gate, lanes = asyncio.Event(), []
+
+    async def fake_poll(s, ch, sw, cred_, *, client=None, now=None, lane="all", **kw):
+        lanes.append(lane)
+        sw.last_poll_at = now
+        await s.commit()
+        return {"ok": True}
+
+    async def slow_wireless(s, ch, sw, cred_, *, client=None, now=None):
+        lanes.append("wireless")
+        await gate.wait()                                     # minutes of table walks
+        return {"ok": True}
+    monkeypatch.setattr(P, "poll_switch", fake_poll)
+    monkeypatch.setattr(P, "poll_wireless", slow_wireless)
+    try:
+        r = await P.run_due(None, _pg.session_factory())
+        assert r["started"] == 1 and r["wireless"] == 1
+        await asyncio.sleep(0.05)
+        assert sorted(lanes) == ["fast", "wireless"] and P._inflight_wireless == {wlc.id}
+        async with _pg.session_factory()() as s:
+            assert await P.claim_wireless(s, datetime.now(timezone.utc), 900) == []    # leased: no second wireless job
+        for _ in range(3):                                   # quick polls continue while the wireless job runs
+            async with _pg.session_factory()() as s:
+                await s.execute(P.update(Switch).where(Switch.id == wlc.id).values(last_poll_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+                await s.commit()
+            await P.run_due(None, _pg.session_factory())
+            await asyncio.sleep(0.05)
+        assert lanes.count("fast") == 4 and lanes.count("wireless") == 1
+    finally:
+        gate.set()
+        await asyncio.gather(*list(P._background), return_exceptions=True)
+    async with _pg.session_factory()() as s:
+        assert (await s.get(Switch, wlc.id)).wireless_lease_until is None and not P._inflight_wireless

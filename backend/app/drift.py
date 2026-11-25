@@ -196,9 +196,9 @@ async def raise_risk_alerts(s: AsyncSession, fw: Firewall, vdom: str, risks: lis
             for r in risks]
     touched: list = []
     await upsert_detections(s, rule, dets, now, touched)
-    from .incidents import correlate_alerts
+    # risky-change alerts are NMS faults: they are no longer correlated into SIEM security incidents
+    # (docs/architecture/REMOVAL_LOG.md)
     from .notify import alert_created
-    await correlate_alerts(s, [a for a, _ in touched], now)
     for a, created in touched:
         if created:
             await alert_created(s, a)

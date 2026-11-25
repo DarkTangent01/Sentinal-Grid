@@ -1,0 +1,163 @@
+# ClickHouse (same image and digest as docker-compose.yml) as uid 101 from the start: no capability, read-only root
+# filesystem. The entrypoint's generated admin-user file, the log directory and /tmp are emptyDirs. nofile limits come
+# from the node's container runtime (set LimitNOFILE / default ulimits there); Kubernetes has no per-pod ulimit.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: sentinel
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clickhouse
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      serviceAccountName: clickhouse
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 120
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:24.8.14.39@sha256:1ffa82edee000a42c09313bd9f1293d94c570aee74babc1b3ca9983a35fa597b
+        env:
+        - name: CLICKHOUSE_DB
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: CLICKHOUSE_DB
+        - name: CLICKHOUSE_USER
+          value: siem
+        - name: CLICKHOUSE_PASSWORD_FILE
+          value: /run/secrets/clickhouse_password
+        - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+          value: '1'
+        ports:
+        - name: http
+          containerPort: 8123
+        - name: native
+          containerPort: 9000
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: '1'
+            memory: 4Gi
+            ephemeral-storage: 64Mi
+          limits:
+            cpu: '4'
+            memory: 8Gi
+            ephemeral-storage: 1Gi
+        startupProbe:
+          httpGet:
+            path: /ping
+            port: http
+          periodSeconds: 5
+          failureThreshold: 120
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          periodSeconds: 20
+          failureThreshold: 6
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: config
+          mountPath: /etc/clickhouse-server/config.d/siem.xml
+          subPath: siem.xml
+          readOnly: true
+        - name: users
+          mountPath: /etc/clickhouse-server/users.d
+        - name: logs
+          mountPath: /var/log/clickhouse-server
+        - name: tmp
+          mountPath: /tmp
+        - name: backups
+          mountPath: /backups
+        - name: secrets
+          mountPath: /run/secrets
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: clickhouse-config
+      - name: users
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      - name: logs
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
+      - name: backups
+        persistentVolumeClaim:
+          claimName: clickhouse-backups
+      - name: secrets
+        secret:
+          secretName: sentinel-db-secrets
+          defaultMode: 288
+          items:
+          - key: clickhouse_password
+            path: clickhouse_password
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app.kubernetes.io/part-of: sentinel
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 500Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: clickhouse
+  ports:
+  - name: http
+    port: 8123
+    targetPort: http
+  - name: native
+    port: 9000
+    targetPort: native
+  clusterIP: None

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useData } from "../lib/context";
 import { fmtBytes, fmtNum, fmtPct0 } from "../lib/format";
-import { Card, Empty, Kpi, Loading, TableWrap, Tabs, Trunc, useExplore } from "../components/ui";
+import { Card, Empty, Kpi, Loading, rowProps, TableWrap, Tabs, Trunc, useExplore } from "../components/ui";
 import { WorldMap } from "../components/WorldMap";
 
 export function Geo() {
@@ -35,13 +35,13 @@ export function Geo() {
       <div className="grid-cards xl:grid-cols-2">
         <Card title={dir === "dst" ? "Destination countries" : "Source countries"}>
           {rows.length ? <TableWrap maxH="max-h-96"><table className="tbl"><thead><tr><th className="w-full">Country</th><th className="num">Events</th><th className="num">Denied</th>{dir === "dst" ? <><th className="num">Bytes</th><th className="num">Hosts</th></> : <th className="num">Sources</th>}</tr></thead>
-            <tbody>{rows.map((r: any) => <tr key={r.country} tabIndex={0} onClick={() => explore({ ql: `${dir}_country:"${r.country}"` })}>
+            <tbody>{rows.map((r: any) => <tr key={r.country} {...rowProps(() => explore({ ql: `${dir}_country:"${r.country}"` }))}>
               <td>{r.country}</td><td className="num">{fmtNum(r.events)}</td><td className="num text-red-400">{fmtNum(r.denied)}</td>
               {dir === "dst" ? <><td className="num">{fmtBytes(r.bytes)}</td><td className="num">{fmtNum(r.hosts)}</td></> : <td className="num">{fmtNum(r.sources)}</td>}</tr>)}</tbody></table></TableWrap> : <Empty />}
         </Card>
         <Card title="Top destination networks (ASN)">
           {d?.asn?.length ? <TableWrap maxH="max-h-96"><table className="tbl"><thead><tr><th>ASN</th><th className="w-full">Organisation</th><th className="num">Bytes</th><th className="num">Events</th><th className="num">Hosts</th></tr></thead>
-            <tbody>{d.asn.map((r: any) => <tr key={r.asn} tabIndex={0} onClick={() => explore({ ql: `asn:${r.asn}` })}><td className="font-mono text-xs">AS{r.asn}</td><td><Trunc text={r.org} max="max-w-[20rem]" /></td>
+            <tbody>{d.asn.map((r: any) => <tr key={r.asn} {...rowProps(() => explore({ ql: `asn:${r.asn}` }))}><td className="font-mono text-xs">AS{r.asn}</td><td><Trunc text={r.org} max="max-w-[20rem]" /></td>
               <td className="num">{fmtBytes(r.bytes)}</td><td className="num">{fmtNum(r.events)}</td><td className="num">{fmtNum(r.hosts)}</td></tr>)}</tbody></table></TableWrap>
             : <Empty text={st.data?.available ? "No ASN data in this range." : "ASN data needs a GeoIP ASN database (GeoLite2-ASN or DB-IP ASN Lite)."} />}
         </Card>

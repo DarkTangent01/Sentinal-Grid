@@ -1,5 +1,14 @@
+# the image copies app/, rules/, migrations/, alembic.ini and requirements.txt (Dockerfile); nothing else is needed
 tests
 .pytest_cache
+.ruff_cache
 __pycache__
 *.pyc
 .claude
+.venv
+.env*
+*.db
+*.pem
+*.key
+*.crt
+.git

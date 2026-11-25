@@ -4,18 +4,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { fmtNum } from "../../lib/format";
-import { Card, Empty, Kpi, Loading, Modal, TableWrap, Tabs, Time } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, Modal, rowProps, TableWrap, Tabs, Time } from "../../components/ui";
 import { MetricStatus } from "../switches/common";
 import { SwitchForm } from "../switches/Admin";
 import { Band, RfFlags, WState, dash, dbm, dur, pctv, useWlGo, useWlMeta } from "./common";
 import { ApsTab } from "./Aps";
 import { RfEvents, RfFindings, RfFrequency, RfHeatmap, RfOverview, RfRadios } from "./Rf";
 import { ClientsTab, EventsTab, RoamingTab, TroubleshootTab, WlansTab } from "./Clients";
+import { FloorsTab, RoguesTab } from "./Extra";
+import { IntegrationsTab } from "./Integrations";
 
 export const RF_TABS: [string, string][] = [["rf-overview", "RF Overview"], ["rf-frequency", "Frequency Distribution"], ["rf-heatmap", "Utilisation Heatmap"],
   ["rf-radios", "AP Radio Details"], ["rf-events", "RF Events"], ["rf-findings", "RF Findings"]];
 export const WL_TABS: [string, string][] = [["overview", "Wireless Overview"], ["controllers", "WLC Inventory"], ["aps", "Access Points"], ...RF_TABS,
-  ["clients", "Clients"], ["wlans", "WLAN / SSID"], ["roaming", "Roaming"], ["events", "Events"], ["troubleshoot", "Troubleshooting"], ["health", "Monitoring Health"]];
+  ["clients", "Clients"], ["wlans", "WLAN / SSID"], ["roaming", "Roaming"], ["floors", "Floor Experience"], ["rogues", "Rogue APs"], ["events", "Events"], ["troubleshoot", "Troubleshooting"], ["health", "Monitoring Health"], ["integrations", "Integrations"]];
 
 export function Wireless() {
   const [sp, setSp] = useSearchParams();
@@ -36,9 +38,12 @@ export function Wireless() {
       {tab === "clients" && <ClientsTab />}
       {tab === "wlans" && <WlansTab />}
       {tab === "roaming" && <RoamingTab />}
+      {tab === "floors" && <FloorsTab />}
+      {tab === "rogues" && <RoguesTab />}
       {tab === "events" && <EventsTab />}
       {tab === "troubleshoot" && <TroubleshootTab />}
       {tab === "health" && <Health />}
+      {tab === "integrations" && <IntegrationsTab />}
     </div>
   </div>;
 }
@@ -89,7 +94,7 @@ function Overview() {
       <div className="grid gap-4 xl:grid-cols-3">
         <Card title="AP status by site" bodyClass="p-0">{!d.ap_status_by_site.length ? <Empty text="No APs." /> :
           <TableWrap><table className="tbl"><thead><tr><th>Site</th><th className="num">Up</th><th className="num">Degraded</th><th className="num">Down</th><th className="num">Other</th></tr></thead>
-            <tbody>{d.ap_status_by_site.map((r: any) => <tr key={r.site} className="cursor-pointer hover:bg-white/5" onClick={() => go("aps", { site: r.site })}><td>{r.site}</td>
+            <tbody>{d.ap_status_by_site.map((r: any) => <tr key={r.site} {...rowProps(() => go("aps", { site: r.site }))}><td>{r.site}</td>
               <td className="num">{r.up || 0}</td><td className="num">{r.degraded || 0}</td><td className="num text-red-300">{r.down || 0}</td>
               <td className="num">{(r.unknown || 0) + (r.maintenance || 0)}</td></tr>)}</tbody></table></TableWrap>}</Card>
         <Card title="Clients by SSID" bodyClass="p-0"><Dist rows={d.clients_by_ssid} k="ssid" onPick={(v) => go("clients", { ssid: v })} /></Card>
@@ -100,12 +105,12 @@ function Overview() {
         <Card title="RF health by band" bodyClass="p-0">{!d.rf_by_band.length ? <Empty text="No radio data." /> :
           <TableWrap><table className="tbl"><thead><tr><th>Band</th><th className="num">Radios up</th><th className="num">High util.</th><th className="num">Avg util.</th>
             <th className="num">Avg noise</th><th className="num">Avg 802.11 interference</th></tr></thead>
-            <tbody>{d.rf_by_band.map((r: any) => <tr key={r.band} className="cursor-pointer hover:bg-white/5" onClick={() => go("rf-frequency", { band: r.band })}><td><Band b={r.band} /></td>
+            <tbody>{d.rf_by_band.map((r: any) => <tr key={r.band} {...rowProps(() => go("rf-frequency", { band: r.band }))}><td><Band b={r.band} /></td>
               <td className="num">{r.up} / {r.radios}</td><td className="num">{r.high_util}</td><td className="num">{pctv(r.avg_util)}</td><td className="num">{dbm(r.avg_noise_dbm)}</td>
               <td className="num">{pctv(r.avg_interference_pct)}</td></tr>)}</tbody></table></TableWrap>}</Card>
         <Card title="Worst RF conditions" bodyClass="p-0">{!d.worst_radios.length ? <Empty text="No radio is past an RF threshold." /> :
           <TableWrap><table className="tbl"><thead><tr><th>AP / radio</th><th>Band</th><th className="num">Ch</th><th className="num">Util.</th><th className="num">Noise</th><th>Issues</th></tr></thead>
-            <tbody>{d.worst_radios.map((r: any) => <tr key={r.id} className="cursor-pointer hover:bg-white/5" onClick={() => go("aps", { ap: r.ap_id })}>
+            <tbody>{d.worst_radios.map((r: any) => <tr key={r.id} {...rowProps(() => go("aps", { ap: r.ap_id }))}>
               <td>{r.ap} <span className="text-muted text-2xs">slot {r.slot}</span></td><td><Band b={r.band} /></td><td className="num">{dash(r.channel)}</td>
               <td className="num">{pctv(r.channel_util_pct)}</td><td className="num">{dbm(r.noise_dbm)}</td><td><RfFlags f={r.flags} /></td></tr>)}</tbody></table></TableWrap>}</Card>
       </div>
@@ -114,11 +119,11 @@ function Overview() {
           {([["Poor RSSI", "poor_rssi", d.client_experience.poor_rssi], ["Low SNR", "low_snr", d.client_experience.low_snr],
             ["On a radio with high retries", "", d.client_experience.high_retry_radio_clients], ["Repeated disconnects (≥ 3)", "disconnects", d.client_experience.repeat_disconnects],
             ["Frequent roaming (24 h)", "roaming", d.client_experience.frequent_roamers]] as [string, string, number][]).map(([l, p, v]) =>
-            <tr key={l} className={p ? "cursor-pointer hover:bg-white/5" : ""} onClick={() => p && go(p === "roaming" ? "roaming" : "clients", p === "roaming" ? {} : { problem: p })}>
+            <tr key={l} {...(p ? rowProps(() => go(p === "roaming" ? "roaming" : "clients", p === "roaming" ? {} : { problem: p })) : {})}>
               <td>{l}</td><td className="num font-semibold">{fmtNum(v)}</td></tr>)}</tbody></table></TableWrap></Card>
         <Card title="Recent wireless events" bodyClass="p-0" right={<button className="link text-xs" onClick={() => go("events")}>All events →</button>}>
           {!d.recent_events.length ? <Empty text="No events yet." /> : <TableWrap maxH="max-h-72"><table className="tbl"><tbody>{d.recent_events.map((e: any) =>
-            <tr key={e.id}><td className="text-xs whitespace-nowrap"><Time v={e.at} /></td><td className="text-xs">{e.kind.replace(/_/g, " ")}</td><td className="text-xs">{e.detail}</td></tr>)}</tbody></table></TableWrap>}
+            <tr key={e.id}><td className="text-xs whitespace-nowrap"><Time v={e.at} /></td><td className="text-xs">{e.kind.replace(/_/g, " ")}</td><td className="text-xs cell-wrap min-w-[14rem]">{e.detail}</td></tr>)}</tbody></table></TableWrap>}
         </Card>
       </div>
     </>)}
@@ -128,7 +133,7 @@ function Overview() {
 function Dist({ rows, k, onPick }: { rows: any[]; k: string; onPick: (v: string) => void }) {
   if (!rows.length) return <Empty text="No clients." />;
   const max = Math.max(...rows.map((r) => r.clients));
-  return <TableWrap maxH="max-h-60"><table className="tbl"><tbody>{rows.map((r) => <tr key={r[k]} className="cursor-pointer hover:bg-white/5" onClick={() => onPick(r[k])}>
+  return <TableWrap maxH="max-h-60"><table className="tbl"><tbody>{rows.map((r) => <tr key={r[k]} {...rowProps(() => onPick(r[k]))}>
     <td className="w-1/2 truncate">{r[k]}</td><td><div className="h-2 rounded bg-teal-500/60" style={{ width: `${Math.max(4, (100 * r.clients) / max)}%` }} /></td>
     <td className="num">{r.clients}</td></tr>)}</tbody></table></TableWrap>;
 }
@@ -180,10 +185,10 @@ function ThresholdForm({ w, onClose }: { w: any; onClose: () => void }) {
     ["retry_pct", "Retry rate (%)"], ["ap_clients_max", "AP client overload"], ["roams_per_hour", "Roams per hour"], ["rate_poor_mbps", "Low data rate (Mbit/s)"]];
   return <Modal title={`Wireless thresholds — ${w.name}`} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-2">
-      {fields.map(([k, l]) => <div key={k}><label className="label">{l} <span className="text-muted">(default {d[k]})</span></label>
-        <input className="input w-full" type="number" placeholder={String(d[k] ?? "")} onChange={(e) => setV({ ...v, [k]: e.target.value === "" ? undefined : Number(e.target.value) })} /></div>)}
-      {["2.4", "5", "6"].map((b) => <div key={b}><label className="label">Channel utilisation {b} GHz (%) <span className="text-muted">(default {d.channel_util_pct?.[b]})</span></label>
-        <input className="input w-full" type="number" onChange={(e) => setV({ ...v, channel_util_pct: { ...(v.channel_util_pct || {}), [b]: Number(e.target.value) } })} /></div>)}
+      {fields.map(([k, l]) => <label key={k} className="block min-w-0"><span className="label">{l} <span className="text-muted">(default {d[k]})</span></span>
+        <input className="input w-full" type="number" placeholder={String(d[k] ?? "")} onChange={(e) => setV({ ...v, [k]: e.target.value === "" ? undefined : Number(e.target.value) })} /></label>)}
+      {["2.4", "5", "6"].map((b) => <label key={b} className="block min-w-0"><span className="label">Channel utilisation {b} GHz (%) <span className="text-muted">(default {d.channel_util_pct?.[b]})</span></span>
+        <input className="input w-full" type="number" onChange={(e) => setV({ ...v, channel_util_pct: { ...(v.channel_util_pct || {}), [b]: Number(e.target.value) } })} /></label>)}
     </div>
     {save.error && <div role="alert" className="text-sm text-red-400 mt-2">{(save.error as Error).message}</div>}
     <button className="btn btn-primary mt-3" disabled={save.isPending} onClick={() => save.mutate()}>Save</button>

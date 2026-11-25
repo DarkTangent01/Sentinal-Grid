@@ -8,7 +8,7 @@ from app.analytics.ql import QLError, compile_ql
 from app.compliance import evaluate
 from app.drift import assess_risks, diff
 from app.enrich.enricher import Enricher
-from app.enrich.geo import GeoResolver
+from app.platform.geoip import GeoResolver
 from app.enrich.ti import IndicatorSet, parse_feed
 from app.incidents import compute
 from app.notify import build_request, in_quiet_hours

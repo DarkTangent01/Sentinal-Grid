@@ -1,0 +1,84 @@
+# Application data claims (the databases' own claims are in their StatefulSets). No hostPath anywhere. The storage
+# class comes from the cluster default or the overlay; pick an encrypted class in production. Claims are never deleted by
+# the deployment procedure (k8s/README.md).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-backups
+  labels:
+    app.kubernetes.io/part-of: sentinel
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ingress-spool
+  labels:
+    app.kubernetes.io/part-of: sentinel
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: syslog-deadletter
+  labels:
+    app.kubernetes.io/part-of: sentinel
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: worker-deadletter
+  labels:
+    app.kubernetes.io/part-of: sentinel
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tacacs-config
+  labels:
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: 'shared by tacacs (rw), worker (rw) and api (ro): needs a ReadWriteMany class in production'
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tacacs-logs
+  labels:
+    app.kubernetes.io/part-of: sentinel
+  annotations:
+    sentinel/note: 'written by tacacs, read by the worker: ReadWriteMany in production'
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi

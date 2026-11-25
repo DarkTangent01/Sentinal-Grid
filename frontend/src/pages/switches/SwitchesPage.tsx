@@ -4,10 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api, downloadUrl } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { fmtNum } from "../../lib/format";
-import { Card, Empty, Kpi, Loading, Sev, TableWrap, Tabs, Time, Trunc, rowProps, useDebounced } from "../../components/ui";
+import { Card, Empty, Kpi, Loading, Pager, rowProps, Sev, TableWrap, Tabs, Time, Trunc, useDebounced } from "../../components/ui";
 import { Bps, Flags, Fresh, Oper, RangeSelect, StateDot, Util, fmtPctOrDash, fmtUptime, fmtWatts, statusTone } from "./common";
 import { AddSwitch, SwitchSettings } from "./Admin";
 import { Topology } from "./Topology";
+import { L3Topology } from "./L3Topology";
 
 const TABS: [string, string][] = [["overview", "Overview"], ["inventory", "Inventory"], ["topology", "Topology"], ["interfaces", "Interfaces"], ["events", "Events"],
   ["settings", "Settings"]];
@@ -54,7 +55,7 @@ export function Switches() {
       </div>}
       {f.tab === "overview" && <Overview f={f} />}
       {f.tab === "inventory" && <Inventory f={f} />}
-      {f.tab === "topology" && <Topology site={f.site} />}
+      {f.tab === "topology" && <TopologyLayers site={f.site} />}
       {f.tab === "interfaces" && <AllInterfaces f={f} />}
       {f.tab === "events" && <Events f={f} />}
       {f.tab === "settings" && me.role === "admin" && <SwitchSettings />}
@@ -187,8 +188,7 @@ function Inventory({ f }: { f: F }) {
           <td className="num">{r.alerts_open ? <Sev s={r.alert_severity} /> : "0"}</td>
           <td className="num">{r.coverage_pct == null ? "—" : `${r.coverage_pct.toFixed(0)}%`}</td>
         </tr>)}</tbody></table></TableWrap>)}
-    {q.data && q.data.total > 100 && <div className="flex gap-2 p-2"><button className="btn" disabled={!page} onClick={() => setPage(page - 1)}>Previous</button>
-      <button className="btn" disabled={(page + 1) * 100 >= q.data.total} onClick={() => setPage(page + 1)}>Next</button></div>}
+    {q.data && <Pager page={page + 1} size={100} total={q.data.total} onPage={(p) => setPage(p - 1)} />}
   </Card>;
 }
 
@@ -223,8 +223,7 @@ function AllInterfaces({ f }: { f: F }) {
           <td className="num">{r.in_errors == null && r.out_errors == null ? "—" : fmtNum((r.in_errors || 0) + (r.out_errors || 0))}</td>
           <td className="num">{r.crc == null ? "—" : fmtNum(r.crc)}</td><td className="num">{r.discards == null ? "—" : fmtNum(r.discards)}</td><td><Flags f={r.flags} /></td>
         </tr>)}</tbody></table></TableWrap>)}
-    {q.data && q.data.total > 100 && <div className="flex gap-2 p-2"><button className="btn" disabled={!page} onClick={() => setPage(page - 1)}>Previous</button>
-      <button className="btn" disabled={(page + 1) * 100 >= q.data.total} onClick={() => setPage(page + 1)}>Next</button></div>}
+    {q.data && <Pager page={page + 1} size={100} total={q.data.total} onPage={(p) => setPage(p - 1)} />}
   </Card>;
 }
 
@@ -249,7 +248,18 @@ function Events({ f }: { f: F }) {
       {["informational", "low", "medium", "high", "critical"].map((k) => <option key={k}>{k}</option>)}</select></>}>
     <Loading q={q} />
     {q.data && <EventTable rows={q.data.items} />}
-    {q.data && q.data.total > 200 && <div className="flex gap-2 p-2"><button className="btn" disabled={!page} onClick={() => setPage(page - 1)}>Previous</button>
-      <button className="btn" disabled={(page + 1) * 200 >= q.data.total} onClick={() => setPage(page + 1)}>Next</button></div>}
+    {q.data && <Pager page={page + 1} size={200} total={q.data.total} onPage={(p) => setPage(p - 1)} />}
   </Card>;
+}
+
+
+function TopologyLayers({ site }: { site: string }) {
+  const [layer, setLayer] = useState<"l2" | "l3">("l2");
+  return <div className="space-y-3">
+    <div className="flex gap-1" role="tablist" aria-label="Topology layer">
+      {([["l2", "Layer 2 (LLDP / CDP)"], ["l3", "Layer 3 & WAN (OSPF, BGP, IPsec, ISP)"]] as const).map(([k, l]) =>
+        <button key={k} role="tab" aria-selected={layer === k} className={`btn py-1 ${layer === k ? "btn-primary" : ""}`} onClick={() => setLayer(k)}>{l}</button>)}
+    </div>
+    {layer === "l2" ? <Topology site={site} /> : <L3Topology site={site} />}
+  </div>;
 }

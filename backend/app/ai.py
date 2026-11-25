@@ -153,3 +153,57 @@ async def summarize_incident(payload: dict) -> dict:
     text, model = await _call([{"type": "text", "text": SUMMARY_SYSTEM}],
                               [{"role": "user", "content": f"<incident_data>\n{data}\n</incident_data>"}], None, 8000, "medium")
     return {"summary": text.strip(), "model": model}
+
+
+ALERT_SYSTEM = """You are a senior SOC analyst explaining one alert to another analyst. Use only the investigation brief provided
+(it was assembled from the SIEM's stored alert, events, asset and threat-intelligence records). Answer under these headings:
+What happened / Why it was detected / Assets and users involved / Supporting evidence / Potential impact /
+ATT&CK context / What to check next.
+Rules: every factual statement about activity must cite the event id and timestamp it comes from, as [event <id> @ <time>],
+or the alert id as [alert <id>]; if the brief has no evidence for something, say it is not in the data instead of inferring it.
+An alert is a lead, not a verdict: do not state that the activity is malicious unless the evidence shows it.
+The SIEM is read-only toward firewalls: phrase containment as a recommendation that needs approval. Under 350 words."""
+
+HUNT_SCHEMA = {
+    "type": "object",
+    "properties": {"hunts": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "why": {"type": "string", "description": "what finding this would confirm or rule out"},
+                       "query": {"type": "string", "description": "one pipeline query"}, "technique": {"type": "string", "description": "ATT&CK technique id or empty"}},
+        "required": ["title", "why", "query", "technique"], "additionalProperties": False}}},
+    "required": ["hunts"], "additionalProperties": False,
+}
+
+
+async def explain_alert(brief: dict) -> dict:
+    """Narrative for one alert from its investigation brief (app/investigate_brief.py). The brief is the only input:
+    the model sees no data the analyst cannot see on the same page, and executes nothing."""
+    if not get_settings().ai_allow_data_sharing:
+        raise AIError("alert explanations send alert and event data to the AI service; an administrator must set AI_ALLOW_DATA_SHARING=true")
+    data = json.dumps(brief, default=str, sort_keys=True)[:60_000]
+    text, model = await _call([{"type": "text", "text": ALERT_SYSTEM}],
+                              [{"role": "user", "content": f"<investigation_brief>\n{data}\n</investigation_brief>"}], None, 8000, "medium")
+    return {"explanation": text.strip(), "model": model}
+
+
+async def suggest_hunts(context: dict, watchlists: list[str]) -> dict:
+    """Hunting queries suggested from detection names, ATT&CK techniques and threat-intel categories (no entities, no
+    event data are sent). Every query is compiled by the same allow-listing compiler as hand-written ones; a query
+    that does not compile is dropped and reported, never run. The analyst decides what to run."""
+    system = [{"type": "text", "text": CATALOGUE, "cache_control": {"type": "ephemeral"}}]
+    ask = ("Suggest up to 6 threat-hunting queries for this environment. Each must look for activity that would confirm, extend or rule out "
+           "the detections below, or cover an ATT&CK technique listed as a gap. Prefer aggregations that end with sort and head.\n"
+           f"<context>\n{json.dumps(context, default=str, sort_keys=True)[:8000]}\n</context>")
+    text, model = await _call(system, [{"role": "user", "content": ask}], HUNT_SCHEMA, 6000, "medium")
+    try:
+        hunts = json.loads(text)["hunts"]
+    except (ValueError, KeyError, TypeError):
+        raise AIError("the model returned an unreadable answer") from None
+    ok, dropped = [], []
+    for h in hunts[:8]:
+        try:
+            compile_pipeline(h["query"], {n: {"kind": "string", "values": []} for n in watchlists})
+            ok.append(h)
+        except PipelineError as e:
+            dropped.append({"title": h.get("title", ""), "error": str(e)[:200]})
+    return {"hunts": ok, "dropped": dropped, "model": model}

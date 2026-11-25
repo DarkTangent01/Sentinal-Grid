@@ -1,5 +1,7 @@
 # SIEM gap analysis, 2026-11-02
 
+**Update 2026-11-16:** most open rows below are addressed in [SIEM_TRANSFORMATION.md](SIEM_TRANSFORMATION.md): Zeek, new formats, HTTP ingestion, ingestion accounting, sequence rules, ATT&CK coverage, threat-intel connectors, entity risk, incident lifecycle, response approvals and SOC dashboards.
+
 Statuses:
 
 | Status | Meaning |

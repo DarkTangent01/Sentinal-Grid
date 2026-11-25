@@ -6,60 +6,76 @@ import { FilterProvider, Me, MeCtx } from "./lib/context";
 import { setTimezone } from "./lib/format";
 import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
-const Dashboard = page(() => import("./pages/Dashboard"), "Dashboard");
-const Sources = page(() => import("./pages/TopN"), "Sources");
-const Destinations = page(() => import("./pages/TopN"), "Destinations");
-const Ports = page(() => import("./pages/TopN"), "Ports");
-const Web = page(() => import("./pages/Web"), "Web");
-const Dns = page(() => import("./pages/Dns"), "Dns");
-const Security = page(() => import("./pages/Security"), "Security");
-const Alerts = page(() => import("./pages/Alerts"), "Alerts");
-const Explorer = page(() => import("./pages/Explorer"), "Explorer");
-const Investigate = page(() => import("./pages/Investigate"), "Investigate");
-const Firewalls = page(() => import("./pages/Firewalls"), "Firewalls");
-const Settings = page(() => import("./pages/Settings"), "Settings");
-const Hardening = page(() => import("./pages/Hardening"), "Hardening");
-const Policies = page(() => import("./pages/Policies"), "Policies");
-const PolicyDetail = page(() => import("./pages/PolicyDetail"), "PolicyDetail");
-const Shadow = page(() => import("./pages/Shadow"), "Shadow");
-const IncidentDetail = page(() => import("./pages/Incidents"), "IncidentDetail");
-const Incidents = page(() => import("./pages/Incidents"), "Incidents");
-const ThreatIntel = page(() => import("./pages/ThreatIntel"), "ThreatIntel");
-const Assets = page(() => import("./pages/Assets"), "Assets");
-const Geo = page(() => import("./pages/Geo"), "Geo");
-const Vpn = page(() => import("./pages/Vpn"), "Vpn");
-const Compliance = page(() => import("./pages/Compliance"), "Compliance");
-const Drift = page(() => import("./pages/Drift"), "Drift");
-const Notifications = page(() => import("./pages/Notifications"), "Notifications");
-const Searches = page(() => import("./pages/Searches"), "Searches");
-const Reports = page(() => import("./pages/Reports"), "Reports");
-const Search = page(() => import("./pages/Search"), "Search");
-const Detections = page(() => import("./pages/Detections"), "Detections");
-const WorkbookView = page(() => import("./pages/Workbooks"), "WorkbookView");
-const Workbooks = page(() => import("./pages/Workbooks"), "Workbooks");
-const Watchlists = page(() => import("./pages/Watchlists"), "Watchlists");
-const Hunting = page(() => import("./pages/Hunting"), "Hunting");
-const Automation = page(() => import("./pages/Automation"), "Automation");
-const EntityGraph = page(() => import("./pages/EntityGraph"), "EntityGraph");
-const Isp = page(() => import("./pages/Isp"), "Isp");
-const FirewallHealth = page(() => import("./pages/FirewallHealth"), "FirewallHealth");
-const VpnTunnels = page(() => import("./pages/VpnTunnels"), "VpnTunnels");
-const Bgp = page(() => import("./pages/Bgp"), "Bgp");
-const Identity = page(() => import("./pages/Identity"), "Identity");
-const Iac = page(() => import("./pages/iac/IacPage"), "Iac");
-const LogSources = page(() => import("./pages/LogSources"), "LogSources");
-const Switches = page(() => import("./pages/switches/SwitchesPage"), "Switches");
-const SwitchDetail = page(() => import("./pages/switches/SwitchDetail"), "SwitchDetail");
-const Tacacs = page(() => import("./pages/tacacs/TacacsPage"), "Tacacs");
-const NmsDashboard = page(() => import("./pages/nms/NmsDashboard"), "NmsDashboard");
-const NmsAnalytics = page(() => import("./pages/nms/Analytics"), "NmsAnalytics");
-const DependenciesPage = page(() => import("./pages/nms/Operations"), "DependenciesPage");
-const MaintenancePage = page(() => import("./pages/nms/Operations"), "MaintenancePage");
-const ServicesPage = page(() => import("./pages/nms/Operations"), "ServicesPage");
-const SnmpPage = page(() => import("./pages/snmp/SnmpPage"), "SnmpPage");
-const Wireless = page(() => import("./pages/wireless/WirelessPage"), "Wireless");
+import { SplashScreen } from "./components/Brand";
+const Dashboard = /*#__PURE__*/ page(() => import("./pages/Dashboard"), "Dashboard");
+const Sources = /*#__PURE__*/ page(() => import("./pages/TopN"), "Sources");
+const Destinations = /*#__PURE__*/ page(() => import("./pages/TopN"), "Destinations");
+const Ports = /*#__PURE__*/ page(() => import("./pages/TopN"), "Ports");
+const Web = /*#__PURE__*/ page(() => import("./pages/Web"), "Web");
+const Dns = /*#__PURE__*/ page(() => import("./pages/Dns"), "Dns");
+const Security = /*#__PURE__*/ page(() => import("./pages/Security"), "Security");
+const Alerts = /*#__PURE__*/ page(() => import("./pages/Alerts"), "Alerts");
+const Explorer = /*#__PURE__*/ page(() => import("./pages/Explorer"), "Explorer");
+const Investigate = /*#__PURE__*/ page(() => import("./pages/Investigate"), "Investigate");
+const Firewalls = /*#__PURE__*/ page(() => import("./pages/Firewalls"), "Firewalls");
+const Settings = /*#__PURE__*/ page(() => import("./pages/Settings"), "Settings");
+const Hardening = /*#__PURE__*/ page(() => import("./pages/Hardening"), "Hardening");
+const Policies = /*#__PURE__*/ page(() => import("./pages/Policies"), "Policies");
+const PolicyDetail = /*#__PURE__*/ page(() => import("./pages/PolicyDetail"), "PolicyDetail");
+const Shadow = /*#__PURE__*/ page(() => import("./pages/Shadow"), "Shadow");
+const IncidentDetail = /*#__PURE__*/ page(() => import("./pages/Incidents"), "IncidentDetail");
+const Incidents = /*#__PURE__*/ page(() => import("./pages/Incidents"), "Incidents");
+const ThreatIntel = /*#__PURE__*/ page(() => import("./pages/ThreatIntel"), "ThreatIntel");
+const Assets = /*#__PURE__*/ page(() => import("./pages/Assets"), "Assets");
+const Geo = /*#__PURE__*/ page(() => import("./pages/Geo"), "Geo");
+const Vpn = /*#__PURE__*/ page(() => import("./pages/Vpn"), "Vpn");
+const Compliance = /*#__PURE__*/ page(() => import("./pages/Compliance"), "Compliance");
+const Drift = /*#__PURE__*/ page(() => import("./pages/Drift"), "Drift");
+const Notifications = /*#__PURE__*/ page(() => import("./pages/Notifications"), "Notifications");
+const Searches = /*#__PURE__*/ page(() => import("./pages/Searches"), "Searches");
+const Reports = /*#__PURE__*/ page(() => import("./pages/Reports"), "Reports");
+const Search = /*#__PURE__*/ page(() => import("./pages/Search"), "Search");
+const Detections = /*#__PURE__*/ page(() => import("./pages/Detections"), "Detections");
+const WorkbookView = /*#__PURE__*/ page(() => import("./pages/Workbooks"), "WorkbookView");
+const Workbooks = /*#__PURE__*/ page(() => import("./pages/Workbooks"), "Workbooks");
+const Watchlists = /*#__PURE__*/ page(() => import("./pages/Watchlists"), "Watchlists");
+const Hunting = /*#__PURE__*/ page(() => import("./pages/Hunting"), "Hunting");
+const Automation = /*#__PURE__*/ page(() => import("./pages/Automation"), "Automation");
+const EntityGraph = /*#__PURE__*/ page(() => import("./pages/EntityGraph"), "EntityGraph");
+const Isp = /*#__PURE__*/ page(() => import("./pages/Isp"), "Isp");
+const FirewallHealth = /*#__PURE__*/ page(() => import("./pages/FirewallHealth"), "FirewallHealth");
+const VpnTunnels = /*#__PURE__*/ page(() => import("./pages/VpnTunnels"), "VpnTunnels");
+const Bgp = /*#__PURE__*/ page(() => import("./pages/Bgp"), "Bgp");
+const Identity = /*#__PURE__*/ page(() => import("./pages/Identity"), "Identity");
+const Iac = /*#__PURE__*/ page(() => import("./pages/iac/IacPage"), "Iac");
+const LogSources = /*#__PURE__*/ page(() => import("./pages/LogSources"), "LogSources");
+const Switches = /*#__PURE__*/ page(() => import("./pages/switches/SwitchesPage"), "Switches");
+const SwitchDetail = /*#__PURE__*/ page(() => import("./pages/switches/SwitchDetail"), "SwitchDetail");
+const Tacacs = /*#__PURE__*/ page(() => import("./pages/tacacs/TacacsPage"), "Tacacs");
+const NmsDashboard = /*#__PURE__*/ page(() => import("./pages/nms/NmsDashboard"), "NmsDashboard");
+const NmsAnalytics = /*#__PURE__*/ page(() => import("./pages/nms/Analytics"), "NmsAnalytics");
+const DependenciesPage = /*#__PURE__*/ page(() => import("./pages/nms/Operations"), "DependenciesPage");
+const SocOverview = /*#__PURE__*/ page(() => import("./pages/Soc"), "SocOverview");
+const AttackPage = /*#__PURE__*/ page(() => import("./pages/Soc"), "AttackPage");
+const RiskPage = /*#__PURE__*/ page(() => import("./pages/Soc"), "RiskPage");
+const ResponsePage = /*#__PURE__*/ page(() => import("./pages/Soc"), "ResponsePage");
+const NetworkSecurity = /*#__PURE__*/ page(() => import("./pages/NetworkSecurity"), "NetworkSecurity");
+const ConfigsPage = /*#__PURE__*/ page(() => import("./pages/nms/Configs"), "ConfigsPage");
+const NetCompliancePage = /*#__PURE__*/ page(() => import("./pages/nms/NetCompliance"), "NetCompliancePage");
+const TrafficPage = /*#__PURE__*/ page(() => import("./pages/nms/Traffic"), "TrafficPage");
+const SelfMonPage = /*#__PURE__*/ page(() => import("./pages/nms/SelfMon"), "SelfMonPage");
+const AccessPage = /*#__PURE__*/ page(() => import("./pages/nms/Access"), "AccessPage");
+const MaintenancePage = /*#__PURE__*/ page(() => import("./pages/nms/Operations"), "MaintenancePage");
+const ServicesPage = /*#__PURE__*/ page(() => import("./pages/nms/Operations"), "ServicesPage");
+const SnmpPage = /*#__PURE__*/ page(() => import("./pages/snmp/SnmpPage"), "SnmpPage");
+const Wireless = /*#__PURE__*/ page(() => import("./pages/wireless/WirelessPage"), "Wireless");
 import { NoAccess, ProductSelect } from "./pages/ProductSelect";
-import { PRODUCT, Product, entryTarget, forgetProducts, lastProduct, productOfLocation, rememberProduct } from "./lib/products";
+import { PRODUCT, Product, buildProducts, entryTarget, forgetProducts, lastProduct, productOfLocation, rememberProduct } from "./lib/products";
+
+// Build-time product (npm run build:grid | build:nms set VITE_PRODUCT): literal comparisons, so the bundler drops the other product's
+// routes and, with them, its lazily loaded pages (the page() calls are marked pure). Ownership: lib/products.ts OWN.
+const WITH_GRID = import.meta.env.VITE_PRODUCT !== "nms";
+const WITH_NMS = import.meta.env.VITE_PRODUCT !== "grid";
 
 /** Route-level code splitting: a page, and the chart/map libraries only it uses, load on its first visit. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,14 +87,15 @@ export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const loadMe = () => api<Me>("/auth/me").then((m) => { setTimezone(m.timezone); setMe(m); }).catch(() => setMe(null));
+  // a single-product build (BUILD_PRODUCT) offers only its product: the gate, switcher and start setting follow from this
+  const loadMe = () => api<Me>("/auth/me").then((m) => { setTimezone(m.timezone); setMe({ ...m, products: buildProducts(m.products) }); }).catch(() => setMe(null));
   useEffect(() => {
     loadMe();
     const h = () => setMe(null);
     window.addEventListener("siem:unauthorized", h);
     return () => window.removeEventListener("siem:unauthorized", h);
   }, []);
-  if (me === undefined) return <div className="p-6 text-muted">Loading…</div>;
+  if (me === undefined) return <SplashScreen />;
   if (me === null) return <Login onLogin={loadMe} />;
   const logout = async () => {
     await api("/auth/logout", { method: "POST" }).catch(() => null);
@@ -106,7 +123,11 @@ function Shell({ me, onLogout, loadMe }: { me: Me; onLogout: () => void; loadMe:
   const owner = productOfLocation(loc.pathname, loc.search);
   const product: Product = owner && me.products.includes(owner) ? owner : lastProduct(me.products)!;
   useEffect(() => { if (owner && me.products.includes(owner)) rememberProduct(owner, loc.pathname + loc.search); }, [owner, loc.pathname, loc.search, me.products]);
-  useEffect(() => { document.title = PRODUCT[product].name; }, [product]);
+  // the product accent (sky for Sentinel NMS, violet for Sentinel Grid) follows the product on screen (index.css tokens)
+  useEffect(() => {
+    document.documentElement.dataset.product = product;
+    return () => { delete document.documentElement.dataset.product; };
+  }, [product]);
   return (
     <FilterProvider>
       <Layout onLogout={onLogout} product={product}>
@@ -131,57 +152,68 @@ function Pages({ loadMe }: { loadMe: () => void }) {
   return (
         <Suspense fallback={<div role="status" className="p-6 text-sm text-muted">Loading…</div>}>
           <Routes>
-            <Route path="/grid" element={<Dashboard />} />
-            <Route path="/nms" element={<NmsDashboard />} />
-            <Route path="/nms/analytics" element={<NmsAnalytics />} />
-            <Route path="/nms/services" element={<ServicesPage />} />
-            <Route path="/nms/maintenance" element={<MaintenancePage />} />
-            <Route path="/nms/dependencies" element={<DependenciesPage />} />
-            <Route path="/snmp" element={<SnmpPage />} />
-            <Route path="/sources" element={<Sources />} />
-            <Route path="/destinations" element={<Destinations />} />
-            <Route path="/ports" element={<Ports />} />
-            <Route path="/web" element={<Web />} />
-            <Route path="/dns" element={<Dns />} />
-            <Route path="/security" element={<Security />} />
+            {WITH_GRID && <Route path="/grid" element={<Dashboard />} />}
+            {WITH_NMS && <Route path="/nms" element={<NmsDashboard />} />}
+            {WITH_NMS && <Route path="/nms/analytics" element={<NmsAnalytics />} />}
+            {WITH_NMS && <Route path="/nms/access" element={<AccessPage />} />}
+            {WITH_NMS && <Route path="/nms/services" element={<ServicesPage />} />}
+            {WITH_NMS && <Route path="/nms/maintenance" element={<MaintenancePage />} />}
+            {WITH_NMS && <Route path="/nms/dependencies" element={<DependenciesPage />} />}
+            {WITH_NMS && <Route path="/nms/configs" element={<ConfigsPage />} />}
+            {WITH_NMS && <Route path="/network-compliance" element={<NetCompliancePage />} />}
+            {WITH_GRID && <Route path="/soc" element={<SocOverview />} />}
+            {WITH_GRID && <Route path="/attack" element={<AttackPage />} />}
+            {WITH_GRID && <Route path="/risk" element={<RiskPage />} />}
+            {WITH_GRID && <Route path="/response" element={<ResponsePage />} />}
+            {WITH_GRID && <Route path="/network-security" element={<NetworkSecurity />} />}
+            {WITH_NMS && <Route path="/nms/traffic" element={<TrafficPage />} />}
+            {WITH_NMS && <Route path="/nms/flows" element={<Navigate to="/nms/traffic" replace />} />}
+            {WITH_NMS && <Route path="/nms/monitoring" element={<SelfMonPage />} />}
+            {WITH_NMS && <Route path="/snmp" element={<SnmpPage />} />}
+            {WITH_GRID && <Route path="/sources" element={<Sources />} />}
+            {WITH_GRID && <Route path="/destinations" element={<Destinations />} />}
+            {WITH_GRID && <Route path="/ports" element={<Ports />} />}
+            {WITH_GRID && <Route path="/web" element={<Web />} />}
+            {WITH_GRID && <Route path="/dns" element={<Dns />} />}
+            {WITH_GRID && <Route path="/security" element={<Security />} />}
             <Route path="/alerts" element={<Alerts />} />
-            <Route path="/explorer" element={<Explorer />} />
-            <Route path="/investigate/:ip" element={<Investigate />} />
-            <Route path="/firewalls" element={<Firewalls />} />
-            <Route path="/hardening" element={<Hardening />} />
-            <Route path="/policies" element={<Policies />} />
-            <Route path="/policies/shadow" element={<Shadow />} />
-            <Route path="/policies/:fw/:vdom/:pid" element={<PolicyDetail />} />
-            <Route path="/incidents" element={<Incidents />} />
-            <Route path="/incidents/:id" element={<IncidentDetail />} />
-            <Route path="/threat-intel" element={<ThreatIntel />} />
-            <Route path="/assets" element={<Assets />} />
-            <Route path="/geo" element={<Geo />} />
-            <Route path="/vpn" element={<Vpn />} />
-            <Route path="/compliance" element={<Compliance />} />
-            <Route path="/drift" element={<Drift />} />
+            {WITH_GRID && <Route path="/explorer" element={<Explorer />} />}
+            {WITH_GRID && <Route path="/investigate/:ip" element={<Investigate />} />}
+            {WITH_NMS && <Route path="/firewalls" element={<Firewalls />} />}
+            {WITH_NMS && <Route path="/hardening" element={<Hardening />} />}
+            {WITH_NMS && <Route path="/policies" element={<Policies />} />}
+            {WITH_NMS && <Route path="/policies/shadow" element={<Shadow />} />}
+            {WITH_NMS && <Route path="/policies/:fw/:vdom/:pid" element={<PolicyDetail />} />}
+            {WITH_GRID && <Route path="/incidents" element={<Incidents />} />}
+            {WITH_GRID && <Route path="/incidents/:id" element={<IncidentDetail />} />}
+            {WITH_GRID && <Route path="/threat-intel" element={<ThreatIntel />} />}
+            {WITH_GRID && <Route path="/assets" element={<Assets />} />}
+            {WITH_GRID && <Route path="/geo" element={<Geo />} />}
+            {WITH_GRID && <Route path="/vpn" element={<Vpn />} />}
+            {WITH_GRID && <Route path="/compliance" element={<Compliance />} />}
+            {WITH_NMS && <Route path="/drift" element={<Drift />} />}
             <Route path="/notifications" element={<Notifications />} />
-            <Route path="/searches" element={<Searches />} />
+            {WITH_GRID && <Route path="/searches" element={<Searches />} />}
             <Route path="/reports" element={<Reports />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/hunting" element={<Hunting />} />
-            <Route path="/detections" element={<Detections />} />
-            <Route path="/workbooks" element={<Workbooks />} />
-            <Route path="/workbooks/:id" element={<WorkbookView />} />
-            <Route path="/watchlists" element={<Watchlists />} />
-            <Route path="/automation" element={<Automation />} />
-            <Route path="/graph" element={<EntityGraph />} />
-            <Route path="/isp" element={<Isp />} />
-            <Route path="/wireless" element={<Wireless />} />
-            <Route path="/fw-health" element={<FirewallHealth />} />
-            <Route path="/vpn-tunnels" element={<VpnTunnels />} />
-            <Route path="/bgp" element={<Bgp />} />
-            <Route path="/identity" element={<Identity />} />
-            <Route path="/iac" element={<Iac />} />
-            <Route path="/switches" element={<Switches />} />
-            <Route path="/switches/:id" element={<SwitchDetail />} />
-            <Route path="/tacacs" element={<Tacacs />} />
-            <Route path="/log-sources" element={<LogSources />} />
+            {WITH_GRID && <Route path="/search" element={<Search />} />}
+            {WITH_GRID && <Route path="/hunting" element={<Hunting />} />}
+            {WITH_GRID && <Route path="/detections" element={<Detections />} />}
+            {WITH_GRID && <Route path="/workbooks" element={<Workbooks />} />}
+            {WITH_GRID && <Route path="/workbooks/:id" element={<WorkbookView />} />}
+            {WITH_GRID && <Route path="/watchlists" element={<Watchlists />} />}
+            {WITH_GRID && <Route path="/automation" element={<Automation />} />}
+            {WITH_GRID && <Route path="/graph" element={<EntityGraph />} />}
+            {WITH_NMS && <Route path="/isp" element={<Isp />} />}
+            {WITH_NMS && <Route path="/wireless" element={<Wireless />} />}
+            {WITH_NMS && <Route path="/fw-health" element={<FirewallHealth />} />}
+            {WITH_NMS && <Route path="/vpn-tunnels" element={<VpnTunnels />} />}
+            {WITH_NMS && <Route path="/bgp" element={<Bgp />} />}
+            {WITH_GRID && <Route path="/identity" element={<Identity />} />}
+            {WITH_NMS && <Route path="/iac" element={<Iac />} />}
+            {WITH_NMS && <Route path="/switches" element={<Switches />} />}
+            {WITH_NMS && <Route path="/switches/:id" element={<SwitchDetail />} />}
+            {WITH_NMS && <Route path="/tacacs" element={<Tacacs />} />}
+            {WITH_GRID && <Route path="/log-sources" element={<LogSources />} />}
             <Route path="/settings" element={<Settings onMeChange={loadMe} />} />
             <Route path="*" element={<Notice title="Page not found">This address does not exist. Use the sidebar to continue.</Notice>} />
           </Routes>

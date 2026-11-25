@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, downloadUrl, Params } from "../lib/api";
 import { useData, useGlobal } from "../lib/context";
 import { fmtBytes, fmtTime } from "../lib/format";
-import { Action, Card, Drawer, Empty, IpLink, Loading, Sev, Tabs, Time, Trunc, rowProps, useDebounced } from "../components/ui";
+import { Action, Card, Drawer, Empty, IpLink, Loading, Pager, rowProps, Sev, Tabs, Time, Trunc, useDebounced } from "../components/ui";
 import { QL_HELP, SaveSearch } from "./Searches";
 
 const FIELDS: [string, string, string?][] = [
@@ -33,7 +33,6 @@ export function EventTable({ fixed = {}, filters = {} }: { fixed?: Params; filte
   const extra = { ...filters, ...fixed, page, size, sort, order };
   useEffect(() => setPage(1), [JSON.stringify(filters), JSON.stringify(g.params)]);
   const q = useData<any>("/events", extra);
-  const pages = q.data ? Math.max(1, Math.ceil(q.data.total / size)) : 1;
   const th = (k: string, l: string) => (
     <th className="cursor-pointer select-none" onClick={() => { if (sort === k) setOrder(order === "asc" ? "desc" : "asc"); else { setSort(k); setOrder("desc"); } }}>
       {l}{sort === k ? (order === "asc" ? " ▲" : " ▼") : ""}
@@ -46,12 +45,10 @@ export function EventTable({ fixed = {}, filters = {} }: { fixed?: Params; filte
         <span className="text-muted">{q.data ? `${q.data.total.toLocaleString()} events` : ""}</span>
         <div className="flex-1" />
         <a className="btn" href={downloadUrl("/events/export.csv", exportParams)}>Export CSV</a>
-        <select className="input py-1" value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}>
+        <select aria-label="Rows per page" className="input py-1" value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}>
           {[25, 50, 100, 250].map((n) => <option key={n} value={n}>{n} / page</option>)}
         </select>
-        <button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹</button>
-        <span className="text-muted">{page} / {pages}</span>
-        <button className="btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>›</button>
+        <Pager className="" page={page} size={size} total={q.data?.total} onPage={setPage} />
       </div>
       <Loading q={q} />
       {q.data && !q.data.items.length && <Empty text="No matching events." />}
@@ -217,9 +214,9 @@ export function Explorer() {
       <Card title="Filters" right={<div className="flex flex-wrap gap-2"><button className="btn" onClick={() => setSp(new URLSearchParams())}>Clear</button><button className="btn btn-primary" onClick={apply}>Apply</button></div>}>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2" onKeyDown={(e) => e.key === "Enter" && apply()}>
           {FIELDS.map(([k, l, ph]) => (
-            <div key={k}><label className="label">{l}</label><input className="input w-full" placeholder={ph} value={form[k] || ""} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></div>
+            <label key={k} className="block min-w-0"><span className="label">{l}</span><input className="input w-full" placeholder={ph} value={form[k] || ""} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>
           ))}
-          <div><label className="label">Verdict</label><select className="input w-full" value={form.verdict || ""} onChange={(e) => setForm({ ...form, verdict: e.target.value })}><option value="">any</option><option value="allowed">allowed</option><option value="denied">denied</option></select></div>
+          <label className="block min-w-0"><span className="label">Verdict</span><select className="input w-full" value={form.verdict || ""} onChange={(e) => setForm({ ...form, verdict: e.target.value })}><option value="">any</option><option value="allowed">allowed</option><option value="denied">denied</option></select></label>
         </div>
         <div className="flex flex-wrap gap-4 mt-3 text-xs">
           {([["category", ["traffic", "dns", "web", "security", "system"]], ["action", ["accept", "close", "timeout", "reset", "deny", "block", "allow", "monitor"]],

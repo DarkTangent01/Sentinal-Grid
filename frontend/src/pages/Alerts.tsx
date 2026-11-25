@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe } from "../lib/context";
 import { fmtNum, fmtTime } from "../lib/format";
-import { Card, Drawer, Empty, IpLink, Loading, Sev, Tabs, Time, Trunc, rowProps, useExplore } from "../components/ui";
-import { Mitre } from "./Incidents";
+import { Card, Drawer, Empty, IpLink, Loading, Sev, TableWrap, Tabs, Time, Trunc, rowProps, useExplore } from "../components/ui";
+import { ActionForm } from "./Soc";
+import { Mitre } from "../components/Mitre";
 import { useNavigate } from "react-router-dom";
 
 const STATUS_COLORS: Record<string, string> = { new: "bg-red-600/30 text-red-200", investigating: "bg-amber-600/30 text-amber-200", resolved: "bg-emerald-700/30 text-emerald-200", suppressed: "bg-slate-700 text-slate-300" };
@@ -77,6 +78,7 @@ function AlertDrawer({ alert, onClose }: { alert: any; onClose: () => void }) {
           {a.base_severity && a.base_severity !== a.severity && <span className="text-xs text-amber-300">raised from {a.base_severity} (critical asset)</span>}</div>
         {a.incident_id && <button className="btn" onClick={() => nav(`/incidents/${a.incident_id}`)}>Part of incident #{a.incident_id} →</button>}
         <div className="card p-3 bg-panel2"><div className="text-xs text-muted mb-1">Why it triggered</div>{a.explanation}</div>
+        <Brief id={a.id} srcIp={a.src_ip} incidentId={a.incident_id} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs [&>*]:min-w-0 [&>*]:break-words">
           <div>Source: <IpLink ip={a.src_ip} /></div><div>Destination: <IpLink ip={a.dst_ip} /></div>
           <div>First seen: {fmtTime(a.first_seen)}</div><div>Last seen: {fmtTime(a.last_seen)}</div>
@@ -85,7 +87,7 @@ function AlertDrawer({ alert, onClose }: { alert: any; onClose: () => void }) {
         </div>
         <button className="btn btn-primary" onClick={() => explore({ ...f, range: undefined, start: f.start, end: new Date().toISOString() })}>View related events →</button>
         {a.evidence && Object.keys(a.evidence).length > 0 && <pre className="text-xs bg-panel2 p-2 rounded overflow-auto">{JSON.stringify(a.evidence, null, 2)}</pre>}
-        <div><label className="label">Notes</label><textarea className="input w-full h-24" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+        <label className="block min-w-0"><span className="label">Notes</span><textarea className="input w-full h-24" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
         <div className="flex flex-wrap gap-2">
           <button className="btn" onClick={() => upd.mutate({ notes })}>Save notes</button>
           {["new", "investigating", "resolved"].map((s) => <button key={s} className="btn" disabled={a.status === s} onClick={() => upd.mutate({ status: s, notes, assignee: s === "investigating" ? me.username : a.assignee })}>Mark {s}</button>)}
@@ -95,4 +97,40 @@ function AlertDrawer({ alert, onClose }: { alert: any; onClose: () => void }) {
       </div>
     </Drawer>
   );
+}
+
+/** Investigation brief (stored records only, every activity statement cites an event id) and, when an administrator
+ *  enabled AI data sharing, a narrative written from that same brief. */
+function Brief({ id, srcIp, incidentId }: { id: number; srcIp?: string; incidentId?: number }) {
+  const q = useQuery({ queryKey: ["alert-brief", id], queryFn: () => api<any>(`/alerts/${id}/brief`) });
+  const ai = useMutation({ mutationFn: () => api<any>(`/ai/alerts/${id}/explain`, { method: "POST" }) });
+  const [act, setAct] = useState(false);
+  const b = q.data;
+  return <Card title="Investigation brief">
+    <Loading q={q} />
+    {b && <div className="space-y-2 text-sm">
+      <p><b>What happened.</b> {b.what_happened.summary} <span className="text-2xs text-muted">[{b.what_happened.cite}]</span></p>
+      <p><b>Why it was detected.</b> {b.why_detected.description || b.why_detected.rule}{b.why_detected.confidence ? ` Rule confidence: ${b.why_detected.confidence}.` : ""}</p>
+      {b.assets.length > 0 && <p><b>Assets.</b> {b.assets.map((x: any) => `${x.ip} (${x.role}${x.known ? `, ${x.hostname || "no hostname"}, criticality ${x.criticality}${x.owner ? `, owner ${x.owner}` : ""}` : ", not in the inventory"})`).join("; ")}</p>}
+      {b.users.length > 0 && <p><b>Users.</b> {b.users.join(", ")}</p>}
+      <p><b>Potential impact.</b> {b.impact.statement}{b.impact.severity_raised_by_asset ? " Severity was raised because a critical asset is involved." : ""}</p>
+      {b.attack.techniques.length > 0 && <p><b>ATT&CK.</b> {b.attack.tactic_name}: {b.attack.techniques.map((t: any) => <a key={t.id} className="link mr-2" href={t.url} target="_blank" rel="noreferrer noopener">{t.id} {t.name}</a>)}</p>}
+      {b.entity_risk && <p><b>Entity risk.</b> {b.entity_risk.score} ({b.entity_risk.level}){b.entity_risk.top_factors.length ? `: ${b.entity_risk.top_factors.join(", ")}` : ""}</p>}
+      {b.why_detected.known_false_positives.length > 0 && <p><b>Known false positives.</b> {b.why_detected.known_false_positives.join("; ")}</p>}
+      <div><b>Evidence.</b> {b.evidence.events.length ? <TableWrap><table className="tbl mt-1"><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead>
+        <tbody>{b.evidence.events.map((e: any) => <tr key={e.event_id}><td><Time v={e.event_time} /></td><td className="font-mono text-2xs">{e.event_id}</td>
+          <td className="cell-wrap text-xs">{[e.action, e.src_ip && `${e.src_ip} → ${e.dst_ip || "?"}${e.dst_port ? `:${e.dst_port}` : ""}`, e.user, e.threat, e.msg].filter(Boolean).join(" · ")}</td></tr>)}</tbody></table></TableWrap>
+        : <span className="text-muted">{b.evidence.note}</span>}</div>
+      {b.related_alerts.length > 0 && <p><b>Related alerts (24 h).</b> {b.related_alerts.map((r: any) => `${r.name} (${r.severity})`).join("; ")}</p>}
+      <div><b>Next steps.</b><ol className="list-decimal ml-5">{b.next_steps.map((s: string) => <li key={s}>{s}</li>)}</ol></div>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button type="button" className="btn" disabled={ai.isPending} onClick={() => ai.mutate()}>{ai.isPending ? "Asking the AI assistant…" : "Explain with AI"}</button>
+        {srcIp && <button type="button" className="btn" onClick={() => setAct(true)}>Request response…</button>}
+      </div>
+      {ai.error && <div role="alert" className="text-xs text-red-400">{String((ai.error as Error).message)}</div>}
+      {ai.data && <div className="card p-3 bg-panel2"><div className="text-2xs text-muted mb-1">AI narrative ({ai.data.model}) from this brief only; check the cited events before acting.</div>
+        <div className="whitespace-pre-wrap text-sm">{ai.data.explanation}</div></div>}
+    </div>}
+    {act && <ActionForm firewalls={[]} init={{ kind: "enrich_ip", target: srcIp, alert_id: id, incident_id: incidentId }} onClose={() => setAct(false)} />}
+  </Card>;
 }

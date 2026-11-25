@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .analytics.filters import EventFilter, build_where, table
+from .platform.eventquery import EventFilter, build_where, table
 from .db.ch import ClickHouse
 from .db.models import SavedSearch
 from .notify import _link, enqueue

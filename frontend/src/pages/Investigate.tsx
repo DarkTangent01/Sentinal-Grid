@@ -1,3 +1,4 @@
+import { NetworkContext } from "../components/NetworkContext";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -28,7 +29,9 @@ export function Investigate() {
         {s.events > 0 && <span className="text-xs text-muted">first seen <Time v={s.first_seen} /> · last seen <Time v={s.last_seen} /> · {(s.firewalls || []).join(", ")}</span>}
       </div>
       <Loading q={q} />
-      {(asset.data || ti.data?.totals?.events > 0) && <div className="grid-cards md:grid-cols-2">
+      <div className="grid-cards md:grid-cols-2">
+        <NetworkContext ip={ip} />
+      {(asset.data || ti.data?.totals?.events > 0) && <>
         {asset.data && <Card title="Asset">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
             <span className="text-muted">Hostname</span><span className="cell-wrap">{asset.data.hostname || "—"}</span>
@@ -43,7 +46,8 @@ export function Investigate() {
           <ul className="text-sm space-y-1">{ti.data.indicators.slice(0, 8).map((r: any) => <li key={r.indicator} className="flex gap-2"><span className="pill bg-red-500/15 text-red-300">{r.category}</span>
             <span className="font-mono text-xs cell-wrap">{r.indicator}</span><span className="ml-auto text-muted text-xs">{r.events} · {r.feed}</span></li>)}</ul>
         </Card>}
-      </div>}
+      </>}
+      </div>
       <div className="kpi-grid">
         <Kpi label="All events" value={fmtNum(s.events)} onClick={() => explore({ ip })} />
         <Kpi label="Traffic" value={fmtNum(s.traffic)} />

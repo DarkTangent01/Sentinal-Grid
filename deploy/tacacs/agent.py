@@ -29,6 +29,7 @@ import time
 
 BASE = "/tacacs/config"
 ACTIVE = f"{BASE}/active/tac_plus-ng.cfg"
+LOG_DIR = "/tacacs/logs"  # tac_plus-ng writes here as the same user; if it cannot, nothing is logged or ingested
 BIN = "/usr/local/sbin/tac_plus-ng"
 AGENT_VERSION = "1.0"
 ID = re.compile(r"^\d{1,12}$")
@@ -170,8 +171,34 @@ def status() -> None:
     write_json(f"{BASE}/status.json", {
         "agent_version": AGENT_VERSION, "implementation": "tac_plus-ng", "commit": os.environ.get("TAC_PLUS_NG_COMMIT", ""),
         "running": alive(), "pid": state["proc"].pid if alive() else None, "started_at": state["started_at"], "restarts": state["restarts"],
-        "listening": listening(), "active_sha256": sha256(ACTIVE) if os.path.isfile(ACTIVE) else None, "last_reload": state["last_reload"],
+        "listening": listening(), "logs_writable": os.access(LOG_DIR, os.W_OK | os.X_OK), "active_sha256": sha256(ACTIVE) if os.path.isfile(ACTIVE) else None, "last_reload": state["last_reload"],
         "time": time.time()})
+
+
+def process(name: str) -> dict | None:
+    """Handle one request file and write its result; never raises (one bad request must not stop the agent)."""
+    rid = name[:-5] if name.endswith(".json") else ""
+    path = f"{BASE}/requests/{name}"
+    if not ID.match(rid):
+        return None
+    req: dict = {}
+    try:
+        with open(path) as f:
+            req = json.load(f)
+        res = handle(rid, req)
+    except OSError as e:  # e.g. a file the agent cannot read: say which (fixed names only, never contents)
+        where = os.path.relpath(e.filename, BASE) if isinstance(e.filename, str) and e.filename.startswith(BASE) else "?"
+        res = {"id": int(rid), "ok": False, "status": "failed", "output": f"agent error: {type(e).__name__} ({e.strerror}) on {where}"}
+    except Exception as e:
+        res = {"id": int(rid), "ok": False, "status": "failed", "output": f"agent error: {type(e).__name__}"}
+    res["finished_at"] = time.time()
+    write_json(f"{BASE}/results/{rid}.json", res)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    log(f"request {rid} {req.get('action') if isinstance(req, dict) else '?'}: {res['status']}")
+    return res
 
 
 def main() -> None:
@@ -189,21 +216,7 @@ def main() -> None:
         elif time.time() - (state["started_at"] or 0) > 60:
             backoff = 1.0
         for name in sorted(os.listdir(f"{BASE}/requests")):
-            rid = name[:-5] if name.endswith(".json") else ""
-            path = f"{BASE}/requests/{name}"
-            if not ID.match(rid):
-                continue
-            req: dict = {}
-            try:
-                with open(path) as f:
-                    req = json.load(f)
-                res = handle(rid, req)
-            except Exception as e:  # never let one request stop the agent
-                res = {"id": int(rid), "ok": False, "status": "failed", "output": f"agent error: {type(e).__name__}"}
-            res["finished_at"] = time.time()
-            write_json(f"{BASE}/results/{rid}.json", res)
-            os.remove(path)
-            log(f"request {rid} {req.get('action') if isinstance(req, dict) else '?'}: {res['status']}")
+            process(name)
         if time.time() - last_status >= 10:
             status()
             last_status = time.time()

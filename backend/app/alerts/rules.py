@@ -1,17 +1,7 @@
-"""Built-in, configurable detection rules. Thresholds live in PostgreSQL (alert_rules.params).
-Each rule carries a MITRE ATT&CK mapping (tactic + techniques) used for incident correlation."""
-
-TACTICS = {  # MITRE ATT&CK Enterprise tactics, kill-chain order
-    "TA0043": "Reconnaissance", "TA0042": "Resource Development", "TA0001": "Initial Access", "TA0002": "Execution",
-    "TA0003": "Persistence", "TA0004": "Privilege Escalation", "TA0005": "Defense Evasion", "TA0006": "Credential Access",
-    "TA0007": "Discovery", "TA0008": "Lateral Movement", "TA0009": "Collection", "TA0011": "Command and Control",
-    "TA0010": "Exfiltration", "TA0040": "Impact",
-}
-
-
-def M(tactic: str, *techniques: str) -> dict:
-    return {"tactic": tactic, "tactic_name": TACTICS[tactic], "techniques": list(techniques)}
-
+"""Built-in, configurable SIEM detection rules. Thresholds live in PostgreSQL (alert_rules.params).
+Each rule carries a MITRE ATT&CK mapping (tactic + techniques) used for incident correlation. Sentinel NMS rules are
+defined with the NMS modules (alerts/nms.py)."""
+from .engine import TACTICS, M  # noqa: F401  (TACTICS re-exported for the SIEM modules)
 
 DEFAULT_RULES = [
     {"key": "port_scan", "name": "Many destination ports from one source", "severity": "high", "mitre": M("TA0007", "T1046"),
@@ -49,11 +39,9 @@ DEFAULT_RULES = [
     {"key": "multi_site", "name": "Suspicious activity across multiple sites", "severity": "high", "mitre": M("TA0043", "T1595"),
      "description": "The same source was denied at several different sites.",
      "params": {"window_minutes": 30, "min_sites": 3, "min_denied": 20}},
-    # ---- threat intelligence
     {"key": "ti_match", "name": "Traffic to/from threat-intel indicator", "severity": "high", "mitre": M("TA0011", "T1071"),
      "description": "An event matched an indicator from an enabled threat-intelligence feed or the manual IOC list.",
      "params": {"window_minutes": 10, "min_events": 1, "low_categories": ["hijacked_netblock"]}},
-    # ---- behaviour (UEBA-lite); heavier rules run on their own interval
     {"key": "beaconing", "name": "Periodic beaconing to external host", "severity": "medium", "mitre": M("TA0011", "T1071", "T1573"),
      "description": "An internal host connects to the same external destination at highly regular intervals (possible C2 heartbeat).",
      "params": {"window_minutes": 360, "interval_minutes": 15, "min_connections": 24, "min_interval_seconds": 30,
@@ -74,36 +62,11 @@ DEFAULT_RULES = [
     {"key": "impossible_travel", "name": "Impossible travel (VPN)", "severity": "high", "mitre": M("TA0001", "T1078"),
      "description": "The same user logged in to VPN from locations too far apart for the time between logins.",
      "params": {"window_hours": 24, "interval_minutes": 10, "max_kmh": 900, "min_km": 500}},
-    {"key": "risky_config_change", "name": "Risky firewall configuration change", "severity": "high", "mitre": M("TA0005", "T1562.004"),
-     "description": "Configuration drift introduced a risky setting (any/any accept policy, admin access on WAN, insecure protocols, new admin).",
-     "params": {}},
-]
-# ---- operations (not attacks): provider outages surface as alerts so automation and notifications can act on them
-DEFAULT_RULES.append(
-    {"key": "isp_outage", "name": "ISP / WAN link down", "severity": "medium", "mitre": {},
-     "description": "Every SD-WAN health check on a WAN link failed at the same time (provider outage), for at least the configured minutes.",
-     "params": {"window_minutes": 15, "min_outage_minutes": 2}})
-DEFAULT_RULES += [
-    {"key": "fw_resource_high", "name": "Firewall CPU / memory high", "severity": "medium", "mitre": {},
-     "description": "A firewall (HA member) stayed above the CPU or memory threshold for several consecutive performance samples.",
-     "params": {"window_minutes": 20, "cpu_pct": 85, "mem_pct": 85, "min_samples": 3}},
-    {"key": "fw_reboot", "name": "Firewall rebooted", "severity": "high", "mitre": {},
-     "description": "System uptime went backwards between performance samples: the firewall or an HA member restarted.",
-     "params": {"window_minutes": 60}},
-    {"key": "log_feed_gap", "name": "Firewall log feed stopped", "severity": "medium", "mitre": M("TA0005", "T1562.006"),
-     "description": "A firewall stopped sending a log category it normally sends (logging disabled, syslog filter changed, or link loss).",
-     "params": {"silent_minutes": 20}},
     {"key": "peer_anomaly", "name": "Host far outside its peer group", "severity": "medium", "mitre": M("TA0010", "T1041"),
      "description": "An internal host sent much more data, or made many more connections, in the last hour than the other hosts in its "
                     "subnet (median + MAD outlier). Catches unusual hosts that never had a baseline of their own.",
      "params": {"interval_minutes": 15, "window_hours": 1, "min_peers": 5, "mad_k": 8.0, "min_factor": 10.0,
                 "min_sent_bytes": 300_000_000, "min_events": 20_000, "prefix_len": 24}},
-    {"key": "icmp_down", "name": "Monitored public IP unreachable (ICMP)", "severity": "medium", "mitre": {},
-     "description": "An ICMP-monitored address (ISP WAN IP, gateway, upstream) is DOWN after its consecutive-failure threshold.",
-     "params": {"min_down_minutes": 1}},
-    {"key": "vpn_tunnel_down", "name": "Site-to-site VPN tunnel down", "severity": "medium", "mitre": {},
-     "description": "An IPsec site-to-site tunnel went down and has not come back for the configured minutes.",
-     "params": {"window_minutes": 60, "min_down_minutes": 5}},
     {"key": "identity_auth_failures", "name": "Repeated authentication failures for one user", "severity": "medium",
      "mitre": M("TA0006", "T1110"),
      "description": "Many failed VPN, firewall-admin, Windows or firewall-user logins for the same user name, from any number of sources "
@@ -126,35 +89,6 @@ DEFAULT_RULES += [
      "mitre": M("TA0005", "T1562.004"),
      "description": "An administrator changed firewall configuration outside business hours or on a weekend (firewall local time).",
      "params": {"interval_minutes": 5, "window_minutes": 15, "work_start_hour": 7, "work_end_hour": 22, "weekend": True}},
-    {"key": "iac_drift", "name": "Firewall configuration drifted from the approved IaC state", "severity": "high",
-     "mitre": M("TA0005", "T1562.004"),
-     "description": "A scheduled or on-demand IaC drift check found the live firewall configuration differing from the approved desired "
-                    "state (manual GUI/CLI change, unexpected policy, routing or admin-access change).",
-     "params": {"interval_minutes": 5, "window_minutes": 15, "min_severity": "medium"}},
-    {"key": "bgp_peer_down", "name": "BGP neighbor down", "severity": "high", "mitre": {},
-     "description": "A BGP neighbor left the Established state (from router logs or API polling) and stayed down for the configured minutes.",
-     "params": {"interval_minutes": 2, "window_minutes": 60, "min_down_minutes": 2}},
-    {"key": "bgp_peer_flap", "name": "BGP neighbor flapping", "severity": "medium", "mitre": {},
-     "description": "A BGP neighbor went down repeatedly in a short window: unstable link, hold-timer expiries or a mismatched peer.",
-     "params": {"interval_minutes": 5, "window_minutes": 60, "min_flaps": 3}},
-    {"key": "bgp_route_withdrawals", "name": "BGP route withdrawal burst", "severity": "medium", "mitre": {},
-     "description": "Many prefixes were withdrawn for one neighbor in a short window: lost reachability or an upstream routing change.",
-     "params": {"interval_minutes": 5, "window_minutes": 15, "min_withdrawals": 50}},
-    {"key": "bgp_prefix_anomaly", "name": "BGP prefix count far from baseline", "severity": "medium", "mitre": {},
-     "description": "An established neighbor sends far fewer (partial table loss) or far more (possible leak) prefixes than its 7-day median.",
-     "params": {"interval_minutes": 10, "deviation_pct": 30, "min_abs": 5, "min_samples": 30}},
-    {"key": "bgp_route_leak", "name": "BGP route leak / hijack signal", "severity": "high", "mitre": M("TA0040", "T1565"),
-     "description": "A neighbor announced a burst of never-seen prefixes, a more-specific of this firewall's own networks, a bogon, a public "
-                    "prefix over an internal session, or the default route changed; or a new neighbor appeared.",
-     "params": {"interval_minutes": 5, "window_minutes": 15,
-                "kinds": ["leak_suspect", "more_specific", "bogon_prefix", "default_route", "new_peer", "public_via_internal"]}},
-    {"key": "bgp_critical_prefix", "name": "Critical prefix withdrawn or rerouted", "severity": "high", "mitre": {},
-     "description": "A prefix in the IP watchlist (default bgp_critical_prefixes) was withdrawn, left the routing table, or moved to "
-                    "another neighbor / tunnel.",
-     "params": {"interval_minutes": 2, "window_minutes": 10, "watchlist": "bgp_critical_prefixes"}},
-]
-# ---- Windows Security events (Log sources → Windows); idle until Windows logs arrive
-DEFAULT_RULES += [
     {"key": "win_bruteforce", "name": "Windows logon failures (brute force)", "severity": "high", "mitre": M("TA0006", "T1110"),
      "description": "Many failed Windows logons (4625 / 4771 / failed 4776) for one account or from one source.",
      "params": {"window_minutes": 15, "min_failures": 20}},
@@ -173,19 +107,8 @@ DEFAULT_RULES += [
      "description": "A service was installed (7045 / 4697) — persistence or remote execution tools often do this.",
      "params": {"window_minutes": 15, "ignore_services": []}},
 ]
-from ..switches.alerts import DEFAULT_RULES as _SWITCH_RULES  # noqa: E402
-
-from ..tacacs.alerts import DEFAULT_RULES as _TACACS_RULES  # noqa: E402
-
-from ..wan_alerts import DEFAULT_RULES as _WAN_RULES  # noqa: E402
-from ..wireless.alerts import DEFAULT_RULES as _WIRELESS_RULES  # noqa: E402
-
-DEFAULT_RULES += _SWITCH_RULES
-DEFAULT_RULES += _TACACS_RULES
-DEFAULT_RULES += _WAN_RULES
-DEFAULT_RULES += _WIRELESS_RULES
-from ..nms.alerts import DEFAULT_RULES as _NMS_RULES  # noqa: E402
-DEFAULT_RULES += _NMS_RULES
+from ..enrich.ti_flows import DEFAULT_RULE as _TI_FLOW  # noqa: E402  (threat intel on flow telemetry)
+DEFAULT_RULES.append(_TI_FLOW)
 from ..detection.loader import default_rule_rows  # noqa: E402  (YAML rule pack, backend/rules)
 DEFAULT_RULES += default_rule_rows()
 RULE_MITRE = {r["key"]: r["mitre"] for r in DEFAULT_RULES}

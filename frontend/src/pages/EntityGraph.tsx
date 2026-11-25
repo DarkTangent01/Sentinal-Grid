@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, qs } from "../lib/api";
 import { useTheme } from "../lib/theme";
 import { escHtml, fmtBytes, fmtNum } from "../lib/format";
-import { CHART_THEME, Chart, PALETTES, SEV_HEX } from "../components/Chart";
+import { Chart, CHART_THEME, PALETTES, SERIES_ROLE, SEV_HEX } from "../components/Chart";
 import { Card, Empty, Loading, TableWrap } from "../components/ui";
 import { CRIT_CLS } from "./Assets";
 
@@ -50,7 +50,7 @@ export function EntityGraph() {
         })),
         links: q.data.edges.map((e: any) => ({ source: e.source, target: e.target, label: e.label, weight: e.weight, denied: e.denied, bytes: e.bytes,
           sourceLabel: q.data.nodes.find((n: any) => n.id === e.source)?.label, targetLabel: q.data.nodes.find((n: any) => n.id === e.target)?.label,
-          lineStyle: { width: 1 + 3 * Math.sqrt(e.weight / max), color: e.denied ? "#e23744" : undefined } })),
+          lineStyle: { width: 1 + 3 * Math.sqrt(e.weight / max), color: e.denied ? SERIES_ROLE[theme].alert : undefined } })),
       }],
     };
   }, [q.data, theme]);

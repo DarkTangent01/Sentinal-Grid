@@ -1,10 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { useGlobal } from "../lib/context";
+import { useGlobal, useMe } from "../lib/context";
 import { useTheme } from "../lib/theme";
 import { escHtml, fmtDuration, fmtNum, getTimezone } from "../lib/format";
-import { CHART_THEME, Chart, PALETTES, axisStyle } from "../components/Chart";
+import { Chart, CHART_THEME, PALETTES, axisStyle, statusColor } from "../components/Chart";
 import { Card, Drawer, Empty, IpLink, Kpi, Loading, TableWrap, Tabs, Time, Trunc, rowProps } from "../components/ui";
 
 const ST: Record<string, [string, string]> = {
@@ -48,7 +48,7 @@ function EventChart({ timeline, bucket }: { timeline: any[]; bucket: number }) {
     legend: { top: 0 }, tooltip: { trigger: "axis", confine: true }, grid: { left: 40, right: 16, top: 34, bottom: 28 },
     xAxis: timeAxis, yAxis: { type: "value", minInterval: 1, ...axisStyle },
     series: SERIES.map(([k, name, ci]) => ({ name, type: "bar", stack: k.startsWith("peer") || k === "notification" ? "peers" : "routes", barMaxWidth: 14,
-      itemStyle: { color: k === "peer_down" ? "#ef4444" : k === "peer_up" ? "#10b981" : PALETTES[theme][ci] },
+      itemStyle: { color: k === "peer_down" ? statusColor(theme, "down") : k === "peer_up" ? statusColor(theme, "up") : PALETTES[theme][ci] },
       data: timeline.map((r) => [Date.parse(r.t) + (bucket * 1000) / 2, r[k] || 0]) })),
   }} />;
 }
@@ -154,7 +154,7 @@ function Topology({ d, onSel }: { d: any; onSel: (x: any) => void }) {
   const option = useMemo(() => {
     const c = CHART_THEME[theme];
     const nodes: any[] = [], links: any[] = [], seen = new Set<string>(), pairs = new Set<string>();
-    const col = (s: string) => (s === "up" ? "#10b981" : s === "down" ? "#ef4444" : "#64748b");
+    const col = (s: string) => statusColor(theme, s);
     for (const x of d.peers) {
       const fid = `fw:${x.firewall_id}`;
       if (!seen.has(fid)) { seen.add(fid); nodes.push({ id: fid, name: x.firewall_name, symbol: "roundRect", symbolSize: [Math.max(96, x.firewall_name.length * 7 + 20), 28], itemStyle: { color: PALETTES[theme][0] }, label: { show: true, position: "inside", color: "#fff", fontSize: 11 }, kind: "fw" }); }
@@ -242,10 +242,9 @@ function Prefixes({ range, fw }: { range: string; fw: (string | number)[] }) {
         <Kpi label="Installed BGP routes" value={fmtNum(d.totals.installed)} sub={`${fmtNum(d.totals.ecmp)} with ECMP`} />
         <Kpi label="Unstable prefixes" value={fmtNum(d.totals.unstable)} sub={`in ${range}`} tone={d.totals.unstable ? "warn" : "ok"} />
         <Kpi label="Would be dampened now" value={fmtNum(d.totals.suppressed_now)} tone={d.totals.suppressed_now ? "bad" : "ok"} sub="penalty ≥ 2000" />
-        <Kpi label="Critical prefixes installed" value={d.critical.exists ? fmtNum(d.totals.critical_installed) : "—"} sub={d.critical.exists ? `watchlist ${d.critical.watchlist}` : "no watchlist"} />
+        <Kpi label="Critical prefixes installed" value={d.critical.exists ? fmtNum(d.totals.critical_installed) : "—"} sub={d.critical.exists ? `of ${fmtNum(d.critical.networks.length)} listed` : "no critical prefixes listed"} />
       </div>
-      {!d.critical.exists && <p className="text-xs text-muted">Create an IP watchlist named <span className="font-mono">{d.critical.watchlist}</span> (Watchlists page) with your critical
-        subnets (data centre, payment, core sites) to highlight them here and alert when they are withdrawn or move to another path.</p>}
+      <CriticalPrefixes />
       {d.critical.exists && d.critical.events.length > 0 && <Card title={`Critical prefix changes (${d.critical.events.length})`} bodyClass="p-0">
         <EventTable rows={d.critical.events} /></Card>}
       <Card title="Most unstable prefixes" bodyClass="p-0" right={<span className="text-2xs text-muted">route-flap dampening: withdraw +1000, path change +500, half-life 15 min, suppress ≥ 2000</span>}>
@@ -351,7 +350,7 @@ function PeerDrawer({ x, range, onClose }: { x: any; range: string; onClose: () 
         </Card>}
         {d.time_in_state?.states?.length > 0 && <Card title="Time in each state (API polls)">
           <div className="flex h-3 rounded overflow-hidden mb-2">{d.time_in_state.states.map((s: any, i: number) =>
-            <div key={s.state} style={{ width: `${s.pct}%`, background: s.state.toLowerCase() === "established" ? "#10b981" : PALETTES[theme][(i + 3) % 8] }} title={`${s.state} ${s.pct}%`} />)}</div>
+            <div key={s.state} style={{ width: `${s.pct}%`, background: s.state.toLowerCase() === "established" ? statusColor(theme, "established") : PALETTES[theme][(i + 3) % 8] }} title={`${s.state} ${s.pct}%`} />)}</div>
           <ul className="text-xs space-y-1">{d.time_in_state.states.map((s: any) => <li key={s.state}><b>{s.state}</b> {dur(s.seconds)} ({s.pct}%){s.state.toLowerCase() !== "established" && s.hint && <span className="text-muted"> · {s.hint}</span>}</li>)}</ul>
         </Card>}
         {d.samples.length > 0 && <Card title="Prefixes received (API polls)"><Chart height={200} option={{
@@ -377,4 +376,46 @@ function PeerDrawer({ x, range, onClose }: { x: any; range: string; onClose: () 
       </div>}
     </Drawer>
   );
+}
+
+// ------------------------------------------------------------------ critical prefix list (NMS setting)
+/** The networks that matter most (data centre, payment, core sites): highlighted in the route table, and the
+ *  bgp_critical_prefix rule alerts when one is withdrawn or moves to another path. Administrators edit the list. */
+function CriticalPrefixes() {
+  const me = useMe();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["bgp-critical"], queryFn: () => api<{ items: { prefix: string; label: string }[] }>("/bgp/critical-prefixes") });
+  const [text, setText] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const items = q.data?.items || [];
+  const current = items.map((x) => (x.label ? `${x.prefix} ${x.label}` : x.prefix)).join("\n");
+  const save = async () => {
+    const rows = (text ?? current).split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [prefix, ...rest] = l.split(/\s+/);
+      return { prefix, label: rest.join(" ").slice(0, 128) };
+    });
+    try {
+      await api("/bgp/critical-prefixes", { method: "PUT", body: { items: rows } });
+      setText(null);
+      setMsg(`Saved ${rows.length} prefix${rows.length === 1 ? "" : "es"}.`);
+      qc.invalidateQueries({ queryKey: ["bgp-critical"] });
+      qc.invalidateQueries({ queryKey: ["bgp-prefixes"] });
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  return <Card title={`Critical prefixes (${items.length})`}>
+    <p className="text-xs text-muted mb-2">One network per line, optionally followed by a label (for example <span className="font-mono">10.20.0.0/16 Data centre</span>).
+      Listed networks are starred in the route table, and an alert is raised when one is withdrawn or changes path.</p>
+    {me.role === "admin" ? <>
+      <textarea aria-label="Critical prefixes" className="input w-full font-mono text-xs h-32" value={text ?? current}
+        onChange={(e) => { setText(e.target.value); setMsg(""); }} />
+      <div className="flex items-center gap-2 mt-2">
+        <button type="button" className="btn btn-primary" disabled={text === null} onClick={save}>Save</button>
+        {text !== null && <button type="button" className="btn" onClick={() => { setText(null); setMsg(""); }}>Cancel</button>}
+        {msg && <span role="status" className="text-xs text-muted">{msg}</span>}
+      </div>
+    </> : items.length ? <ul className="text-xs font-mono">{items.map((x) => <li key={x.prefix}>{x.prefix}{x.label && <span className="text-muted"> {x.label}</span>}</li>)}</ul>
+      : <p className="text-xs text-muted">No critical prefixes are listed. An administrator can add them here.</p>}
+  </Card>;
 }

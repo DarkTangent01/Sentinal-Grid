@@ -1,7 +1,7 @@
-import { ReactNode, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import { Modal } from "../../components/ui";
+import { Modal, Pager as SharedPager } from "../../components/ui";
 
 export const RANGES: [string, string][] = [["1h", "1 hour"], ["6h", "6 hours"], ["24h", "24 hours"], ["7d", "7 days"], ["30d", "30 days"]];
 
@@ -26,19 +26,17 @@ export function RangeSelect({ value, onChange }: { value: string; onChange: (v: 
     {RANGES.map(([k, l]) => <option key={k} value={k}>Last {l}</option>)}</select>;
 }
 
-export function Pager({ total, limit, offset, onChange }: { total: number; limit: number; offset: number; onChange: (o: number) => void }) {
-  if (total <= limit) return null;
-  return <div className="flex items-center gap-2 p-2 text-xs text-muted">
-    <button className="btn" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>Previous</button>
-    <span>{offset + 1}–{Math.min(total, offset + limit)} of {total}</span>
-    <button className="btn" disabled={offset + limit >= total} onClick={() => onChange(offset + limit)}>Next</button></div>;
+/** Offset-based wrapper over the shared Pager (the TACACS+ APIs page by offset / limit). */
+export function Pager({ total, limit, offset, onChange, hasMore }: { total?: number; limit: number; offset: number; onChange: (o: number) => void; hasMore?: boolean }) {
+  return <SharedPager page={Math.floor(offset / limit) + 1} size={limit} total={total} hasMore={hasMore} onPage={(p) => onChange((p - 1) * limit)} />;
 }
 
 export function Status({ s }: { s?: string | null }) {
   const c: Record<string, string> = { up: "text-emerald-300", passed: "text-emerald-300", succeeded: "text-emerald-300", in_sync: "text-emerald-300",
     permit: "text-emerald-300", degraded: "text-amber-300", pending: "text-amber-300", pending_approval: "text-amber-300", queued: "text-amber-300",
     running: "text-sky-300", down: "text-red-300", failed: "text-red-300", invalid: "text-red-300", deny: "text-red-300", rejected: "text-red-300",
-    rolled_back: "text-amber-300", cancelled: "text-muted", unknown: "text-muted", not_enforced: "text-amber-300" };
+    rolled_back: "text-amber-300", cancelled: "text-muted", unknown: "text-muted", not_enforced: "text-amber-300",
+    closed: "text-emerald-300", open: "text-sky-300", partial: "text-amber-300" };  // accounting sessions
   return <span className={c[s || ""] || "text-muted"}>{(s || "—").replace(/_/g, " ")}</span>;
 }
 
@@ -64,8 +62,6 @@ export function ErrorText({ e }: { e: unknown }) {
   return <div role="alert" className="text-sm text-red-400 mt-2">{(e as Error).message}</div>;
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <div><label className="label">{label}</label>{children}</div>;
-}
+export { Field } from "../../components/ui";
 
 export const list = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
