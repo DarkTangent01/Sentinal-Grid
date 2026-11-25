@@ -71,7 +71,7 @@ services:
 
   clickhouse:
     # 24.8 LTS is past end of support: last patch release, pinned by digest. 25.8 LTS: security/DOCKER_SECURITY_AUDIT.md DS2-1
-    image: clickhouse/clickhouse-server:24.8.14.39@sha256:1ffa82edee000a42c09313bd9f1293d94c570aee74babc1b3ca9983a35fa597b
+    image: clickhouse/clickhouse-server:26.10.9.12@sha256:60bb5a5d7c0df82933d15dacf5a71e1384f8109cb158e6d0e4023b09cbaf72a3
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
