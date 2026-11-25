@@ -81,6 +81,7 @@ const ALL_NAV: Record<Product, NavGroup[]> = {
     { title: "Application & Protocol Intelligence", items: [{ to: "/nms/traffic?tab=overview", label: "Traffic Overview", icon: "explorer", primary: true },
       { to: "/nms/traffic?tab=applications", label: "Applications", icon: "web" }, { to: "/nms/traffic?tab=protocols", label: "Protocols & QUIC", icon: "ports" },
       { to: "/nms/traffic?tab=sources", label: "Top Talkers", icon: "sources" }, { to: "/nms/traffic?tab=conversations", label: "Conversations", icon: "graph" },
+      { to: "/nms/traffic?tab=devices", label: "Device Intelligence", icon: "assets" },
       { to: "/nms/traffic?tab=vlans", label: "VLAN Intelligence", icon: "switch" }, { to: "/nms/traffic?tab=interfaces", label: "Interface Traffic", icon: "health" },
       { to: "/nms/traffic?tab=domains", label: "DNS & Domains", icon: "dns" }, { to: "/nms/traffic?tab=detections", label: "Traffic Detections", icon: "alerts" },
       { to: "/nms/traffic?tab=rules", label: "Traffic Rules", icon: "policies" }, { to: "/nms/traffic?tab=collectors", label: "Flow Collectors", icon: "compliance" }] },
