@@ -3,7 +3,7 @@
 #
 # Upstream describes tac_plus-ng as work in progress: test in a lab before pointing production devices at it, and keep
 # device-local emergency access configured.
-FROM debian:12.15-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS build
+FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
 ARG TAC_PLUS_NG_COMMIT=dc3ce306f0a9753c2ae8cb4cc761d8c8a33b7b6b
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git make clang perl libpcre2-dev libssl-dev libc-ares-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -12,7 +12,7 @@ RUN git clone https://github.com/MarcJHuber/event-driven-servers /src && cd /src
     && test -x /usr/local/sbin/tac_plus-ng && ls /usr/local/sbin /usr/local/lib/mavis
 # upstream's install ignores DESTDIR, so it installs into this stage's (otherwise empty) /usr/local, copied below
 
-FROM debian:12.15-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 ARG TAC_PLUS_NG_COMMIT=dc3ce306f0a9753c2ae8cb4cc761d8c8a33b7b6b
 ENV TAC_PLUS_NG_COMMIT=$TAC_PLUS_NG_COMMIT
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates python3 perl libpcre2-8-0 libssl3 libc-ares2 \
