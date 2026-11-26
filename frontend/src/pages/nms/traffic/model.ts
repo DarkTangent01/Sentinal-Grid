@@ -79,12 +79,12 @@ export function pivot(points: { t: string; series: string; [k: string]: unknown 
 }
 
 export const CONFIDENCE: Record<string, { label: string; cls: string; help: string }> = {
-  confirmed: { label: "Confirmed", cls: "bg-emerald-500/15 text-emerald-300", help: "Firewall application control, or packet bytes in a sample prove the protocol" },
-  high: { label: "High", cls: "bg-sky-500/15 text-sky-300", help: "The server address was resolved from a matching DNS name (not a shared address)" },
-  probable: { label: "Probable", cls: "bg-indigo-500/15 text-indigo-300", help: "The server is in the provider's network (ASN); the application is not identified" },
-  "port-based": { label: "Port-based", cls: "bg-amber-500/15 text-amber-300", help: "Protocol and port match a signature; nothing about the payload is known" },
-  unknown: { label: "Unknown", cls: "bg-slate-700/60 text-slate-300", help: "No signature or evidence" },
-  observed: { label: "Observed", cls: "bg-slate-700/60 text-slate-200", help: "Measured traffic pattern" },
+  confirmed: { label: "Confirmed", cls: "text-emerald-300", help: "Firewall application control, or packet bytes in a sample prove the protocol" },
+  high: { label: "High", cls: "text-sky-300", help: "The server address was resolved from a matching DNS name (not a shared address)" },
+  probable: { label: "Probable", cls: "text-slate-300", help: "The server is in the provider's network (ASN); the application is not identified" },
+  "port-based": { label: "Port-based", cls: "text-amber-300", help: "Protocol and port match a signature; nothing about the payload is known" },
+  unknown: { label: "Unknown", cls: "text-slate-300", help: "No signature or evidence" },
+  observed: { label: "Observed", cls: "text-slate-300", help: "Measured traffic pattern" },
 };
 
 export function directionLabel(d: string | null | undefined): string {

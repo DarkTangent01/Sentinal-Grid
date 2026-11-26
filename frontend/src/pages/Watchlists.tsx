@@ -25,7 +25,7 @@ export function Watchlists() {
           <Loading q={q} />
           {q.data && !q.data.length && <Empty text="No watchlists yet." />}
           <ul>{(q.data || []).map((w) => (
-            <li key={w.id}><button className={`w-full text-left px-4 py-2.5 border-b border-line/60 hover:bg-slate-800/40 ${sel?.id === w.id ? "bg-brand-500/10" : ""}`} onClick={() => setSelId(w.id)}>
+            <li key={w.id}><button className={`w-full text-left px-4 py-2.5 border-b border-line/60 hover:bg-slate-800/40 ${sel?.id === w.id ? "bg-hover" : ""}`} onClick={() => setSelId(w.id)}>
               <div className="font-mono text-sm text-slate-100 truncate">{w.name}</div>
               <div className="text-2xs text-muted">{w.kind} · {fmtNum(w.items)} item{w.items === 1 ? "" : "s"}</div>
             </button></li>))}</ul>

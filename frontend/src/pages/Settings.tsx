@@ -150,7 +150,7 @@ function Users() {
           <td className="whitespace-nowrap">{u.role === "admin" ? <span className="text-xs text-muted">all products (admin)</span> : PRODS.map(([k, l]) =>
             <label key={k} className="inline-flex items-center gap-1 mr-3 text-xs"><input type="checkbox" checked={(u.assigned_products || []).includes(k)}
               onChange={() => patch.mutate({ id: u.id, body: { products: flip(u.assigned_products || [], k) } })} />{l}</label>)}
-            {u.role !== "admin" && !(u.assigned_products || []).length && <span className="pill bg-amber-500/15 text-amber-300">no access</span>}</td>
+            {u.role !== "admin" && !(u.assigned_products || []).length && <span className="pill text-amber-300">no access</span>}</td>
           <td>{u.role === "admin" ? <span className="text-xs text-muted">all sites (admin)</span> :
             <input className="input py-1 text-xs w-44" defaultValue={(u.sites || []).join(", ")} placeholder="all sites" aria-label={`NMS sites of ${u.username}`}
               title="Comma-separated sites this account may see in Sentinel NMS; empty = every site"

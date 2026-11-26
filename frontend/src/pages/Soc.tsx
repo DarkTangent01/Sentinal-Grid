@@ -19,8 +19,8 @@ export function dur(s: number | null | undefined): string {
   return `${(s / 86400).toFixed(1)} d`;
 }
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v}%`);
-const LEVEL: Record<string, string> = { critical: "bg-red-500/15 text-red-300", high: "bg-orange-500/15 text-orange-300", medium: "bg-amber-500/15 text-amber-300",
-  low: "bg-sky-500/15 text-sky-300", none: "bg-slate-500/15 text-slate-300" };
+const LEVEL: Record<string, string> = { critical: "text-red-300", high: "text-orange-300", medium: "text-amber-300",
+  low: "text-sky-300", none: "text-slate-300" };
 
 // ------------------------------------------------------------------ SOC overview
 export function SocOverview() {
@@ -129,7 +129,7 @@ function Bars({ data, order }: { data: Record<string, number>; order?: string[] 
   const keys = (order || Object.keys(data)).filter((k) => data[k]);
   const max = Math.max(1, ...keys.map((k) => data[k]));
   return <ul className="space-y-1.5 text-sm">{keys.map((k) => <li key={k} className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2">
-    <span className="truncate">{k.replace(/_/g, " ")}</span><span className="h-2 rounded bg-slate-800"><span className="block h-2 rounded bg-sky-500" style={{ width: `${(100 * data[k]) / max}%` }} /></span>
+    <span className="truncate">{k.replace(/_/g, " ")}</span><span className="h-2 rounded bg-slate-800"><span className="block h-2 rounded bg-slate-400" style={{ width: `${(100 * data[k]) / max}%` }} /></span>
     <span className="tabular-nums text-right">{data[k]}</span></li>)}</ul>;
 }
 
@@ -211,7 +211,7 @@ export function AttackPage() {
       <div className="grid-cards xl:grid-cols-2">
         <Card title="Coverage by tactic"><Chart height={360} option={opt} ariaLabel="ATT&CK coverage by tactic" /></Card>
         <Card title={`Alerts by tactic (last ${days} days)`} bodyClass="p-0"><TableWrap><table className="tbl"><thead><tr><th>Tactic</th><th className="num">Techniques</th><th className="num">Covered</th><th className="num">Alerts</th></tr></thead>
-          <tbody>{d.tactics.map((t: any) => <tr key={t.id} {...rowProps(() => setTactic(t.id === tactic ? "" : t.id))} className={tactic === t.id ? "bg-brand-500/[0.06]" : ""}>
+          <tbody>{d.tactics.map((t: any) => <tr key={t.id} {...rowProps(() => setTactic(t.id === tactic ? "" : t.id))} className={tactic === t.id ? "bg-hover" : ""}>
             <td>{t.name} <span className="text-2xs text-muted font-mono">{t.id}</span></td><td className="num">{t.techniques}</td><td className="num">{t.covered}</td><td className="num">{fmtNum(t.alerts)}</td></tr>)}</tbody></table></TableWrap></Card>
       </div>
       <Card title={`Techniques (${rows.length})`} bodyClass="p-0" right={<div className="flex flex-wrap gap-2">
@@ -221,7 +221,7 @@ export function AttackPage() {
         <select aria-label="Period" className="input py-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[7, 30, 90].map((n) => <option key={n} value={n}>alerts: {n} days</option>)}</select></div>}>
         <TableWrap><table className="tbl"><thead><tr><th>Technique</th><th>Status</th><th className="num">Rules</th><th className="num">Alerts</th><th className="num">Precision</th><th>Data sources here</th></tr></thead>
           <tbody>{rows.map((t: any) => <tr key={t.id} {...rowProps(() => setSel(t.id))}><td className="cell-wrap min-w-[16rem]"><span className="font-mono text-xs text-muted mr-1.5">{t.id}</span>{t.name}</td>
-            <td><span className={`pill ${t.status === "covered" ? "bg-emerald-500/15 text-emerald-300" : t.status === "disabled" ? "bg-amber-500/15 text-amber-300" : "bg-slate-500/15 text-slate-300"}`}>
+            <td><span className={`pill ${t.status === "covered" ? "text-emerald-300" : t.status === "disabled" ? "text-amber-300" : "text-slate-300"}`}>
               {t.status === "covered" ? (t.via ? "covered (sub-technique)" : "covered") : t.status === "disabled" ? "rule disabled" : "gap"}</span></td>
             <td className="num">{t.rules_enabled}/{t.rules.length}</td><td className="num">{fmtNum(t.alerts)}</td><td className="num">{t.precision == null ? "—" : `${t.precision}% (${t.judged})`}</td>
             <td className="cell-wrap text-xs min-w-[12rem]">{t.data_sources}</td></tr>)}</tbody></table></TableWrap></Card>
@@ -250,9 +250,9 @@ function TechniqueDrawer({ tid, days, onClose }: { tid: string; days: number; on
 }
 
 // ------------------------------------------------------------------ response actions
-const RSTATUS: Record<string, string> = { pending: "bg-amber-500/15 text-amber-300", approved: "bg-sky-500/15 text-sky-300", applied: "bg-sky-500/15 text-sky-300",
-  verified: "bg-emerald-500/15 text-emerald-300", not_verified: "bg-red-500/15 text-red-300", rejected: "bg-slate-500/15 text-slate-300", done: "bg-emerald-500/15 text-emerald-300",
-  rolled_back: "bg-slate-500/15 text-slate-300", cancelled: "bg-slate-500/15 text-slate-300", failed: "bg-red-500/15 text-red-300" };
+const RSTATUS: Record<string, string> = { pending: "text-amber-300", approved: "text-sky-300", applied: "text-sky-300",
+  verified: "text-emerald-300", not_verified: "text-red-300", rejected: "text-slate-300", done: "text-emerald-300",
+  rolled_back: "text-slate-300", cancelled: "text-slate-300", failed: "text-red-300" };
 const KIND_LABEL: Record<string, string> = { block_ip: "Block address", disable_account: "Disable account", isolate_host: "Isolate host", enrich_ip: "Enrich address",
   collect_evidence: "Collect evidence", notify: "Notify" };
 
@@ -275,7 +275,7 @@ export function ResponsePage() {
     <Card bodyClass="p-0"><Loading q={q} />
       {q.data && (!items.length ? <Empty text="No response actions." /> :
         <TableWrap><table className="tbl"><thead><tr><th>Action</th><th>Target</th><th>Status</th><th>Requested</th><th>Approved / rejected</th><th>Incident</th><th>Reason</th></tr></thead>
-          <tbody>{items.map((a) => <tr key={a.id} {...rowProps(() => setSel(a.id))}><td>{KIND_LABEL[a.kind]}{a.can_decide && <span className="pill bg-amber-500/15 text-amber-300 ml-1.5">needs you</span>}</td>
+          <tbody>{items.map((a) => <tr key={a.id} {...rowProps(() => setSel(a.id))}><td>{KIND_LABEL[a.kind]}{a.can_decide && <span className="pill text-amber-300 ml-1.5">needs you</span>}</td>
             <td className="font-mono text-xs nowrap">{a.target}</td><td><span className={`pill ${RSTATUS[a.status]}`}>{a.status.replace("_", " ")}</span></td>
             <td className="text-xs">{a.requested_by}<div><Time v={a.created_at} /></div></td><td className="text-xs">{a.decided_by || "—"}</td>
             <td>{a.incident_id ? <Link className="link" to={`/incidents/${a.incident_id}`} onClick={(e) => e.stopPropagation()}>#{a.incident_id}</Link> : "—"}</td>

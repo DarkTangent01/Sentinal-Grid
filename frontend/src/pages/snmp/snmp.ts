@@ -13,8 +13,8 @@ export const CONFIDENCE: Record<string, string> = {
 };
 
 export const CELL: Record<string, [string, string]> = {
-  observed: ["bg-emerald-500/15 text-emerald-300", "observed"], implemented: ["bg-sky-500/15 text-sky-300", "implemented"],
-  unsupported: ["bg-slate-700/60 text-slate-400", "unsupported"], failing: ["bg-red-500/15 text-red-300", "failing"],
+  observed: ["text-emerald-300", "observed"], implemented: ["text-sky-300", "implemented"],
+  unsupported: ["text-slate-300", "unsupported"], failing: ["text-red-300", "failing"],
   not_applicable: ["text-muted", "—"],
 };
 

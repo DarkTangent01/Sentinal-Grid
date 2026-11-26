@@ -16,13 +16,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db.models import Alert, Asset
 from .incidents import entity_of
-from .products import alert_product
+from .products import alert_product, product_rule_keys
 
 SEV_POINTS = {"informational": 1, "low": 4, "medium": 10, "high": 22, "critical": 40}
 CONF = {"low": 0.6, "medium": 0.8, "high": 1.0}
@@ -75,18 +76,35 @@ def score_entity(alerts: list[Alert], now: datetime, criticality: str = "") -> d
             "tactics": sorted({(a.mitre or {}).get("tactic_name") for a in alerts if (a.mitre or {}).get("tactic_name")} - {None})}
 
 
-async def entity_alerts(s: AsyncSession, days: int = 30, product: str = "grid") -> dict[tuple[str, str], list[Alert]]:
+ASSET_BATCH = 5000
+
+
+# Only these Alert fields are used for scoring, entity grouping and the detail list. The evidence JSON is large (it was
+# ~70 % of the load time for 85k alerts), so only the three keys used here are read from it, in SQL.
+_COLS = ("id", "name", "rule_key", "group_key", "src_ip", "firewall_ids", "sites", "severity", "status", "disposition", "last_seen", "mitre",
+         "incident_id", "explanation")
+
+
+async def entity_alerts(s: AsyncSession, days: int = 30, product: str = "grid") -> dict[tuple[str, str], list]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    out: dict[tuple[str, str], list[Alert]] = defaultdict(list)
-    for a in (await s.execute(select(Alert).where(Alert.last_seen >= since))).scalars():
-        if alert_product(a.rule_key) != product:
-            continue
+    out: dict[tuple[str, str], list] = defaultdict(list)
+    keys = await product_rule_keys(s, product, since)
+    if not keys:
+        return out
+    ev = Alert.evidence
+    q = select(*(getattr(Alert, c) for c in _COLS), ev["confidence"].as_string(), ev["user"].as_string(), ev["group"]["user"].as_string()) \
+        .where(Alert.last_seen >= since, Alert.rule_key.in_(keys))
+    for row in (await s.execute(q)).all():
+        conf, user, guser = row[-3:]
+        evidence = {k: v for k, v in (("confidence", conf), ("user", user)) if v}
+        if guser:
+            evidence["group"] = {"user": guser}
+        a = SimpleNamespace(**dict(zip(_COLS, row[:len(_COLS)])), evidence=evidence)
         kind, ent = entity_of(a)
         if kind in ("ip", "user") and ent:
             out[(kind, ent)].append(a)
-        u = (a.evidence or {}).get("group", {}).get("user") if isinstance((a.evidence or {}).get("group"), dict) else None
-        if u and (kind, ent) != ("user", u):
-            out[("user", u)].append(a)       # rules grouped by user also count for the user
+        if guser and (kind, ent) != ("user", guser):
+            out[("user", guser)].append(a)       # rules grouped by user also count for the user
     return out
 
 
@@ -94,7 +112,9 @@ async def ranking(s: AsyncSession, days: int = 30, kind: str | None = None, limi
     now = datetime.now(timezone.utc)
     groups = await entity_alerts(s, days)
     ips = [e for (k, e) in groups if k == "ip"]
-    assets = {a.ip: a for a in (await s.execute(select(Asset).where(Asset.ip.in_(ips)))).scalars()} if ips else {}
+    assets: dict = {}
+    for i in range(0, len(ips), ASSET_BATCH):   # batched: one IN list is capped at 32,767 parameters by PostgreSQL
+        assets.update({a.ip: a for a in (await s.execute(select(Asset).where(Asset.ip.in_(ips[i:i + ASSET_BATCH])))).scalars()})
     rows = []
     for (k, ent), alerts in groups.items():
         if kind and k != kind:

@@ -9,7 +9,7 @@ import { ActionForm } from "./Soc";
 import { Mitre } from "../components/Mitre";
 import { useNavigate } from "react-router-dom";
 
-const STATUS_COLORS: Record<string, string> = { new: "bg-red-600/30 text-red-200", investigating: "bg-amber-600/30 text-amber-200", resolved: "bg-emerald-700/30 text-emerald-200", suppressed: "bg-slate-700 text-slate-300" };
+const STATUS_COLORS: Record<string, string> = { new: "text-red-300", investigating: "text-amber-300", resolved: "text-emerald-300", suppressed: "bg-slate-700 text-slate-300" };
 
 export function Alerts() {
   const [status, setStatus] = useState("open");
@@ -42,7 +42,7 @@ export function Alerts() {
           <thead><tr><th>Severity</th><th>Detection</th><th>ATT&CK</th><th>Status</th><th>Source</th><th>Sites</th><th>First seen</th><th>Last seen</th><th className="num">Events</th><th>Why it triggered</th></tr></thead>
           <tbody>{q.data.items.map((a: any) => (
             <tr key={a.id} {...rowProps(() => setSel(a))} aria-label={`Open alert ${a.name}`}>
-              <td className="nowrap"><Sev s={a.severity} /></td><td className="min-w-[12rem]">{a.name}{a.incident_id && <span className="pill bg-sky-500/15 text-sky-300 ml-1">incident #{a.incident_id}</span>}</td>
+              <td className="nowrap"><Sev s={a.severity} /></td><td className="min-w-[12rem]">{a.name}{a.incident_id && <span className="pill text-sky-300 ml-1">incident #{a.incident_id}</span>}</td>
               <td className="min-w-[9rem]"><Mitre m={a.mitre} /></td>
               <td className="nowrap"><span className={`pill ${STATUS_COLORS[a.status]}`}>{a.status}</span></td>
               <td><IpLink ip={a.src_ip} /></td><td className="text-xs min-w-[7rem]">{(a.sites || []).join(", ") || "—"}</td>

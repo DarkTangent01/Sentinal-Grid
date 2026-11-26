@@ -7,7 +7,7 @@ import { fmtBytes, fmtDuration, fmtNum, getTimezone } from "../lib/format";
 import { Chart, PALETTES, axisStyle } from "../components/Chart";
 import { Card, Drawer, Empty, IpLink, Kpi, Loading, TableWrap, Time, rowProps } from "../components/ui";
 
-const ST: Record<string, [string, string]> = { up: ["bg-emerald-400", "Up"], down: ["bg-red-500 animate-pulse", "Down"], stale: ["bg-slate-500", "No recent stats"] };
+const ST: Record<string, [string, string]> = { up: ["bg-emerald-400", "Up"], down: ["bg-red-500", "Down"], stale: ["bg-slate-500", "No recent stats"] };
 const bps = (v?: number | null) => (v == null ? "—" : `${fmtBytes(v / 8).replace(/B$/, "B/s")}`);
 
 export function VpnTunnels() {

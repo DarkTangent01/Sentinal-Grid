@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { RangeKey, useGlobal, useLastUpdated, useMe } from "../lib/context";
 import { fmtTime, fmtTimeShort } from "../lib/format";
 import { ThemeToggle } from "../lib/theme";
-import { ICONS, Sidebar, useSidebarCollapsed } from "./Sidebar";
+import { Sidebar, useSidebarCollapsed } from "./Sidebar";
 import { ADMIN, NAV, PRODUCT, Product, activeItem } from "../lib/products";
 
 const RANGES: [RangeKey, string][] = [["5m", "Last 5 min"], ["15m", "Last 15 min"], ["1h", "Last hour"], ["24h", "Last 24 h"], ["7d", "Last 7 days"], ["custom", "Custom…"]];
@@ -52,7 +52,7 @@ export function Layout({ children, onLogout, product }: { children: ReactNode; o
   return (
     <div className="flex h-full min-w-0">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 btn btn-primary">Skip to content</a>
-      {navOpen && <div className="fixed inset-0 z-30 bg-scrim/60 backdrop-blur-[1px] lg:hidden animate-fade-in" onClick={() => setNavOpen(false)} aria-hidden />}
+      {navOpen && <div className="fixed inset-0 z-30 bg-scrim/60 lg:hidden animate-fade-in" onClick={() => setNavOpen(false)} aria-hidden />}
       <Sidebar me={me} product={product} open={navOpen} collapsed={collapsed} setCollapsed={setCollapsed} onLogout={onLogout} lastIngest={lastIngest} />
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {demo && (
@@ -60,7 +60,7 @@ export function Layout({ children, onLogout, product }: { children: ReactNode; o
             <span className="dot dot-warn" aria-hidden />DEMO MODE — synthetic sanitized events from demo firewalls (source = <b>demo</b>) are present. They are not live telemetry.
           </div>
         )}
-        <header className="border-b border-line bg-panel2/80 backdrop-blur supports-[backdrop-filter]:bg-panel2/70 sticky top-0 z-20">
+        <header className="border-b border-line bg-bg sticky top-0 z-20">
           <div className="flex items-center gap-2 px-3 sm:px-5 h-12">
             <button type="button" className="btn btn-ghost btn-icon lg:hidden" aria-label="Open navigation" aria-controls="sidebar" aria-expanded={navOpen} onClick={() => setNavOpen(true)}>{MENU}</button>
             <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
@@ -70,8 +70,7 @@ export function Layout({ children, onLogout, product }: { children: ReactNode; o
                   <span aria-hidden>/</span></li>
                 {crumbs && <li className="hidden md:flex items-center gap-1.5 text-subtle shrink-0"><span>{crumbs.group}</span><span aria-hidden>/</span></li>}
                 <li className="flex items-center gap-2 min-w-0" aria-current="page">
-                  {crumbs?.icon && <span className="text-brand-400 shrink-0">{ICONS[crumbs.icon]}</span>}
-                  <span className="font-semibold text-slate-100 truncate">{crumbs?.label || PRODUCT[product].name}</span></li>
+                  <span className="font-medium text-slate-100 truncate">{crumbs?.label || PRODUCT[product].name}</span></li>
               </ol>
             </nav>
             <LastUpdated />

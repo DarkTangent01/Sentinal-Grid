@@ -227,7 +227,7 @@ function RadioSection({ r, current, range, onSelect }: { r: any; current: boolea
     keys.forEach((k) => (s[k] || []).forEach((p: any) => m.set(p.t, { ...(m.get(p.t) || { t: p.t }), [k]: p.v })));
     return [...m.values()].sort((a, b) => a.t.localeCompare(b.t));
   };
-  return <div className={`rounded-lg border p-3 space-y-3 ${current ? "border-sky-500/60" : "border-line"}`}>
+  return <div className={`rounded-lg border p-3 space-y-3 ${current ? "border-line-strong" : "border-line"}`}>
     <div className="flex items-center gap-2"><b>Slot {r.slot}</b><Band b={r.band} /><WState s={r.state} />{!current && <button className="btn py-0.5 text-xs" onClick={onSelect}>Focus</button>}</div>
     <div className="grid md:grid-cols-2 gap-4">
       <KV rows={[["Frequency", freqLabel(r)], ["Channel", `${dash(r.channel)}${r.dfs ? " (DFS)" : ""}${r.channel_assignment ? ` · ${r.channel_assignment === "automatic" ? "RRM assigned" : "static"}` : ""}`],

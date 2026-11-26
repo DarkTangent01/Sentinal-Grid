@@ -16,7 +16,7 @@ export function useSwitchMeta() {
 }
 
 const STATE: Record<string, [string, string]> = {
-  up: ["bg-emerald-400", "Up"], down: ["bg-red-500 animate-pulse", "Down"], auth_failed: ["bg-red-400", "Auth failed"],
+  up: ["bg-emerald-400", "Up"], down: ["bg-red-500", "Down"], auth_failed: ["bg-red-400", "Auth failed"],
   unknown: ["bg-slate-500", "Pending"], paused: ["bg-slate-700", "Paused"],
 };
 
@@ -26,9 +26,9 @@ export function StateDot({ s, monitoring }: { s: string; monitoring?: string }) 
 }
 
 const MSTATUS: Record<string, string> = {
-  healthy: "bg-emerald-500/15 text-emerald-300", unavailable: "bg-amber-500/15 text-amber-300", unsupported: "bg-slate-700/60 text-slate-400",
-  failed: "bg-red-500/15 text-red-300", stale: "bg-amber-500/15 text-amber-300", not_configured: "bg-slate-700/60 text-slate-300",
-  pending: "bg-slate-700/40 text-slate-400",
+  healthy: "text-emerald-300", unavailable: "text-amber-300", unsupported: "text-slate-300",
+  failed: "text-red-300", stale: "text-amber-300", not_configured: "text-slate-300",
+  pending: "text-slate-300",
 };
 
 export function MetricStatus({ s }: { s: string }) {
@@ -48,7 +48,7 @@ export function Oper({ s }: { s?: string }) {
 
 export function Flags({ f }: { f?: string[] }) {
   if (!f?.length) return null;
-  return <span className="inline-flex flex-wrap gap-1">{f.map((x) => <span key={x} title={x} className="pill bg-slate-700/60 text-slate-300 text-2xs">{x.replace(/_/g, " ")}</span>)}</span>;
+  return <span className="inline-flex flex-wrap gap-1">{f.map((x) => <span key={x} title={x} className="pill text-slate-300 text-2xs">{x.replace(/_/g, " ")}</span>)}</span>;
 }
 
 export function Util({ v }: { v?: number | null }) {

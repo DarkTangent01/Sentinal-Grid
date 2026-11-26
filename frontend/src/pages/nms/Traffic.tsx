@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, downloadUrl } from "../../lib/api";
 import { fmtBytes, fmtNum } from "../../lib/format";
 import { TimeChart, TopBar } from "../../components/charts";
-import { Bar, Card, Drawer, Empty, Kpi, Loading, Pager, SortTh, TableWrap, Tabs, Time, rowProps } from "../../components/ui";
+import { Bar, Card, Drawer, Empty, Kpi, Loading, Pager, SortTh, StatStrip, TableWrap, Tabs, Time, rowProps } from "../../components/ui";
 import { fmtBps } from "../switches/common";
 import { CONFIDENCE, DIRECTIONS, RANGES, TABS, TabKey, TrafficFilters, activeFilterCount, apiParams, directionLabel, pivot, readFilters, withFilters } from "./traffic/model";
 import { CollectorsTab, DetectionsTab, RulesTab, SettingsTab } from "./TrafficConfig";
@@ -154,22 +154,25 @@ function Overview({ nav }: { nav: Nav }) {
   return <div className="space-y-3">
     <Loading q={q} />
     {k && (k.bytes === 0 ? <Card><Empty text={<>No flow records match this window and filters. {col.data?.exporters?.length ? "" : "No device is exporting flows yet: see Collectors."}</>} /></Card> : <>
-      <div className="kpi-grid">
+      <div className="grid gap-2.5 grid-cols-2 lg:grid-cols-4">
         <Kpi label="Observed traffic" value={fmtBytes(k.bytes)} sub={k.sampled_bytes ? `${Math.round(100 * k.sampled_bytes / k.bytes)}% sampled (estimate)` : "measured (unsampled exports)"} />
-        <Kpi label="Packets" value={fmtNum(k.packets)} />
-        <Kpi label="Flow records" value={fmtNum(k.flows)} onClick={() => go({ tab: "flows" })} />
-        <Kpi label="Unique sources" value={fmtNum(k.sources)} onClick={() => go({ tab: "sources" })} />
-        <Kpi label="Unique destinations" value={fmtNum(k.destinations)} onClick={() => go({ tab: "destinations" })} />
-        <Kpi label="Applications" value={fmtNum(k.applications)} onClick={() => go({ tab: "applications" })} />
-        <Kpi label="Protocols" value={fmtNum(k.protocols)} onClick={() => go({ tab: "protocols" })} />
-        <Kpi label="Average throughput" value={fmtBps(k.avg_bps)} />
-        <Kpi label="Peak throughput" value={fmtBps(k.peak_bps)} sub={`per ${k.peak_bucket_seconds >= 3600 ? `${k.peak_bucket_seconds / 3600} h` : `${k.peak_bucket_seconds / 60} min`}`} />
-        <Kpi label="Inbound" value={fmtBytes(k.inbound)} onClick={() => go({ tab: "conversations", direction: "inbound" })} />
-        <Kpi label="Outbound" value={fmtBytes(k.outbound)} onClick={() => go({ tab: "conversations", direction: "outbound" })} />
-        <Kpi label="Internal (east-west)" value={fmtBytes(k.internal)} onClick={() => go({ tab: "conversations", direction: "east_west" })} />
-        <Kpi label="External" value={fmtBytes(k.external)} />
-        <Kpi label="Unclassified" value={fmtBytes(k.unknown)} sub={k.bytes ? `${(100 * k.unknown / k.bytes).toFixed(1)}%` : ""} onClick={() => go({ tab: "conversations", app: "Unknown" })} />
-        <Kpi label="Suspicious (open detections)" value={fmtNum(k.suspicious)} tone={k.suspicious ? "warn" : "ok"} onClick={() => go({ tab: "detections" })} />
+        <Kpi label="Peak throughput" value={fmtBps(k.peak_bps)} sub={`average ${fmtBps(k.avg_bps)} · per ${k.peak_bucket_seconds >= 3600 ? `${k.peak_bucket_seconds / 3600} h` : `${k.peak_bucket_seconds / 60} min`}`} />
+        <Kpi label="Unclassified" value={fmtBytes(k.unknown)} sub={k.bytes ? `${(100 * k.unknown / k.bytes).toFixed(1)}% of traffic` : ""} onClick={() => go({ tab: "conversations", app: "Unknown" })} />
+        <Kpi label="Open detections" value={fmtNum(k.suspicious)} tone={k.suspicious ? "warn" : undefined} onClick={() => go({ tab: "detections" })} />
+      </div>
+      <div className="card px-4 py-3">
+        <StatStrip items={([
+          ["Packets", fmtNum(k.packets)],
+          ["Flow records", <button type="button" className="link" onClick={() => go({ tab: "flows" })}>{fmtNum(k.flows)}</button>],
+          ["Sources", <button type="button" className="link" onClick={() => go({ tab: "sources" })}>{fmtNum(k.sources)}</button>],
+          ["Destinations", <button type="button" className="link" onClick={() => go({ tab: "destinations" })}>{fmtNum(k.destinations)}</button>],
+          ["Applications", <button type="button" className="link" onClick={() => go({ tab: "applications" })}>{fmtNum(k.applications)}</button>],
+          ["Protocols", <button type="button" className="link" onClick={() => go({ tab: "protocols" })}>{fmtNum(k.protocols)}</button>],
+          ["Inbound", <button type="button" className="link" onClick={() => go({ tab: "conversations", direction: "inbound" })}>{fmtBytes(k.inbound)}</button>],
+          ["Outbound", <button type="button" className="link" onClick={() => go({ tab: "conversations", direction: "outbound" })}>{fmtBytes(k.outbound)}</button>],
+          ["Internal (east-west)", <button type="button" className="link" onClick={() => go({ tab: "conversations", direction: "east_west" })}>{fmtBytes(k.internal)}</button>],
+          ["External", fmtBytes(k.external)],
+        ] as [string, ReactNode][])} />
       </div>
       {q.data.notes?.length > 0 && <ul className="text-2xs text-muted list-disc pl-5">{q.data.notes.map((x: string) => <li key={x}>{x}</li>)}</ul>}
       <Card title="Traffic trend" right={<select aria-label="Split by" className="input py-0.5 text-xs" value={by} onChange={(e) => setBy(e.target.value)}>

@@ -5,185 +5,192 @@
 @tailwind utilities;
 
 /* ---- Sentinel design tokens (docs/design-system.md) ----
-   RGB triplets so Tailwind opacity modifiers work. Night (default) uses the Sentinel navy foundation; day is the same
-   system on light surfaces. The product accent (brand-* scale, solid-*) follows <html data-product>: Sentinel NMS
-   sky, Sentinel Grid violet. Status colours have one meaning everywhere. */
+   RGB triplets so Tailwind opacity modifiers work. Night (default): true black and neutral graphite, no blue tint.
+   Day: white and neutral greys. Accents are restrained: primary actions are neutral (white on black / black on white);
+   the product accent (sky for Sentinel NMS, violet for Sentinel Grid, via <html data-product>) marks only selected
+   navigation, the product's own chart series and meaningful highlights. Status colours mean status, nothing else. */
 :root {
-  --bg: 11 18 32;              /* #0B1220 primary background */
-  --surface-2: 15 23 42;       /* #0F172A secondary background (sidebar, header, table heads) */
-  --surface: 17 28 46;         /* #111C2E surface (cards) */
-  --surface-3: 22 34 56;       /* #162238 elevated (menus, drawers, tooltips) */
-  --border: 38 52 73;          /* #263449 */
-  --text: 241 245 249;         /* #F1F5F9 */
-  --text-muted: 148 163 184;   /* #94A3B8 secondary text, 7.0:1 on surface */
-  --text-subtle: 100 116 139;  /* #64748B muted (labels, placeholders, disabled) */
-  --accent: 56 189 248;        /* #38BDF8 Sentinel / NMS accent */
-  --solid-brand: 56 189 248;   /* primary button fill: #38BDF8 with #0B1220 text = 9.1:1 */
-  --solid-brand-hover: 14 165 233;
-  --solid-on: 11 18 32;
-  --ok: 34 197 94;             /* #22C55E healthy / operational */
-  --warn: 245 158 11;          /* #F59E0B warning / degraded */
-  --bad: 239 68 68;            /* #EF4444 critical / down */
-  --info: 56 189 248;          /* #38BDF8 informational */
-  --unknown: 100 116 139;      /* #64748B unknown / disabled */
+  --bg: 9 9 9;                 /* #090909 application background */
+  --surface-2: 10 10 10;       /* #0A0A0A sidebar / header */
+  --surface: 17 17 17;         /* #111111 primary surface (cards) */
+  --surface-tile: 22 22 22;    /* #161616 secondary surface (tiles inside a card, table hover) */
+  --surface-3: 28 28 28;       /* #1C1C1C elevated (menus, dialogs, tooltips) */
+  --surface-hover: 34 34 34;   /* #222222 */
+  --border: 41 41 41;          /* #292929 */
+  --border-strong: 56 56 56;   /* #383838 */
+  --text: 245 245 245;         /* #F5F5F5 */
+  --text-muted: 161 161 170;   /* #A1A1AA secondary */
+  --text-subtle: 113 113 122;  /* #71717A muted */
+  --text-disabled: 82 82 91;   /* #52525B */
+  --accent: 56 189 248;        /* #38BDF8 Sentinel NMS (selected navigation, own series, highlights only) */
+  --solid-brand: 245 245 245;  /* primary action: #F5F5F5 with #090909 text */
+  --solid-brand-hover: 212 212 216;
+  --solid-on: 9 9 9;
+  --focus: 212 212 216;
+  --ok: 34 197 94;             /* #22C55E */
+  --warn: 245 158 11;          /* #F59E0B */
+  --bad: 239 68 68;            /* #EF4444 */
+  --info: 56 189 248;          /* #38BDF8 */
+  --unknown: 113 113 122;      /* #71717A */
   --sev-critical: 239 68 68;
   --sev-high: 249 115 22;
   --sev-medium: 245 158 11;
   --sev-low: 56 189 248;
-  --sev-info: 100 116 139;
-  --shadow: 2 6 23;
-  --scrim: 2 6 23;             /* overlay behind dialogs / the mobile drawer */
-  --grid-line: 148 163 184;
+  --sev-info: 113 113 122;
+  --shadow: 0 0 0;
+  --scrim: 0 0 0;
   --sidebar-w: 15rem;
-  /* chart chrome (components/Chart.tsx reads --chart-primary for the product's own series) */
   --chart-primary: 56 189 248;
-  --chart-text: 148 163 184;
-  --chart-strong: 241 245 249;
-  --chart-axis: 38 52 73;
-  --chart-split: 26 38 58;
-  --chart-tooltip: 22 34 56;
+  --chart-text: 113 113 122;
+  --chart-strong: 245 245 245;
+  --chart-axis: 41 41 41;
+  --chart-split: 28 28 28;
+  --chart-tooltip: 28 28 28;
   color-scheme: dark;
 }
-:root[data-product="grid"] {
-  --accent: 167 139 250;       /* #A78BFA Sentinel Grid accent */
-  --solid-brand: 167 139 250;  /* #A78BFA with #0B1220 text = 7.6:1 */
-  --solid-brand-hover: 139 92 246;
-  --chart-primary: 167 139 250;
-}
+:root[data-product="grid"] { --accent: 167 139 250; --chart-primary: 167 139 250; }   /* #A78BFA Sentinel Grid */
 
 :root.light {
-  --bg: 244 246 250;           /* #F4F6FA */
-  --surface-2: 248 250 252;    /* #F8FAFC */
+  --bg: 255 255 255;
+  --surface-2: 250 250 250;    /* #FAFAFA sidebar / header */
   --surface: 255 255 255;
+  --surface-tile: 250 250 250;
   --surface-3: 255 255 255;
-  --border: 226 232 240;       /* #E2E8F0 */
-  --text: 15 23 42;            /* #0F172A */
-  --text-muted: 71 85 105;     /* #475569, 7.6:1 on white */
-  --text-subtle: 100 116 139;  /* #64748B, 4.8:1 */
-  --accent: 3 105 161;         /* #0369A1, 5.9:1 on white */
-  --solid-brand: 2 132 199;    /* #0284C7 fill with white text: buttons use 600 → 700 hover */
-  --solid-brand-hover: 3 105 161;
+  --surface-hover: 244 244 245;
+  --border: 228 228 231;       /* #E4E4E7 */
+  --border-strong: 212 212 216;
+  --text: 9 9 11;
+  --text-muted: 82 82 91;      /* #52525B */
+  --text-subtle: 113 113 122;
+  --text-disabled: 161 161 170;
+  --accent: 2 132 199;         /* #0284C7 */
+  --solid-brand: 9 9 11;       /* primary action: black with white text */
+  --solid-brand-hover: 39 39 42;
   --solid-on: 255 255 255;
-  --ok: 21 128 61;             /* #15803D, AA on white */
-  --warn: 180 83 9;            /* #B45309 */
-  --bad: 185 28 28;            /* #B91C1C */
+  --focus: 63 63 70;
+  --ok: 21 128 61;
+  --warn: 180 83 9;
+  --bad: 185 28 28;
   --info: 3 105 161;
-  --unknown: 100 116 139;
+  --unknown: 113 113 122;
   --sev-critical: 220 38 38;
   --sev-high: 234 88 12;
   --sev-medium: 217 119 6;
   --sev-low: 2 132 199;
-  --sev-info: 100 116 139;
-  --shadow: 15 23 42;
-  --scrim: 15 23 42;
+  --sev-info: 113 113 122;
+  --shadow: 9 9 11;
+  --scrim: 9 9 11;
   --chart-primary: 2 132 199;
-  --chart-text: 71 85 105;
-  --chart-strong: 15 23 42;
-  --chart-axis: 203 213 225;
-  --chart-split: 238 242 247;
+  --chart-text: 113 113 122;
+  --chart-strong: 9 9 11;
+  --chart-axis: 228 228 231;
+  --chart-split: 244 244 245;
   --chart-tooltip: 255 255 255;
   color-scheme: light;
 }
-:root.light[data-product="grid"] {
-  --accent: 109 40 217;        /* #6D28D9, 7.1:1 on white */
-  --solid-brand: 124 58 237;   /* #7C3AED with white text = 5.7:1 */
-  --solid-brand-hover: 109 40 217;
-  --chart-primary: 124 58 237;
-}
+:root.light[data-product="grid"] { --accent: 124 58 237; --chart-primary: 124 58 237; }
 
 @layer base {
-  html { font-feature-settings: "cv02", "cv03", "cv04", "cv11"; }   /* Inter: open digits, single-storey a off — clearer at small sizes */
-  body { @apply bg-bg text-slate-200 antialiased font-sans; font-size: 13.5px; line-height: 1.5; transition: background-color .15s ease; }
-  ::selection { background: rgb(var(--accent) / 0.25); }
-  :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 4px; }
+  html { font-feature-settings: "cv02", "cv03", "cv04", "cv11"; }
+  body { @apply bg-bg text-slate-200 antialiased font-sans; font-size: 13px; line-height: 1.5; }
+  ::selection { background: rgb(var(--text-muted) / 0.3); }
+  :focus-visible { outline: 1.5px solid rgb(var(--focus)); outline-offset: 2px; border-radius: 4px; }
   h1, h2, h3 { letter-spacing: -0.01em; }
   code, kbd, samp, pre, .font-mono { font-feature-settings: normal; }
-  /* numbers that line up in tables, counters, timestamps */
   .tabular-nums, time { font-variant-numeric: tabular-nums; }
+  /* status dots stay still: pulsing indicators were decoration, not information */
+  .rounded-full.animate-pulse { animation: none; }
 }
 
 @layer components {
   /* ---- typography ---- */
-  .page-title { @apply text-2xl font-semibold tracking-tight text-slate-100; }
-  .section-title { @apply text-lg font-semibold text-slate-100; }
-  .eyebrow { @apply text-2xs font-semibold uppercase tracking-[0.08em] text-subtle; }
-  .metric { @apply text-xl sm:text-2xl xl:text-[1.625rem] leading-tight font-semibold tracking-tight tabular-nums; }
+  .page-title { @apply text-[22px] font-semibold tracking-tight text-slate-100; }
+  .section-title { @apply text-[15px] font-semibold text-slate-100; }
+  .eyebrow { @apply text-xs font-medium text-subtle; }
+  .metric { @apply text-xl xl:text-[22px] leading-tight font-semibold tracking-tight tabular-nums; }
 
-  /* ---- cards (grid/flex children: min-w-0 keeps wide tables and canvases inside their track) ---- */
-  .card { @apply bg-panel border border-line rounded-card min-w-0 flex flex-col shadow-card; }
-  .card-h { @apply px-4 py-2.5 border-b border-line text-sm font-semibold text-slate-100 flex flex-wrap items-center justify-between gap-2 min-w-0; }
+  /* ---- cards: subtle surface, one border, no shadow. A card inside a card becomes a flat tile (no second border),
+     so sections that group KPI cards do not draw boxes inside boxes. ---- */
+  .card { @apply bg-panel border border-line rounded-card min-w-0 flex flex-col; }
+  .card .card { @apply border-transparent bg-[rgb(var(--surface-tile))]; }
+  .card-h { @apply px-4 py-2.5 border-b border-line text-[13px] font-semibold text-slate-100 flex flex-wrap items-center justify-between gap-2 min-w-0; }
   .card-b { @apply p-4 min-w-0 flex-1; }
-  .card-interactive { @apply transition-[border-color,box-shadow,transform] duration-150 hover:border-brand-500/50 hover:shadow-pop; }
-  .grid-cards { @apply grid gap-4 min-w-0 items-start; }
+  .card-interactive { @apply transition-colors duration-100 hover:border-line-strong; }
+  .card .card-interactive:hover { @apply bg-hover; }
+  .grid-cards { @apply grid gap-3 min-w-0 items-start; }
   .grid-cards > * { min-width: 0; }
-  .kpi-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr)); }
+  .kpi-grid { @apply grid gap-2.5; grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr)); }
 
-  /* ---- buttons: default = secondary; primary, ghost, danger, icon ---- */
-  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium border border-line bg-panel2 text-slate-200
-                 hover:bg-elevated hover:border-slate-600 active:translate-y-px disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap
-                 transition-[background-color,border-color,color,box-shadow] duration-150; }
-  .btn-primary { @apply bg-solid-brand border-solid-brand text-solid-on font-semibold hover:bg-solid-brand-hover hover:border-solid-brand-hover shadow-sm; }
-  .btn-ghost { @apply bg-transparent border-transparent text-slate-300 hover:bg-slate-800/60 hover:border-transparent; }
-  .btn-danger { @apply bg-red-600/15 border-red-500/40 text-red-300 hover:bg-red-600/25 hover:border-red-500/60; }
-  .btn-icon { @apply px-2 py-1.5; }
-  .btn-sm { @apply px-2 py-1 text-xs rounded-md; }
+  /* ---- buttons: default = secondary (transparent + border); primary = neutral solid; ghost; danger ---- */
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium border border-line bg-transparent text-slate-200
+                 hover:bg-hover hover:border-line-strong disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap transition-colors duration-100; }
+  .btn-primary { @apply bg-solid-brand border-solid-brand text-solid-on hover:bg-solid-brand-hover hover:border-solid-brand-hover; }
+  .btn-ghost { @apply bg-transparent border-transparent text-slate-400 hover:text-slate-100 hover:bg-hover hover:border-transparent; }
+  .btn-danger { @apply bg-transparent border-red-500/40 text-red-400 hover:bg-red-500/10; }
+  .btn-icon { @apply px-1.5 py-1.5; }
+  .btn-sm { @apply px-2 py-1 text-xs; }
 
   /* ---- forms ---- */
-  .input { @apply bg-panel2 border border-line rounded-lg px-2.5 py-1.5 text-[13px] text-slate-100 focus:outline-none focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/20
-                   placeholder:text-subtle min-w-0 max-w-full transition-[border-color,box-shadow] duration-150 disabled:opacity-60; }
-  select.input { @apply pr-7; }
-  input[type="checkbox"], input[type="radio"] { accent-color: rgb(var(--accent)); }
+  .input { @apply bg-transparent border border-line rounded-md px-2.5 py-1.5 text-[13px] text-slate-100 focus:outline-none focus:border-line-strong focus:bg-panel
+                   placeholder:text-subtle min-w-0 max-w-full transition-colors duration-100 disabled:opacity-60; }
+  select.input { @apply pr-7 bg-bg; }
+  input[type="checkbox"], input[type="radio"] { accent-color: rgb(var(--text)); }
   .label { @apply block text-xs font-medium text-muted mb-1; }
   .help { @apply text-2xs text-subtle mt-1; }
-  .field-error { @apply text-2xs text-red-300 mt-1; }
+  .field-error { @apply text-2xs text-red-400 mt-1; }
 
-  /* ---- tables: compact rows, sticky heads inside .tbl-wrap / TableWrap ---- */
+  /* ---- tables: dense operational grids ---- */
   .tbl-wrap { @apply w-full overflow-x-auto; }
-  .tbl { @apply w-full text-[13px] border-collapse; }
-  .tbl th { @apply text-left text-2xs font-semibold text-subtle uppercase tracking-[0.06em] px-3 py-2 border-b border-line whitespace-nowrap align-bottom bg-panel2; }
-  .tbl td { @apply px-3 py-1.5 border-b border-line/60 align-top; }
+  .tbl { @apply w-full text-[12.5px] border-collapse; }
+  .tbl th { @apply text-left text-xs font-medium text-subtle px-3 py-2 border-b border-line whitespace-nowrap align-bottom bg-panel; }
+  .tbl td { @apply px-3 py-[5px] border-b border-line/70 align-top; }
   .tbl td.num, .tbl th.num { @apply text-right tabular-nums whitespace-nowrap; }
   .tbl td.nowrap { @apply whitespace-nowrap; }
   @media (max-width: 639px) { .tbl td:not(.cell-wrap) { white-space: nowrap; } }
-  .tbl tbody tr { @apply transition-colors duration-100; }
-  .tbl tbody tr:hover { @apply bg-brand-500/[0.05]; }
+  .tbl tbody tr:hover { @apply bg-[rgb(var(--surface-tile))]; }
   .tbl tbody tr:last-child td { @apply border-b-0; }
   .tbl tbody tr[tabindex] { @apply cursor-pointer; }
   .tbl tbody tr[tabindex]:focus-visible { outline-offset: -2px; }
   .cell-wrap { @apply [overflow-wrap:anywhere]; }
   .cell-trunc { @apply block truncate; }
-  /* technical identifiers: IPs, MACs, ports, IDs, hashes */
   .mono { @apply font-mono text-[12px] tabular-nums; }
 
-  .link { @apply text-brand-400 hover:text-brand-300 hover:underline underline-offset-2 cursor-pointer bg-transparent p-0 border-0 text-left; }
-  .pill { @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium whitespace-nowrap; }
-  .sev-critical { @apply bg-sev-critical/15 text-red-300 ring-1 ring-inset ring-sev-critical/35; }
-  .sev-high { @apply bg-sev-high/15 text-orange-300 ring-1 ring-inset ring-sev-high/35; }
-  .sev-medium { @apply bg-sev-medium/15 text-amber-300 ring-1 ring-inset ring-sev-medium/35; }
-  .sev-low { @apply bg-sev-low/15 text-sky-300 ring-1 ring-inset ring-sev-low/35; }
-  .sev-informational { @apply bg-sev-info/15 text-slate-300 ring-1 ring-inset ring-sev-info/30; }
+  /* links are neutral: underline marks them, colour does not */
+  .link { @apply text-slate-100 underline decoration-slate-600 underline-offset-2 hover:decoration-slate-300 cursor-pointer bg-transparent p-0 border-0 text-left; }
+  .pill { @apply inline-flex items-center gap-1 rounded px-1.5 py-px text-2xs font-medium whitespace-nowrap bg-slate-800/70 text-slate-300; }
+  /* severity: coloured word with a dot, no tinted box */
+  .sev-critical, .sev-high, .sev-medium, .sev-low, .sev-informational { @apply !bg-transparent !px-0 uppercase tracking-wide text-[10.5px] font-semibold
+    before:content-[''] before:h-1.5 before:w-1.5 before:rounded-full before:mr-0.5; }
+  .sev-critical { @apply text-red-400 before:bg-sev-critical; }
+  .sev-high { @apply text-orange-400 before:bg-sev-high; }
+  .sev-medium { @apply text-amber-400 before:bg-sev-medium; }
+  .sev-low { @apply text-sky-400 before:bg-sev-low; }
+  .sev-informational { @apply text-slate-400 before:bg-sev-info; }
 
-  /* ---- status dot (always beside a text label: colour is never the only cue) ---- */
-  .dot { @apply inline-block h-2 w-2 rounded-full shrink-0; }
+  .dot { @apply inline-block h-1.5 w-1.5 rounded-full shrink-0; }
   .dot-ok { @apply bg-ok; } .dot-warn { @apply bg-warn; } .dot-bad { @apply bg-bad; } .dot-info { @apply bg-info; } .dot-unknown { background: rgb(var(--unknown)); }
 
-  /* ---- loading skeleton ---- */
-  .skeleton { @apply rounded-md animate-shimmer; background: linear-gradient(90deg, rgb(var(--border) / 0.35) 25%, rgb(var(--border) / 0.7) 50%, rgb(var(--border) / 0.35) 75%);
+  .skeleton { @apply rounded animate-shimmer; background: linear-gradient(90deg, rgb(var(--border) / 0.35) 25%, rgb(var(--border) / 0.6) 50%, rgb(var(--border) / 0.35) 75%);
               background-size: 200% 100%; }
 
-  /* ---- tooltip (hover and keyboard focus; text in aria-label / data-tip) ---- */
+  /* compact secondary figures in one row instead of more cards */
+  .stat-strip { @apply flex flex-wrap gap-x-6 gap-y-2 text-xs; }
+  .stat-strip > div { @apply flex flex-col; }
+  .stat-strip dt { @apply text-subtle; }
+  .stat-strip dd { @apply text-slate-100 font-medium tabular-nums text-[13px]; }
+
   .tip { @apply relative; }
   .tip[data-tip]:hover::after, .tip[data-tip]:focus-visible::after {
-    content: attr(data-tip); @apply absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 whitespace-nowrap rounded-md border border-line bg-elevated px-2 py-1 text-xs
-      font-medium text-slate-100 shadow-pop pointer-events-none animate-fade-in;
+    content: attr(data-tip); @apply absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 whitespace-nowrap rounded border border-line bg-elevated px-2 py-1 text-xs
+      text-slate-100 pointer-events-none;
   }
 }
 
 html, body, #root { height: 100%; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgb(var(--border)); border-radius: 6px; border: 2px solid rgb(var(--bg)); }
-::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-subtle)); }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--border-strong)); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }

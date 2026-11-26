@@ -47,7 +47,7 @@ export function scoreTone(score: number | null | undefined): Tone {
 export const TONE_TEXT: Record<string, string> = { ok: "text-emerald-300", warn: "text-amber-300", bad: "text-red-300" };
 
 export const SERVICE_STATE: Record<string, [string, string]> = {
-  ok: ["bg-emerald-400", "OK"], warning: ["bg-amber-400", "Warning"], critical: ["bg-red-500 animate-pulse", "Critical"],
+  ok: ["bg-emerald-400", "OK"], warning: ["bg-amber-400", "Warning"], critical: ["bg-red-500", "Critical"],
   unknown: ["bg-slate-500", "Pending"], paused: ["bg-slate-700", "Paused"],
 };
 

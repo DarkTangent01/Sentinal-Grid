@@ -76,6 +76,18 @@ def alert_product(rule_key: str) -> str:
     return "nms" if rule_key in NMS_RULES or rule_key.startswith(NMS_RULE_PREFIXES) else "grid"
 
 
+async def product_rule_keys(s, product: str, since=None) -> list[str]:
+    """The rule keys of one product that have alerts (since a time): filter alerts by product in SQL with this instead of
+    loading every alert and calling alert_product() in Python. NMS rules (wireless retry / noise and so on) are most of
+    the alert table on a busy network."""
+    from sqlalchemy import select
+    from .db.models import Alert
+    q = select(Alert.rule_key).distinct()
+    if since is not None:
+        q = q.where(Alert.last_seen >= since)
+    return [k for k in (await s.execute(q)).scalars() if alert_product(k) == product]
+
+
 def rules_of(product: str, keys) -> list[str]:
     return [k for k in keys if alert_product(k) == product]
 

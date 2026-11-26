@@ -239,7 +239,7 @@ function Runs() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const q = useQuery({ queryKey: ["automation-runs", page], queryFn: () => api<any>("/automation/runs", { params: { page, size: 50 } }), refetchInterval: 30_000, placeholderData: (p) => p });
-  const STATUS: Record<string, string> = { ok: "bg-emerald-500/15 text-emerald-300", partial: "bg-amber-500/15 text-amber-300", error: "bg-red-500/15 text-red-300" };
+  const STATUS: Record<string, string> = { ok: "text-emerald-300", partial: "text-amber-300", error: "text-red-300" };
   return (
     <Card title="Run history" right={<Pager className="" page={page} size={50} total={q.data?.total} onPage={setPage} />}>
       <Loading q={q} />

@@ -96,7 +96,7 @@ export function Studio({ projectId, onPlan }: { projectId: number | null; onPlan
     </Card>
     <div className="space-y-4 min-w-0">
       <div className="flex gap-1 flex-wrap">{(["problems", "refs", "diff", "versions"] as const).map((p) =>
-        <button key={p} className={`btn py-1 ${panel === p ? "border-brand-500 text-brand-400" : ""}`} onClick={() => setPanel(p)}>
+        <button key={p} className={`btn py-1 ${panel === p ? "border-line-strong text-slate-100" : ""}`} onClick={() => setPanel(p)}>
           {{ problems: `Problems${report ? ` (${(report.errors?.length || 0) + (report.findings?.length || 0)})` : ""}`, refs: "References", diff: "Diff vs approved", versions: "History" }[p]}</button>)}</div>
       {panel === "problems" && <Card title="Validation">
         {!report ? <Note>Run Validate (or commit) to check schema, references, variables and security rules. Nothing is sent to any device.</Note> : <>
@@ -173,8 +173,8 @@ function VersionView({ id, current, onClose }: { id: number; current: string; on
   return <Confirm title={v ? `Version ${v.number} · ${v.hash.slice(0, 12)}` : "Version"} confirmLabel="Close" onConfirm={onClose} onClose={onClose}>
     <Loading q={q} />
     {v && <><div className="text-xs text-muted">{v.author} · <Time v={v.created_at} /> · {v.message}</div>
-      <div className="flex gap-1"><button className={`btn py-0.5 text-xs ${mode === "content" ? "border-brand-500" : ""}`} onClick={() => setMode("content")}>Content</button>
-        <button className={`btn py-0.5 text-xs ${mode === "diff" ? "border-brand-500" : ""}`} onClick={() => setMode("diff")}>Diff vs editor</button></div>
+      <div className="flex gap-1"><button className={`btn py-0.5 text-xs ${mode === "content" ? "border-line-strong text-slate-100" : ""}`} onClick={() => setMode("content")}>Content</button>
+        <button className={`btn py-0.5 text-xs ${mode === "diff" ? "border-line-strong text-slate-100" : ""}`} onClick={() => setMode("diff")}>Diff vs editor</button></div>
       {mode === "content" ? <pre className="text-xs max-h-96 overflow-auto rounded border border-line p-2">{v.content}</pre> : <LineDiff a={v.content} b={current} />}
       {v.validation?.errors?.length > 0 && <Note tone="bad">{v.validation.errors.map((e: any) => e.message).join("; ")}</Note>}</>}
   </Confirm>;

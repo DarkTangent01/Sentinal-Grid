@@ -82,7 +82,7 @@ export function Search() {
       </Card>
 
       {res && <Card title={<span>{fmtNum(res.rows.length)} result{res.rows.length === 1 ? "" : "s"} <span className="text-muted font-normal text-xs">· {res.elapsed_ms} ms · {res.kind}</span></span>}
-        right={res.truncated ? <span className="pill bg-amber-500/15 text-amber-300">Truncated — add | head N or aggregate with stats</span> : undefined}>
+        right={res.truncated ? <span className="pill text-amber-300">Truncated — add | head N or aggregate with stats</span> : undefined}>
         <ResultView r={res} viz={viz} height={320} maxH="max-h-[60vh]" />
         {effective !== "table" && res.rows.length > 0 && <div className="mt-4"><Collapsible title="Data table"><ResultTable r={res} maxH="max-h-96" /></Collapsible></div>}
       </Card>}
@@ -157,7 +157,7 @@ function AskAI({ onQuery }: { onQuery: (q: string, viz?: string) => void }) {
   return (
     <Card>
       <form className="flex flex-wrap gap-2 items-center" onSubmit={(e) => { e.preventDefault(); if (question.trim()) m.mutate(); }}>
-        <span className="text-sm font-semibold text-brand-400">Ask</span>
+        <span className="text-sm font-semibold text-slate-100">Ask</span>
         <input aria-label="Ask in plain English" className="input flex-1 min-w-[16rem]" value={question} onChange={(e) => setQuestion(e.target.value)}
           placeholder="e.g. which internal hosts sent the most data to other countries today?" />
         <button className="btn btn-primary" disabled={!question.trim() || m.isPending}>{m.isPending ? "Thinking…" : "Write the query"}</button>

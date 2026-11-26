@@ -90,7 +90,7 @@ export function EntityGraph() {
               {root?.hostname && <div><span className="text-muted">Host:</span> {root.hostname}</div>}
               {root?.criticality && <div><span className="text-muted">Criticality:</span> <span className={`pill ${CRIT_CLS[root.criticality]}`}>{root.criticality}</span></div>}
               {root?.owner && <div><span className="text-muted">Owner:</span> {root.owner}</div>}
-              <div><span className="text-muted">Watchlists:</span> {root?.watchlists?.length ? root.watchlists.map((w: string) => <span key={w} className="pill bg-brand-500/10 text-brand-400 mr-1">{w}</span>) : "none"}</div>
+              <div><span className="text-muted">Watchlists:</span> {root?.watchlists?.length ? root.watchlists.map((w: string) => <span key={w} className="pill text-slate-300 mr-1">{w}</span>) : "none"}</div>
               <div className="flex flex-wrap gap-2 pt-2">
                 {kind === "ip" && <button className="btn" onClick={() => nav(`/investigate/${encodeURIComponent(value)}`)}>IP details</button>}
                 <button className="btn" onClick={() => nav(`/search${qs({ q: kind === "ip" ? `ip:${value}` : kind === "domain" ? `domain:${value}` : `user:"${value}"` })}`)}>Search events</button>

@@ -51,7 +51,7 @@ export function ServicesPage() {
       {q.data && (!q.data.items.length ? <Empty text={admin ? "No service checks yet. Add one to monitor a web app, DNS name, port or certificate." : "No service checks defined."} /> :
         <TableWrap maxH="max-h-[34rem]"><table className="tbl"><thead><tr><th>Check</th><th>Kind</th><th>Target</th><th>State</th><th className="num">Latency</th>
           <th>Last result</th><th>Certificate</th><th>Checked</th>{admin && <th />}</tr></thead>
-          <tbody>{q.data.items.map((x: any) => <tr key={x.id} className={sel === x.id ? "bg-brand-500/[0.06]" : ""} aria-current={sel === x.id ? "true" : undefined} {...rowProps(() => setSp({ id: String(x.id) }))}>
+          <tbody>{q.data.items.map((x: any) => <tr key={x.id} className={sel === x.id ? "bg-hover" : ""} aria-current={sel === x.id ? "true" : undefined} {...rowProps(() => setSp({ id: String(x.id) }))}>
             <td className="font-medium">{x.name}{(x.site || x.switch) && <div className="text-2xs text-muted">{[x.site, x.switch].filter(Boolean).join(" · ")}</div>}</td>
             <td className="text-xs uppercase">{x.kind}</td><td className="font-mono text-xs max-w-[18rem] truncate" title={serviceTarget(x)}>{serviceTarget(x)}</td>
             <td><ServiceState s={x.state} />{x.fail_streak > 1 && <span className="text-2xs text-muted"> ×{x.fail_streak}</span>}</td>

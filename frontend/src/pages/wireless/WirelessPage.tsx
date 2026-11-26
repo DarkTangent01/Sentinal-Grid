@@ -134,7 +134,7 @@ function Dist({ rows, k, onPick }: { rows: any[]; k: string; onPick: (v: string)
   if (!rows.length) return <Empty text="No clients." />;
   const max = Math.max(...rows.map((r) => r.clients));
   return <TableWrap maxH="max-h-60"><table className="tbl"><tbody>{rows.map((r) => <tr key={r[k]} {...rowProps(() => onPick(r[k]))}>
-    <td className="w-1/2 truncate">{r[k]}</td><td><div className="h-2 rounded bg-teal-500/60" style={{ width: `${Math.max(4, (100 * r.clients) / max)}%` }} /></td>
+    <td className="w-1/2 truncate">{r[k]}</td><td><div className="h-2 rounded bg-slate-500" style={{ width: `${Math.max(4, (100 * r.clients) / max)}%` }} /></td>
     <td className="num">{r.clients}</td></tr>)}</tbody></table></TableWrap>;
 }
 

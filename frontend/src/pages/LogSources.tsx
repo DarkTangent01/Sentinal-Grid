@@ -102,8 +102,8 @@ function SourceForm({ s, onClose }: { s: any; onClose: () => void }) {
   );
 }
 
-const STATUS: Record<string, string> = { ok: "bg-emerald-500/15 text-emerald-300", degraded: "bg-amber-500/15 text-amber-300", silent: "bg-red-500/15 text-red-300",
-  never: "bg-slate-500/15 text-slate-300", disabled: "bg-slate-500/15 text-slate-300" };
+const STATUS: Record<string, string> = { ok: "text-emerald-300", degraded: "text-amber-300", silent: "text-red-300",
+  never: "text-slate-300", disabled: "text-slate-300" };
 
 /** Per-source ingestion health and an account of everything that did not become an event (with the reason and a
  *  sample line): nothing is dropped without a record of who sent it and why. */
@@ -120,7 +120,7 @@ function IngestHealth() {
       </div>
       <TableWrap><table className="tbl"><thead><tr><th>Source</th><th>Type</th><th>Status</th><th className="num">1 h</th><th className="num">24 h</th><th className="num">Lag p50 / p95</th>
         <th className="num">Duplicates</th><th className="num">Parse errors</th><th className="num">Bad time</th><th className="num">Dropped</th><th>Last event</th></tr></thead>
-        <tbody>{d.sources.map((x: any) => <tr key={`${x.firewall_id}`}><td>{x.name}{x.http_ingest && <span className="pill bg-sky-500/15 text-sky-300 ml-1.5">HTTP</span>}</td>
+        <tbody>{d.sources.map((x: any) => <tr key={`${x.firewall_id}`}><td>{x.name}{x.http_ingest && <span className="pill text-sky-300 ml-1.5">HTTP</span>}</td>
           <td className="text-xs">{x.kind}</td><td><span className={`pill ${STATUS[x.status]}`}>{x.status}</span></td><td className="num">{fmtNum(x.events_1h)}</td><td className="num">{fmtNum(x.events_24h)}</td>
           <td className="num">{x.lag_p50_s == null ? "—" : `${x.lag_p50_s} / ${x.lag_p95_s} s`}</td><td className="num">{fmtNum(x.duplicates_24h)}</td>
           <td className={`num ${x.parse_errors_24h ? "text-amber-300" : ""}`}>{fmtNum(x.parse_errors_24h)}</td><td className={`num ${x.bad_timestamps_24h ? "text-amber-300" : ""}`}>{fmtNum(x.bad_timestamps_24h)}</td>

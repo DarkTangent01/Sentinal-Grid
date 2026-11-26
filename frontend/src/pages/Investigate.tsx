@@ -43,7 +43,7 @@ export function Investigate() {
           </div>
         </Card>}
         {ti.data?.totals?.events > 0 && <Card title={`Threat-intel matches (${ti.data.totals.events})`}>
-          <ul className="text-sm space-y-1">{ti.data.indicators.slice(0, 8).map((r: any) => <li key={r.indicator} className="flex gap-2"><span className="pill bg-red-500/15 text-red-300">{r.category}</span>
+          <ul className="text-sm space-y-1">{ti.data.indicators.slice(0, 8).map((r: any) => <li key={r.indicator} className="flex gap-2"><span className="pill text-red-300">{r.category}</span>
             <span className="font-mono text-xs cell-wrap">{r.indicator}</span><span className="ml-auto text-muted text-xs">{r.events} · {r.feed}</span></li>)}</ul>
         </Card>}
       </>}

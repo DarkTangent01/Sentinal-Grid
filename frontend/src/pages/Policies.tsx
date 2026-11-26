@@ -12,8 +12,8 @@ export const STATE_LABEL: Record<string, string> = {
   unknown: "Unknown", disabled: "Disabled", not_assessable: "Not assessable",
 };
 export const STATE_CLASS: Record<string, string> = {
-  in_use: "bg-emerald-700/30 text-emerald-200", no_observed_hits: "bg-amber-600/20 text-amber-200",
-  potentially_unused: "bg-orange-600/30 text-orange-200", unknown: "bg-slate-700 text-slate-300",
+  in_use: "text-emerald-300", no_observed_hits: "text-amber-300",
+  potentially_unused: "text-orange-300", unknown: "bg-slate-700 text-slate-300",
   disabled: "bg-slate-800 text-slate-400", not_assessable: "bg-slate-800 text-slate-400",
 };
 export const SHADOW_LABEL: Record<string, string> = {
@@ -141,7 +141,7 @@ export function Policies() {
             {th("firewall_hits", "Firewall hits", "num")}{th("siem_matches", "SIEM matches", "num")}{th("last_seen", "Last seen")}<th>Logging</th><th>Assessment</th><th>Shadow</th></tr></thead>
           <tbody>{inv.data.items.map((r: any) => (
             <tr key={`${r.firewall_id}|${r.vdom}|${r.policyid}`} {...rowProps(() => nav(`/policies/${r.firewall_id}/${encodeURIComponent(r.vdom)}/${r.policyid}`))}>
-              <td className="text-xs nowrap">{r.firewall}<div className="text-muted">{r.vdom}{r.source === "demo" && <span className="pill bg-amber-600/30 text-amber-200 ml-1">demo</span>}</div></td>
+              <td className="text-xs nowrap">{r.firewall}<div className="text-muted">{r.vdom}{r.source === "demo" && <span className="pill text-amber-300 ml-1">demo</span>}</div></td>
               <td className="num">{r.seq}</td><td className="num font-mono">{r.policyid}</td>
               <td className="min-w-[9rem]"><Trunc text={r.name || "(unnamed)"} max="max-w-[14rem]" /></td>
               <td><Names list={r.srcaddr} /><div className="text-2xs text-muted"><Names list={r.srcintf} max={2} /></div></td>

@@ -11,8 +11,8 @@ import { Card, Empty, Field, Kpi, Loading, Modal, Pager, TableWrap, Tabs, Time, 
 const DeviceTerminal = lazy(() => import("./Terminal"));
 
 export const RISK_TONE: Record<string, string> = {
-  READ_ONLY: "bg-emerald-500/15 text-emerald-300", LOW_RISK: "bg-sky-500/15 text-sky-300", MODERATE_RISK: "bg-amber-500/15 text-amber-300",
-  HIGH_RISK: "bg-orange-500/20 text-orange-300", DESTRUCTIVE: "bg-red-500/20 text-red-300",
+  READ_ONLY: "text-emerald-300", LOW_RISK: "text-sky-300", MODERATE_RISK: "text-amber-300",
+  HIGH_RISK: "text-orange-300", DESTRUCTIVE: "text-red-300",
 };
 export const Risk = ({ r }: { r?: string }) => r ? <span className={`pill ${RISK_TONE[r] || "bg-slate-800 text-slate-300"}`}>{r.replace("_", " ").toLowerCase()}</span> : null;
 const STATUS_TONE: Record<string, string> = {
@@ -71,7 +71,7 @@ export function TerminalWorkspace({ terms, setTerms }: { terms: OpenTerm[]; setT
   const cur = terms.find((t) => t.key === active) || terms[terms.length - 1];
   return <Card title="Terminals" right={<span className="text-xs text-muted">{terms.length} open</span>}>
     <div className="flex flex-wrap gap-1 mb-2" role="tablist" aria-label="Open terminals">
-      {terms.map((t) => <span key={t.key} className={`inline-flex items-center rounded-md border ${t.key === cur.key ? "border-teal-400/60 bg-teal-500/10" : "border-line"}`}>
+      {terms.map((t) => <span key={t.key} className={`inline-flex items-center rounded-md border ${t.key === cur.key ? "border-line-strong bg-hover" : "border-line"}`}>
         <button role="tab" aria-selected={t.key === cur.key} className="px-2 py-1 text-xs" onClick={() => setActive(t.key)}>{t.name}{t.mode === "change" ? " (change)" : ""}</button>
         <button aria-label={`Close terminal ${t.name}`} className="px-1.5 text-muted hover:text-slate-100" onClick={() => setTerms((x) => x.filter((y) => y.key !== t.key))}>✕</button>
       </span>)}
@@ -338,7 +338,7 @@ function JobView({ id }: { id: number }) {
     <Loading q={q} />
     {j && <>
       <div className="flex items-center gap-3 text-sm"><St s={j.status} /><span>{j.completed} / {j.total} devices</span>{j.failed > 0 && <span className="text-red-300">{j.failed} failed</span>}</div>
-      <div className="h-2 rounded bg-slate-800 mt-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><div className="h-2 rounded bg-teal-500" style={{ width: `${pct}%` }} /></div>
+      <div className="h-2 rounded bg-slate-800 mt-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><div className="h-2 rounded bg-slate-400" style={{ width: `${pct}%` }} /></div>
       <TableWrap maxH="max-h-96"><table className="tbl mt-3"><thead><tr><th>Device</th><th>Status</th><th>Commands</th><th className="num">Time</th><th>Error</th><th /></tr></thead>
         <tbody>{q.data.results.map((r: any) => <tr key={r.switch_id}><td className="font-medium">{r.device}</td><td><St s={r.status} /></td>
           <td className="text-xs">{(r.outputs || []).map((o: any) => `${o.command} (${o.status})`).join(", ")}</td><td className="num text-xs">{r.duration_ms != null ? `${r.duration_ms} ms` : ""}</td>

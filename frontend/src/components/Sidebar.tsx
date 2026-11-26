@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Me } from "../lib/context";
 import { fmtAgo } from "../lib/format";
 import { ADMIN, NAV, PRODUCT, Product, activeItem, lastPathOf } from "../lib/products";
-import { SentinelMark, SentinelTile } from "./Brand";
+import { SentinelMark } from "./Brand";
 
 // 24×24 stroke icons (inline, no icon dependency)
 const I = (d: ReactNode) => (
@@ -60,19 +60,19 @@ export const ICONS: Record<string, ReactNode> = {
 };
 
 const KEY = "siem.sidebar.collapsed";
-const GKEY = "siem.sidebar.groups.";
+const GKEY = "siem.sidebar.groupstate.";
 
 export function useSidebarCollapsed(): [boolean, (v: boolean) => void] {
   const [c, setC] = useState<boolean>(() => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } });
   return [c, (v) => { setC(v); try { localStorage.setItem(KEY, v ? "1" : "0"); } catch { /* ignore */ } }];
 }
 
-function useFolded(product: Product): [Set<string>, (t: string) => void] {
-  const [f, setF] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem(GKEY + product) || "[]")); } catch { return new Set(); } });
-  return [f, (t) => setF((cur) => {
-    const n = new Set(cur);
-    if (n.has(t)) n.delete(t); else n.add(t);
-    try { localStorage.setItem(GKEY + product, JSON.stringify([...n])); } catch { /* ignore */ }
+/** Explicit open/closed choices per group; a group without one is open only while it holds the current page. */
+function useGroupState(product: Product): [Record<string, boolean>, (t: string, open: boolean) => void] {
+  const [f, setF] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(GKEY + product) || "{}"); } catch { return {}; } });
+  return [f, (t, open) => setF((cur) => {
+    const n = { ...cur, [t]: open };
+    try { localStorage.setItem(GKEY + product, JSON.stringify(n)); } catch { /* ignore */ }
     return n;
   })];
 }
@@ -101,7 +101,7 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
     refetchInterval: 60_000, staleTime: 30_000, enabled: nms && product === "nms" });
   const badges: Record<string, number> = { grid_alerts: gAlerts.data?.total ?? 0, nms_alerts: nAlerts.data?.total ?? 0,
     incidents: incidents.data?.total ?? 0, wan_incidents: wanInc.data?.total ?? 0 };
-  const [folded, toggle] = useFolded(product);
+  const [gstate, setGroup] = useGroupState(product);
   const [menu, setMenu] = useState(false);
   // collapsed rail applies on desktop only; the mobile drawer is always full width
   const rail = collapsed;
@@ -117,14 +117,14 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
   return (
     <aside id="sidebar" aria-label="Sidebar"
       className={`fixed inset-y-0 left-0 z-40 shrink-0 bg-panel2 border-r border-line flex flex-col transition-[transform,width] duration-200 ease-out
-        w-64 lg:static lg:translate-x-0 ${rail ? "lg:w-[4.25rem]" : "lg:w-64"} ${open ? "translate-x-0 shadow-pop" : "-translate-x-full"}`}>
+        w-60 lg:static lg:translate-x-0 ${rail ? "lg:w-[4rem]" : "lg:w-60"} ${open ? "translate-x-0 shadow-pop" : "-translate-x-full"}`}>
       {/* brand + product switcher */}
       <div className={`relative flex items-center gap-2.5 h-14 px-3.5 border-b border-line ${rail ? "lg:justify-center lg:px-0" : ""}`}>
-        <SentinelTile size={34} tone={product} />
+        <SentinelMark size={22} tone={product} />
         <div className={`min-w-0 flex-1 ${rail ? "lg:hidden" : ""}`}>
-          <div className="font-semibold tracking-[-0.02em] text-[15px] text-slate-100 leading-tight truncate">Sentinel <span className="text-brand-400">{PRODUCT[product].accent}</span></div>
+          <div className="font-semibold tracking-[-0.01em] text-[14px] text-slate-100 leading-tight truncate">Sentinel {PRODUCT[product].accent}</div>
           <div className="text-[10.5px] text-subtle flex items-center gap-1.5 truncate mt-0.5" title={product === "grid" && lastIngest ? `Last event ingested ${fmtAgo(lastIngest)}` : status}>
-            {product === "grid" && <span className={`dot !h-1.5 !w-1.5 ${live ? "dot-ok animate-pulse" : "dot-warn"}`} aria-hidden />}
+            {product === "grid" && <span className={`dot !h-1.5 !w-1.5 ${live ? "dot-ok" : "dot-warn"}`} aria-hidden />}
             <span className="truncate">{status}</span>
           </div>
         </div>
@@ -139,7 +139,7 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
             {me.products.map((p) => <button key={p} type="button" role="menuitemradio" aria-checked={p === product} autoFocus={p === others[0]}
               className={`w-full flex items-center gap-2.5 rounded-md px-2 py-2 text-left text-[13px] hover:bg-slate-800/70 focus-visible:outline-none focus-visible:bg-slate-800/70 ${p === product ? "text-slate-100" : "text-slate-300"}`}
               onClick={() => sw(p)}>
-              <SentinelTile size={28} tone={p} />
+              <SentinelMark size={20} tone={p} />
               <span className="flex-1 min-w-0">{PRODUCT[p].name}<span className="block text-2xs text-subtle truncate">{PRODUCT[p].kind}</span></span>
               {p === product && <span className="pill bg-slate-800 text-muted">current</span>}</button>)}
             <div className="my-1 border-t border-line" />
@@ -149,20 +149,21 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
       </div>
 
       {/* navigation */}
-      <nav aria-label={`${PRODUCT[product].name} navigation`} className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-4">
+      <nav aria-label={`${PRODUCT[product].name} navigation`} className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-1">
         {groups.map((g) => {
           const items = g.items.filter((it) => !it.admin || me.role === "admin");
           if (!items.length) return null;
-          const isFolded = folded.has(g.title) && !rail && !items.some((it) => it.to === active);
+          const holdsActive = items.some((it) => it.to === active);
+          const isFolded = !rail && !(gstate[g.title] ?? holdsActive);
           const gid = `nav-${product}-${g.title.replace(/\W+/g, "-")}`;
           return (
           <div key={g.title}>
-            <button type="button" className={`group/g w-full flex items-center gap-1 px-2.5 mb-1 eyebrow hover:text-slate-300 transition-colors ${rail ? "lg:hidden" : ""}`}
-              aria-expanded={!isFolded} aria-controls={gid} onClick={() => toggle(g.title)}>
+            <button type="button" className={`group/g w-full flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium ${holdsActive ? "text-slate-300" : "text-subtle"} hover:text-slate-200 transition-colors ${rail ? "lg:hidden" : ""}`}
+              aria-expanded={!isFolded} aria-controls={gid} onClick={() => setGroup(g.title, isFolded)}>
               <span className="flex-1 text-left truncate">{g.title}</span>
               <span className={`opacity-60 group-hover/g:opacity-100 transition-transform duration-150 ${isFolded ? "-rotate-90" : ""}`}>{CHEVRON}</span></button>
             {rail && <div className="hidden lg:block mx-3 mb-2 border-t border-line" aria-hidden />}
-            {!isFolded && <ul id={gid} className="space-y-px">
+            {!isFolded && <ul id={gid} className="space-y-px mt-0.5 mb-2">
               {items.map((it) => {
                 const isActive = it.to === active;
                 if (it.planned) return (
@@ -175,15 +176,15 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
                 <li key={it.to}>
                   <Link to={it.to} aria-current={isActive ? "page" : undefined} aria-label={rail ? `${it.label}${n ? `, ${n} open` : ""}` : undefined}
                     title={rail ? it.label : undefined}
-                    className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150
+                    className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-[5px] text-[13px] transition-colors duration-100
                       ${rail ? "lg:justify-center lg:px-0 lg:py-2" : ""}
-                      ${isActive ? "bg-brand-500/[0.12] text-slate-100 font-medium" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"}`}>
-                    {isActive && <span className="absolute -left-2 top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-400" aria-hidden />}
-                    <span className={`shrink-0 ${isActive ? "text-brand-400" : "text-subtle group-hover:text-slate-300"}`}>{ICONS[it.icon]}</span>
+                      ${isActive ? "bg-hover text-slate-100 font-medium" : "text-slate-400 hover:bg-hover/60 hover:text-slate-100"}`}>
+                    {isActive && <span className="absolute -left-2 top-2 bottom-2 w-[2px] rounded-r bg-brand-400" aria-hidden />}
+                    <span className={`shrink-0 ${isActive ? "text-slate-100" : "text-subtle group-hover:text-slate-300"}`}>{ICONS[it.icon]}</span>
                     <span className={`truncate flex-1 ${rail ? "lg:hidden" : ""}`}>{it.label}</span>
                     {n > 0 && (
                       <span aria-label={rail ? undefined : `${n} open`}
-                        className={`rounded-full bg-bad text-[#fff] text-[10px] font-semibold tabular-nums px-1.5 py-0.5 leading-none
+                        className={`rounded bg-slate-800 text-red-400 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 leading-none
                           ${rail ? "lg:absolute lg:top-0.5 lg:right-1 lg:px-1" : ""}`}>{n > 99 ? "99+" : n}</span>
                     )}
                   </Link>
@@ -196,24 +197,24 @@ export function Sidebar({ me, product, open, collapsed, setCollapsed, onLogout, 
 
       {/* collapse (desktop) */}
       <button type="button" onClick={() => setCollapsed(!collapsed)} aria-label={rail ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!rail}
-        className={`hidden lg:flex items-center gap-2 mx-2 mb-2 rounded-md px-2.5 py-1.5 text-xs text-subtle hover:bg-slate-800/60 hover:text-slate-200 transition-colors ${rail ? "justify-center px-0" : ""}`}>
+        className={`hidden lg:flex items-center gap-2 mx-2 mb-2 rounded-md px-2.5 py-1.5 text-xs text-subtle hover:bg-hover hover:text-slate-200 transition-colors ${rail ? "justify-center px-0" : ""}`}>
         <span className={`transition-transform duration-200 ${rail ? "rotate-180" : ""}`}>{ICONS.chevron}</span>
         {!rail && <span>Collapse</span>}
       </button>
 
       {/* user */}
       <div className={`border-t border-line p-3 flex items-center gap-2.5 ${rail ? "lg:flex-col lg:px-0" : ""}`}>
-        <div className="h-8 w-8 shrink-0 rounded-full bg-brand-500/15 text-brand-300 ring-1 ring-inset ring-brand-500/30 flex items-center justify-center text-xs font-semibold"
+        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center text-xs font-semibold"
           title={`${me.username} (${me.role})`} aria-hidden>{initials}</div>
         <div className={`min-w-0 flex-1 ${rail ? "lg:hidden" : ""}`}>
           <div className="flex items-center gap-1.5">
             <span className="text-[13px] font-medium text-slate-200 truncate">{me.username}</span>
-            <span className={`pill ${me.role === "admin" ? "bg-brand-500/15 text-brand-300" : "bg-slate-800 text-muted"}`}>{me.role}</span>
+            <span className="pill text-muted">{me.role}</span>
           </div>
           <div className="text-2xs text-subtle truncate" title="Display timezone (Settings → Preferences)">{me.timezone}</div>
         </div>
         <button type="button" onClick={onLogout} aria-label="Sign out" data-tip={rail ? "Sign out" : undefined}
-          className="tip shrink-0 rounded-md p-1.5 text-subtle hover:bg-slate-800/70 hover:text-slate-100 transition-colors">{ICONS.logout}</button>
+          className="tip shrink-0 rounded-md p-1.5 text-subtle hover:bg-hover hover:text-slate-100 transition-colors">{ICONS.logout}</button>
       </div>
     </aside>
   );

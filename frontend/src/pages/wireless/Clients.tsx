@@ -147,7 +147,7 @@ export function RoamingTab() {
         <th className="num">Ping-pong</th><th className="num">Drop after roam</th><th>Flags</th><th>APs visited</th><th>Last</th></tr></thead>
         <tbody>{d.rows.map((r: any) => <tr key={r.mac} {...rowProps(() => go("clients", { client: r.mac }))}><td className="font-mono text-xs">{r.mac}</td>
           <td className="num">{r.roams}</td><td className="num">{r.ping_pong}</td><td className="num">{r.disconnect_after_roam}</td>
-          <td>{r.flags.map((f: string) => <span key={f} className="pill bg-amber-500/15 text-amber-300 mr-1">{f.replace(/_/g, " ")}</span>)}</td>
+          <td>{r.flags.map((f: string) => <span key={f} className="pill text-amber-300 mr-1">{f.replace(/_/g, " ")}</span>)}</td>
           <td className="text-xs font-mono">{r.aps.join(", ")}</td><td className="text-xs"><Time v={r.last} /></td></tr>)}</tbody></table></TableWrap>}</Card>
     </>}
   </div>;

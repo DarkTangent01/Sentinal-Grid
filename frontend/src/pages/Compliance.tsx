@@ -3,8 +3,8 @@ import { api, downloadUrl } from "../lib/api";
 import { Card, Kpi, Loading, TableWrap, Time } from "../components/ui";
 
 const ST: Record<string, [string, string]> = {
-  met: ["Met", "bg-emerald-500/15 text-emerald-300"], partial: ["Partial", "bg-amber-500/15 text-amber-300"],
-  not_met: ["Not met", "bg-red-500/15 text-red-300"], manual: ["Manual check", "bg-slate-700/60 text-slate-300"],
+  met: ["Met", "text-emerald-300"], partial: ["Partial", "text-amber-300"],
+  not_met: ["Not met", "text-red-300"], manual: ["Manual check", "text-slate-300"],
 };
 
 export function Compliance() {

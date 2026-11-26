@@ -70,7 +70,7 @@ function Library() {
             <td className="text-xs">{range || h.range}</td>
             <td><Time v={h.last_run} /></td>
             <td className="num">{running.has(h.id) ? <span className="text-muted animate-pulse">…</span> : h.last_error ? <span className="text-red-300" title={h.last_error}>error</span>
-              : h.last_count == null ? "—" : <span className={h.last_count > 0 ? "pill bg-red-500/15 text-red-300" : "text-muted"}>{fmtNum(h.last_count)}</span>}</td>
+              : h.last_count == null ? "—" : <span className={h.last_count > 0 ? "pill text-red-300" : "text-muted"}>{fmtNum(h.last_count)}</span>}</td>
             <td className="nowrap"><button className="btn" disabled={running.has(h.id)} onClick={() => runOne(h)}>Run</button>
               <button className="btn ml-1" onClick={() => nav(`/search${qs({ q: h.query })}`)}>Open</button>
               {!h.builtin && (h.author === me.username || me.role === "admin") && <>

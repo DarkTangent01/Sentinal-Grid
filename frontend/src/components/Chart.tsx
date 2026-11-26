@@ -3,14 +3,14 @@ import { echarts } from "../lib/echarts";
 import { Theme, useTheme } from "../lib/theme";
 
 /** Categorical slots, assigned in this fixed order (never cycled past 8: fold the rest into "Other"). The Sentinel
- *  chart palette leads with the two product accents and keeps clear of the status hues (no pure green / red / amber),
+ *  chart palette leads with the product accent and a neutral grey and keeps clear of the status hues (no pure green / red / amber),
  *  so a categorical series is never mistaken for "healthy" or "down". */
 export const PALETTES: Record<Theme, string[]> = {
-  dark: ["#38bdf8", "#a78bfa", "#2dd4bf", "#f472b6", "#fbbf24", "#818cf8", "#fb923c", "#94a3b8"],
-  light: ["#0284c7", "#7c3aed", "#0d9488", "#db2777", "#d97706", "#4f46e5", "#ea580c", "#64748b"],
+  dark: ["#38bdf8", "#2dd4bf", "#a78bfa", "#a1a1aa", "#f472b6", "#fbbf24", "#71717a", "#d4d4d8"],
+  light: ["#0284c7", "#0d9488", "#7c3aed", "#71717a", "#db2777", "#d97706", "#a1a1aa", "#3f3f46"],
 };
 /** Severity, identical in every module (docs/design-system.md). */
-export const SEV_HEX: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#f59e0b", low: "#38bdf8", informational: "#64748b" };
+export const SEV_HEX: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#f59e0b", low: "#38bdf8", informational: "#71717a" };
 
 /** The product accent as a hex colour (from --chart-primary, set by <html data-product>). */
 function cssColor(name: string, fallback: string): string {
@@ -27,16 +27,16 @@ function cssColor(name: string, fallback: string): string {
  *  needs a second cue for colour-blind readers), muted = secondary context. */
 export type SeriesRole = "primary" | "alert" | "warn" | "muted";
 export const SERIES_ROLE: Record<Theme, Record<SeriesRole, string>> = {
-  light: { get primary() { return cssColor("--chart-primary", "#0284c7"); }, alert: "#dc2626", warn: "#d97706", muted: "#94a3b8" },
-  dark: { get primary() { return cssColor("--chart-primary", "#38bdf8"); }, alert: "#ef4444", warn: "#f59e0b", muted: "#64748b" },
+  light: { get primary() { return cssColor("--chart-primary", "#0284c7"); }, alert: "#dc2626", warn: "#d97706", muted: "#a1a1aa" },
+  dark: { get primary() { return cssColor("--chart-primary", "#38bdf8"); }, alert: "#ef4444", warn: "#f59e0b", muted: "#52525b" },
 };
 /** Operational state colours for charts, graphs and status bars (one definition for every module).
  *  ok = up / established / healthy, warn = degraded, bad = down / failed / lost, unknown = no data, paused = not monitored.
  *  Pair ok with bad only alongside a second cue (label, icon or dash): the green / red pair alone fails for CVD. */
 export type StatusKey = "ok" | "warn" | "bad" | "unknown" | "paused";
 export const STATUS_HEX: Record<Theme, Record<StatusKey, string>> = {
-  light: { ok: "#16a34a", warn: "#d97706", bad: "#dc2626", unknown: "#94a3b8", paused: "#cbd5e1" },
-  dark: { ok: "#22c55e", warn: "#f59e0b", bad: "#ef4444", unknown: "#64748b", paused: "#334155" },
+  light: { ok: "#16a34a", warn: "#d97706", bad: "#dc2626", unknown: "#a1a1aa", paused: "#d4d4d8" },
+  dark: { ok: "#22c55e", warn: "#f59e0b", bad: "#ef4444", unknown: "#71717a", paused: "#3f3f46" },
 };
 const STATUS_OF: Record<string, StatusKey> = {
   up: "ok", ok: "ok", established: "ok", healthy: "ok", passed: "ok", reachable: "ok",
@@ -46,15 +46,16 @@ const STATUS_OF: Record<string, StatusKey> = {
 };
 /** Colour for a state string from any module (unrecognised states read as "unknown"). */
 export const statusColor = (theme: Theme, state?: string | null) => STATUS_HEX[theme][STATUS_OF[String(state || "").toLowerCase()] || "unknown"];
-export const seriesColor =(theme: Theme, color: string | undefined, i: number) =>
-  (color && color in SERIES_ROLE[theme] ? SERIES_ROLE[theme][color as SeriesRole] : color) ?? PALETTES[theme][i % 8];
+export const seriesColor = (theme: Theme, color: string | undefined, i: number, name?: string) =>
+  (color && color in SERIES_ROLE[theme] ? SERIES_ROLE[theme][color as SeriesRole] : color)
+  ?? (name && /^(other|unknown)$/i.test(name) ? SERIES_ROLE[theme].muted : PALETTES[theme][i % 8]);
 /** Sequential (magnitude) ramp, one hue, low → high. */
 export const SEQUENTIAL: Record<Theme, string[]> = { light: ["#e0f2fe", "#38bdf8", "#075985"], dark: ["#0c3a5a", "#0ea5e9", "#bae6fd"] };
 
 /** Neutral chart chrome per theme. Mirrors the --chart-* tokens in index.css. */
 export const CHART_THEME: Record<Theme, { text: string; strong: string; axis: string; split: string; tooltip: string; tooltipBorder: string; surface: string; land: string }> = {
-  dark: { text: "#94a3b8", strong: "#f1f5f9", axis: "#263449", split: "#1a263a", tooltip: "#162238", tooltipBorder: "#263449", surface: "#111c2e", land: "#1c2a40" },
-  light: { text: "#475569", strong: "#0f172a", axis: "#cbd5e1", split: "#eef2f7", tooltip: "#ffffff", tooltipBorder: "#e2e8f0", surface: "#ffffff", land: "#e2e8f0" },
+  dark: { text: "#a1a1aa", strong: "#f5f5f5", axis: "#292929", split: "#1c1c1c", tooltip: "#1c1c1c", tooltipBorder: "#383838", surface: "#111111", land: "#222222" },
+  light: { text: "#52525b", strong: "#09090b", axis: "#e4e4e7", split: "#f4f4f5", tooltip: "#ffffff", tooltipBorder: "#e4e4e7", surface: "#ffffff", land: "#e4e4e7" },
 };
 
 for (const [name, c] of Object.entries(CHART_THEME) as [Theme, (typeof CHART_THEME)[Theme]][]) {
@@ -64,7 +65,7 @@ for (const [name, c] of Object.entries(CHART_THEME) as [Theme, (typeof CHART_THE
     color: PALETTES[name], backgroundColor: "transparent", textStyle: { color: c.text, fontFamily: "Inter Variable, Inter, system-ui, sans-serif" },
     legend: { textStyle: { color: c.text }, pageTextStyle: { color: c.text } },
     tooltip: { backgroundColor: c.tooltip, borderColor: c.tooltipBorder, textStyle: { color: c.strong },
-      extraCssText: "border-radius:8px;box-shadow:0 12px 32px -12px rgba(2,6,23,.45);font-variant-numeric:tabular-nums;" },
+      extraCssText: "border-radius:6px;box-shadow:none;font-variant-numeric:tabular-nums;font-size:12px;" },
     categoryAxis: axis, valueAxis: axis, timeAxis: axis, logAxis: axis,
   });
 }

@@ -67,13 +67,13 @@ export function EventTable({ fixed = {}, filters = {} }: { fixed?: Params; filte
               <td className="text-xs"><Action a={e.action} /></td><td className="text-xs">{e.policy_id ?? "—"}</td>
               <td className="text-xs"><Trunc text={e.app || e.service} max="max-w-[10rem]" /></td>
               <td className="text-xs">
-                {e.ti_match && <span className="pill bg-red-500/20 text-red-300 mr-1" title={`Threat intel: ${e.ti_category}`}>TI</span>}
+                {e.ti_match && <span className="pill text-red-300 mr-1" title={`Threat intel: ${e.ti_category}`}>TI</span>}
                 {e.category === "dns" ? <Trunc className="font-mono" text={[e.dns_qtype, e.dns_qname, e.dns_rcode].filter(Boolean).join(" ")} />
                   : e.category === "web" ? <Trunc className="font-mono" text={e.url_is_full ? e.url : [e.hostname, e.url].filter(Boolean).join(" · path ")} />
                   : <Trunc text={e.threat || e.msg || e.hostname} />}
               </td>
               <td className="text-xs num">{e.sent_bytes ? fmtBytes(e.sent_bytes) : ""}</td><td className="text-xs num">{e.rcvd_bytes ? fmtBytes(e.rcvd_bytes) : ""}</td>
-              <td><span className={`pill ${e.source === "demo" ? "bg-amber-600/30 text-amber-200" : "bg-slate-800 text-slate-400"}`}>{e.source}</span></td>
+              <td><span className={`pill ${e.source === "demo" ? "text-amber-300" : "bg-slate-800 text-slate-400"}`}>{e.source}</span></td>
             </tr>))}</tbody>
         </table></div>
       )}
@@ -136,7 +136,7 @@ function EventContext({ id, e }: { id: string; e: any }) {
               {x.asset ? <div className="text-xs">{x.asset.hostname || "unnamed host"} · <b>{x.asset.criticality}</b>{x.asset.owner && ` · ${x.asset.owner}`}{x.asset.last_user && ` · user ${x.asset.last_user}`}</div>
                 : <div className="text-xs text-muted">not in the asset inventory</div>}
               {x.threat_intel.length > 0 && <div className="text-xs text-red-300">Threat intel: {x.threat_intel.map((t: any) => `${t.feed} (${t.category})`).join(", ")}</div>}
-              {x.watchlists.length > 0 && <div className="text-xs">Watchlists: {x.watchlists.map((w: string) => <span key={w} className="pill bg-brand-500/10 text-brand-400 mr-1">{w}</span>)}</div>}
+              {x.watchlists.length > 0 && <div className="text-xs">Watchlists: {x.watchlists.map((w: string) => <span key={w} className="pill text-slate-300 mr-1">{w}</span>)}</div>}
             </div>) : null; })}
         </div>
         {c.policy && <div className="border border-line rounded-lg p-3 text-xs">
@@ -222,7 +222,7 @@ export function Explorer() {
           {([["category", ["traffic", "dns", "web", "security", "system"]], ["action", ["accept", "close", "timeout", "reset", "deny", "block", "allow", "monitor"]],
             ["severity", ["critical", "high", "medium", "low", "informational"]]] as [string, string[]][]).map(([k, vals]) => (
             <div key={k} className="flex flex-wrap items-center gap-1"><span className="text-muted mr-1">{k}:</span>
-              {vals.map((v) => <button key={v} onClick={() => toggle(k, v)} className={`pill border ${multi(k).includes(v) ? "border-brand-500 bg-brand-500/10 text-brand-400" : "border-line text-slate-400"}`}>{v}</button>)}
+              {vals.map((v) => <button key={v} onClick={() => toggle(k, v)} className={`pill border ${multi(k).includes(v) ? "border-line-strong text-slate-100" : "border-line text-slate-400"}`}>{v}</button>)}
             </div>
           ))}
         </div>

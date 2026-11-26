@@ -34,7 +34,7 @@ export function WanCircuits() {
           <TableWrap><table className="tbl"><thead><tr><th>Circuit</th><th>ISP</th><th>Site / location</th><th>Device / interface</th><th>Circuit ID</th>
             <th className="num">Bandwidth</th><th>Role</th><th className="num">SLA target</th><th>Monitored targets</th><th>Owner</th>{admin && <th />}</tr></thead>
             <tbody>{rows.map((c: any) => <tr key={c.id} className={c.enabled ? "" : "opacity-60"}>
-              <td className="font-medium">{c.label}{c.hidden && <span className="pill bg-slate-700/60 text-slate-300 ml-1">hidden</span>}{!c.enabled && <span className="pill bg-slate-700/60 text-slate-300 ml-1">disabled</span>}</td>
+              <td className="font-medium">{c.label}{c.hidden && <span className="pill text-slate-300 ml-1">hidden</span>}{!c.enabled && <span className="pill text-slate-300 ml-1">disabled</span>}</td>
               <td>{c.isp_name || <span className="text-muted" title="discovered ASN organisation">{c.as_org || "—"}</span>}</td>
               <td>{c.effective_site || "—"}{c.location && <div className="text-2xs text-muted">{c.location}</div>}</td>
               <td className="text-xs">{c.firewall ? `${c.firewall} / ${c.interface}` : "—"}{c.gateway && <div className="font-mono text-2xs text-muted">gw {c.gateway}</div>}</td>

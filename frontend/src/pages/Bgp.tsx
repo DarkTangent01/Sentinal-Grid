@@ -8,7 +8,7 @@ import { Chart, CHART_THEME, PALETTES, axisStyle, statusColor } from "../compone
 import { Card, Drawer, Empty, IpLink, Kpi, Loading, TableWrap, Tabs, Time, Trunc, rowProps } from "../components/ui";
 
 const ST: Record<string, [string, string]> = {
-  up: ["bg-emerald-400", "Established"], down: ["bg-red-500 animate-pulse", "Down"],
+  up: ["bg-emerald-400", "Established"], down: ["bg-red-500", "Down"],
   admin_down: ["bg-slate-500", "Admin down"], unknown: ["bg-slate-500", "Unknown"],
 };
 const KIND: Record<string, [string, string]> = {

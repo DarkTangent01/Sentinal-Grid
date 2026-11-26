@@ -65,9 +65,9 @@ function FirewallCard({ f, range }: { f: any; range: string }) {
   }, [ts.data, theme, range]);
   return (
     <Card title={<span>{f.firewall_name}{f.site && <span className="text-muted font-normal text-xs"> · {f.site}</span>}</span>}
-      right={<>{f.feed_gaps.length > 0 && <span className="pill bg-red-500/15 text-red-300">feeds stopped: {f.feed_gaps.join(", ")}</span>}
-        {f.reboots.length > 0 && <span className="pill bg-amber-500/15 text-amber-300">{f.reboots.length} reboot(s)</span>}
-        {f.faz && <span className={`pill ${f.faz.connected ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>FortiAnalyzer {f.faz.connected ? "connected" : "disconnected"} · {f.faz.disconnects} drops</span>}</>}>
+      right={<>{f.feed_gaps.length > 0 && <span className="pill text-red-300">feeds stopped: {f.feed_gaps.join(", ")}</span>}
+        {f.reboots.length > 0 && <span className="pill text-amber-300">{f.reboots.length} reboot(s)</span>}
+        {f.faz && <span className={`pill ${f.faz.connected ? "text-emerald-300" : "text-red-300"}`}>FortiAnalyzer {f.faz.connected ? "connected" : "disconnected"} · {f.faz.disconnects} drops</span>}</>}>
       <div className="grid gap-4 xl:grid-cols-[1fr_24rem] min-w-0">
         <div className="min-w-0 space-y-3">
           {f.members.length > 0 && <TableWrap><table className="tbl"><thead><tr><th>Member</th><th className="num">CPU</th><th className="num">CPU p95 / max</th><th className="num">Memory</th>

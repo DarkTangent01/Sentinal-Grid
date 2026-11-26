@@ -54,7 +54,7 @@ export function WanIncidents() {
           <TableWrap><table className="tbl"><thead><tr><th>#</th><th>Status</th><th>Severity</th><th>Incident</th><th>ISP</th><th>Site</th><th>Started</th>
             <th className="num">Outages</th><th className="num">Downtime</th><th className="num">Time to resolve</th><th>Root cause</th><th>Owner</th></tr></thead>
             <tbody>{q.data.items.map((i: any) => <tr key={i.id} {...rowProps(() => setSel(i.id))}>
-              <td className="text-muted">{i.id}</td><td><IncStatus s={i.status} />{i.ongoing && <span className="pill bg-red-500/15 text-red-300 ml-1">ongoing</span>}</td>
+              <td className="text-muted">{i.id}</td><td><IncStatus s={i.status} />{i.ongoing && <span className="pill text-red-300 ml-1">ongoing</span>}</td>
               <td><Sev s={i.severity} /></td><td className="font-medium max-w-[22rem] truncate" title={i.title}>{i.title}</td><td>{i.isp}</td><td>{i.site}</td>
               <td className="text-xs"><Time v={i.first_seen} /></td><td className="num">{i.outage_count}</td><td className="num"><Dur s={i.ongoing ? null : i.downtime_s} /></td>
               <td className="num"><Dur s={i.resolve_s} /></td>
@@ -89,7 +89,7 @@ export function IncidentDrawer({ id, onClose }: { id: number; onClose: () => voi
         <div><div className="text-base font-semibold">{d.title}</div>
           <div className="text-sm flex flex-wrap gap-x-3 gap-y-1 mt-1"><IncStatus s={d.status} /><Sev s={d.severity} /><span>{d.isp} · {d.site}</span>
             <span className="text-muted">started <Time v={d.first_seen} /></span>{d.resolved_at && <span className="text-muted">resolved <Time v={d.resolved_at} /> ({dur(d.resolve_s)})</span>}
-            {d.ongoing && <span className="pill bg-red-500/15 text-red-300">outage in progress</span>}</div></div>
+            {d.ongoing && <span className="pill text-red-300">outage in progress</span>}</div></div>
         <Card title="Symptom and probable cause">
           <p className="text-sm">{d.summary}</p>
           {d.probable_cause && <p className="text-sm mt-2"><span className="text-muted">Probable cause (from correlated monitoring evidence): </span>{d.probable_cause}</p>}

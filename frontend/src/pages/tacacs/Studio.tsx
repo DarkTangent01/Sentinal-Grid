@@ -53,7 +53,7 @@ export function Studio() {
       <Loading q={versions} />
       {versions.data && (!versions.data.items.length ? <Empty text="No versions committed yet." /> :
         <TableWrap><table className="tbl"><thead><tr><th>Version</th><th>Message</th><th>By</th><th>Created</th><th>Validation</th><th>SHA-256</th><th /></tr></thead>
-          <tbody>{versions.data.items.map((v: any) => <tr key={v.id}><td className="font-medium">v{v.number}{v.deployed && <span className="pill bg-emerald-500/15 text-emerald-300 ml-1">deployed</span>}</td>
+          <tbody>{versions.data.items.map((v: any) => <tr key={v.id}><td className="font-medium">v{v.number}{v.deployed && <span className="pill text-emerald-300 ml-1">deployed</span>}</td>
             <td className="text-xs">{v.message}</td><td>{v.created_by}</td><td><Time v={v.created_at} /></td><td className="text-xs">{v.validation.warnings?.length || 0} warning(s)</td>
             <td className="font-mono text-2xs">{v.sha256.slice(0, 16)}…</td>
             <td className="whitespace-nowrap">{can("policy_admin") && <><button className="btn" onClick={() => api(`/tacacs/config/versions/${v.id}`).then(setView)}>View</button>{" "}

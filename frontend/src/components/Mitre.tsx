@@ -8,9 +8,9 @@ export function Mitre({ m }: { m?: any }) {
   if (!m?.tactic) return null;
   return (
     <span className="inline-flex flex-wrap gap-1 items-center">
-      <span className="pill bg-indigo-500/15 text-sky-200 ring-1 ring-sky-500/20" title={m.tactic}>{m.tactic_name || TACTIC_NAMES[m.tactic] || m.tactic}</span>
+      <span className="pill" title={m.tactic}>{m.tactic_name || TACTIC_NAMES[m.tactic] || m.tactic}</span>
       {(m.techniques || []).map((t: string) => (
-        <a key={t} className="pill bg-slate-800 text-slate-300 hover:text-brand-400" href={`https://attack.mitre.org/techniques/${t.replace(".", "/")}/`}
+        <a key={t} className="pill bg-slate-800 text-slate-300 hover:text-slate-100" href={`https://attack.mitre.org/techniques/${t.replace(".", "/")}/`}
           target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{t}</a>))}
     </span>
   );

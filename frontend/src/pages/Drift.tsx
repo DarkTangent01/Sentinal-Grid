@@ -46,7 +46,7 @@ function SnapshotDetail({ id, onClose }: { id: number; onClose: () => void }) {
         <Card title={`Changes (${d.changes.length})`}>
           {d.changes.length ? <div className="space-y-3">{d.changes.map((c: any, n: number) => (
             <div key={n} className="border border-line rounded p-2">
-              <div className="text-sm"><span className={`pill ${c.change === "added" ? "bg-emerald-500/15 text-emerald-300" : c.change === "removed" ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>{c.change}</span> <b>{c.table}</b> {c.key}</div>
+              <div className="text-sm"><span className={`pill ${c.change === "added" ? "text-emerald-300" : c.change === "removed" ? "text-red-300" : "text-amber-300"}`}>{c.change}</span> <b>{c.table}</b> {c.key}</div>
               {c.fields && <table className="tbl mt-1"><thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead><tbody>{Object.entries(c.fields).map(([f, [a, b]]: any) => (
                 <tr key={f}><td className="text-xs nowrap">{f}</td><td><Val v={a} /></td><td><Val v={b} /></td></tr>))}</tbody></table>}
               {c.new && <pre className="text-xs bg-panel2 rounded p-2 mt-1 whitespace-pre-wrap">{JSON.stringify(c.new, null, 1)}</pre>}

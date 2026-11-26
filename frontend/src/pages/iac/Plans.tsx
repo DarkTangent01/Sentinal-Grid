@@ -160,7 +160,7 @@ export function JobDrawer({ id, onClose, onPlan }: { id: number; onClose: () => 
         <span className="text-xs text-muted">by {j.requested_by} · queued <Time v={j.created_at} />{j.finished_at && <> · finished <Time v={j.finished_at} /></>}</span>
         {["queued", "running"].includes(j.status) && <button className="btn btn-danger py-0.5 text-xs ml-auto" disabled={!can(meta, "deployer") || j.cancel_requested} onClick={() => setConfirm(true)}>
           {j.cancel_requested ? "Cancellation requested" : "Cancel"}</button>}</div>
-      <div className="h-2 rounded bg-white/10 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><div className="h-2 bg-brand-500" style={{ width: `${pct}%` }} /></div>
+      <div className="h-2 rounded bg-white/10 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><div className="h-2 bg-slate-400" style={{ width: `${pct}%` }} /></div>
       {j.current_operation && <div className="text-xs text-muted">Current: {j.current_operation}</div>}
       {j.error && <Note tone="bad">{j.error}</Note>}
       {j.devices.map((d: any) => <Card key={d.firewall_id} title={<span>{d.firewall_name} <Status s={d.status} /></span>}

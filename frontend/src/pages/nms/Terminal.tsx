@@ -96,10 +96,10 @@ export function DeviceTerminal({ sid, mode = "read_only", changeId, protocol = "
 
   return <div className="space-y-2">
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className={`pill ${state === "connected" ? "bg-emerald-500/15 text-emerald-300" : state === "connecting" ? "bg-slate-800 text-slate-300" : "bg-red-500/15 text-red-300"}`}>{state}</span>
-      {mode === "change" && <span className="pill bg-amber-500/15 text-amber-300">change session #{changeId}</span>}
+      <span className={`pill ${state === "connected" ? "text-emerald-300" : state === "connecting" ? "bg-slate-800 text-slate-300" : "text-red-300"}`}>{state}</span>
+      {mode === "change" && <span className="pill text-amber-300">change session #{changeId}</span>}
       {protocol !== "ssh" && <span className="pill bg-slate-800 text-slate-300">{protocol}</span>}
-      {info.cleartext && <span className="pill bg-red-500/15 text-red-300" title="Telnet sends the login and everything typed unencrypted">clear text</span>}
+      {info.cleartext && <span className="pill text-red-300" title="Telnet sends the login and everything typed unencrypted">clear text</span>}
       {info.latency != null && <span className="text-muted">login {info.latency} ms</span>}
       {info.recording && <span className="text-muted">recording: {info.recording}</span>}
       {reason && state !== "connected" && <span className="text-muted truncate max-w-[28rem]" title={reason}>{reason}</span>}

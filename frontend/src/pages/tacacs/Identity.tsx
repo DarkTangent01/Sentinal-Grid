@@ -43,7 +43,7 @@ export function Identity() {
       {users.data && (!users.data.items.length ? <Empty text="No users." /> :
         <TableWrap><table className="tbl"><thead><tr><th>User</th><th>Source</th><th>Status</th><th>Groups</th><th>Roles</th><th>Last login</th><th>Last failure</th><th>Valid until</th><th /></tr></thead>
           <tbody>{users.data.items.map((u: any) => <tr key={u.id} className={u.enabled ? "" : "opacity-60"}>
-            <td className="font-medium">{u.username}{u.emergency && <span className="pill bg-red-500/15 text-red-300 ml-1">emergency</span>}<div className="text-2xs text-muted">{u.display_name}</div></td>
+            <td className="font-medium">{u.username}{u.emergency && <span className="pill text-red-300 ml-1">emergency</span>}<div className="text-2xs text-muted">{u.display_name}</div></td>
             <td className="text-xs">{u.source?.name} ({u.source?.kind})</td><td>{u.enabled ? <span className="text-emerald-300">enabled</span> : <span className="text-red-300" title={u.disabled_reason}>disabled</span>}</td>
             <td className="text-xs">{u.groups.join(", ") || "—"}</td><td className="text-xs">{u.roles.join(", ") || <span className="text-amber-300">none (denied)</span>}</td>
             <td><Time v={u.last_login} /></td><td><Time v={u.last_failure} /></td><td><Time v={u.valid_until} /></td>

@@ -161,7 +161,7 @@ export function WanConfig() {
         <Loading q={m} />
         {m.data && (!m.data.items.length ? <Empty text="No maintenance windows." /> :
           <TableWrap><table className="tbl"><thead><tr><th>Name</th><th>Applies to</th><th>From</th><th>To</th><th>Reason</th><th>By</th>{admin && <th />}</tr></thead>
-            <tbody>{m.data.items.map((x: any) => <tr key={x.id}><td className="font-medium">{x.name}{x.active && <span className="pill bg-sky-500/15 text-sky-300 ml-1">active</span>}</td>
+            <tbody>{m.data.items.map((x: any) => <tr key={x.id}><td className="font-medium">{x.name}{x.active && <span className="pill text-sky-300 ml-1">active</span>}</td>
               <td className="text-xs">{x.scope}{x.scope_value && `: ${x.scope_value}`}</td><td className="text-xs"><Time v={x.starts_at} /></td><td className="text-xs"><Time v={x.ends_at} /></td>
               <td className="text-xs">{x.reason}</td><td className="text-xs">{x.created_by}</td>
               {admin && <td><button className="btn py-0.5 text-xs" onClick={() => confirm(`Delete maintenance window ${x.name}?`) && delM.mutate(x.id)}>Delete</button></td>}</tr>)}</tbody></table></TableWrap>)}

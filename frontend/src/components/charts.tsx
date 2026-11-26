@@ -32,7 +32,7 @@ export function TimeChart({ data, series, stack, bytes, height = 240, area, load
     const startMs = data?.data_start ? Date.parse(data.data_start) : null;
     const showGap = startMs !== null && pts.length > 0 && startMs > first;
     return {
-      legend: { top: 0 },
+      legend: { top: 0, type: "scroll", itemWidth: 10, itemHeight: 8, itemGap: 12, textStyle: { fontSize: 11 } },
       xAxis: { type: "time", ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: (v: number) => axisTime(v, b) } },
       yAxis: { type: "value", ...axisStyle, minInterval: bytes ? undefined : 1,
         axisLabel: { ...axisStyle.axisLabel, formatter: (v: number) => (bytes ? fmtBytes(v) : fmtCompact(v)) } },
@@ -45,11 +45,11 @@ export function TimeChart({ data, series, stack, bytes, height = 240, area, load
           return head + ps.map((p) => `<br/>${p.marker}${escHtml(p.seriesName)}: <b>${bytes ? fmtBytes(p.value[1]) : Number(p.value[1]).toLocaleString()}</b>`).join("") + note;
         } },
       series: series.map((s, i) => ({
-        name: s.name, type: stack ? "bar" : "line", stack: stack ? "a" : undefined, smooth: !stack, showSymbol: false,
-        barMaxWidth: 24, areaStyle: area ? { opacity: 0.12 } : undefined, itemStyle: { color: seriesColor(theme, s.color, i) },
-        lineStyle: { width: 2, type: s.dashed ? "dashed" : "solid" },
+        name: s.name, type: stack ? "bar" : "line", stack: stack ? "a" : undefined, smooth: false, showSymbol: false,
+        barMaxWidth: 24, areaStyle: area ? { opacity: 0.06 } : undefined, itemStyle: { color: seriesColor(theme, s.color, i, s.name) },
+        lineStyle: { width: 1.5, type: s.dashed ? "dashed" : "solid" },
         data: toTimePairs(pts, s.key),
-        markArea: i === 0 && showGap ? { silent: true, itemStyle: { color: "rgba(148,163,184,0.08)" },
+        markArea: i === 0 && showGap ? { silent: true, itemStyle: { color: "rgba(161,161,170,0.06)" },
           label: { show: true, color: CHART_THEME[theme].text, fontSize: 10, position: "insideTop" },
           data: [[{ name: "not collected", xAxis: first }, { xAxis: startMs }]] } : undefined,
       })),

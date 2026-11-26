@@ -34,10 +34,10 @@ export function Workbooks() {
       {q.data && !q.data.length && <Empty text="No workbooks." />}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {(q.data || []).map((b) => (
-          <button key={b.id} className="card p-4 text-left hover:border-brand-500/50 hover:shadow-md transition-shadow" onClick={() => nav(`/workbooks/${b.id}`)}>
+          <button key={b.id} className="card p-4 text-left card-interactive" onClick={() => nav(`/workbooks/${b.id}`)}>
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-semibold text-slate-100 truncate">{b.name}</span>
-              {b.template && <span className="pill bg-brand-500/10 text-brand-400">template</span>}
+              {b.template && <span className="pill text-slate-300">template</span>}
               {!b.shared && <span className="pill bg-slate-800 text-slate-400">private</span>}
             </div>
             <div className="text-xs text-muted mt-1 line-clamp-2 min-h-[2rem]">{b.description || "—"}</div>
@@ -90,7 +90,7 @@ export function WorkbookView() {
     <div className="space-y-4 min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         {editing ? <input aria-label="Workbook name" className="input text-lg font-semibold flex-1 min-w-[12rem]" value={draft!.name} onChange={(e) => setDraft({ ...draft!, name: e.target.value })} />
-          : <h1 className="text-lg font-semibold flex-1 min-w-0 truncate">{b.name}{b.template && <span className="pill bg-brand-500/10 text-brand-400 ml-2 align-middle">template</span>}</h1>}
+          : <h1 className="text-lg font-semibold flex-1 min-w-0 truncate">{b.name}{b.template && <span className="pill text-slate-300 ml-2 align-middle">template</span>}</h1>}
         <select aria-label="Workbook time range" className="input py-1" value={editing ? draft!.range : eff}
           onChange={(e) => editing ? setDraft({ ...draft!, range: e.target.value }) : setRange(e.target.value)}>
           {RANGES.map((r) => <option key={r} value={r}>{editing ? `Default range: ${r}` : `Range: ${r}`}</option>)}

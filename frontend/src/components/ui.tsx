@@ -19,24 +19,34 @@ const TONE_TEXT = { ok: "Healthy", bad: "Critical", warn: "Warning" } as const;
 /** Metric card: label, value (tabular), optional context line; a tone adds a status dot with a text equivalent
  *  (colour is never the only cue). Clickable cards drill down. */
 export function Kpi({ label, value, sub, tone, onClick }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "ok" | "bad" | "warn"; onClick?: () => void }) {
-  const color = tone === "ok" ? "text-emerald-400" : tone === "bad" ? "text-red-400" : tone === "warn" ? "text-amber-300" : "text-slate-100";
+  // the dot carries the state; only a problem colours the number itself
+  const color = tone === "bad" ? "text-red-400" : tone === "warn" ? "text-amber-300" : "text-slate-100";
   const Tag = onClick ? "button" : "div";
   return (
-    <Tag type={onClick ? "button" : undefined} className={`card px-4 py-3 text-left ${onClick ? "card-interactive cursor-pointer focus-visible:border-brand-500" : ""}`} onClick={onClick}>
+    <Tag type={onClick ? "button" : undefined} className={`card px-3.5 py-3 text-left ${onClick ? "card-interactive cursor-pointer" : ""}`} onClick={onClick}>
       <div className="flex items-start gap-2">
-        <div className="eyebrow leading-tight line-clamp-2 flex-1" title={label}>{label}</div>
+        <div className="text-xs text-muted leading-tight line-clamp-2 flex-1" title={label}>{label}</div>
         {tone && <span className={`dot mt-0.5 ${TONE_DOT[tone]}`} role="img" aria-label={TONE_TEXT[tone]} />}
       </div>
-      <div className={`metric mt-1.5 truncate ${color}`}>{value}</div>
+      <div className={`metric mt-1 truncate ${color}`}>{value}</div>
       {sub && <div className="text-2xs text-subtle mt-1 truncate" title={typeof sub === "string" ? sub : undefined}>{sub}</div>}
     </Tag>
+  );
+}
+
+/** Secondary figures in one quiet row: use it instead of another row of KPI cards. */
+export function StatStrip({ items }: { items: [string, ReactNode, string?][] }) {
+  return (
+    <dl className="stat-strip">
+      {items.map(([k, v, title]) => <div key={k} title={title}><dt>{k}</dt><dd>{v}</dd></div>)}
+    </dl>
   );
 }
 
 export function Sev({ s }: { s?: string }) {
   if (!s) return null;
   const k = ["critical", "high", "medium", "low"].includes(s) ? s : "informational";
-  return <span className={`pill sev-${k}`}>{s}</span>;
+  return <span className={`inline-flex items-center gap-1 whitespace-nowrap sev-${k}`}>{s}</span>;
 }
 
 export function Action({ a }: { a?: string }) {
@@ -162,7 +172,7 @@ export function Tabs({ tabs, value, onChange }: { tabs: { key: string; label: st
       {tabs.map((t) => (
         <button key={t.key} type="button" role="tab" data-tab={t.key} aria-selected={value === t.key} tabIndex={value === t.key ? 0 : -1}
           onClick={() => onChange(t.key)}
-          className={`shrink-0 px-3 py-2 text-[13px] -mb-px border-b-2 whitespace-nowrap transition-colors duration-150 ${value === t.key ? "border-brand-400 text-slate-100 font-medium" : "border-transparent text-muted hover:text-slate-200 hover:border-slate-600"}`}>
+          className={`shrink-0 px-3 py-2 text-[13px] -mb-px border-b-2 whitespace-nowrap transition-colors duration-150 ${value === t.key ? "border-slate-200 text-slate-100 font-medium" : "border-transparent text-muted hover:text-slate-200 hover:border-slate-600"}`}>
           {t.label}
         </button>
       ))}
@@ -231,7 +241,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref, onClose);
   return (
-    <div className="fixed inset-0 z-50 bg-scrim/65 backdrop-blur-[2px] flex items-start justify-center p-2 sm:p-6 overflow-auto animate-fade-in" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-scrim/70 flex items-start justify-center p-2 sm:p-6 overflow-auto animate-fade-in" onClick={onClose}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`card bg-elevated shadow-pop w-full outline-none animate-pop-in ${wide ? "max-w-5xl" : "max-w-2xl"} sm:mt-10`} onClick={(e) => e.stopPropagation()}>
         <div className="card-h"><h2 className="truncate">{title}</h2><CloseButton onClose={onClose} /></div>
         <div className="p-4">{children}</div>
@@ -244,7 +254,7 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   const ref = useRef<HTMLElement>(null);
   useDialog(ref, onClose);
   return (
-    <div className="fixed inset-0 z-40 bg-scrim/55 backdrop-blur-[1px] animate-fade-in" onClick={onClose}>
+    <div className="fixed inset-0 z-40 bg-scrim/60 animate-fade-in" onClick={onClose}>
       <aside ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="absolute right-0 top-0 bottom-0 w-full max-w-3xl bg-panel border-l border-line shadow-pop overflow-auto outline-none animate-slide-in" onClick={(e) => e.stopPropagation()}>
         <div className="card-h sticky top-0 bg-panel/95 backdrop-blur z-10 !py-3"><h2 className="truncate text-[15px]">{title}</h2><CloseButton onClose={onClose} /></div>
         <div className="p-4">{children}</div>
@@ -255,8 +265,8 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
 
 export function Bar({ value, max }: { value: number; max: number }) {
   return (
-    <div className="h-1.5 bg-slate-800 rounded-full w-16 hidden md:inline-block align-middle ml-2 overflow-hidden" aria-hidden>
-      <div className="h-1.5 bg-brand-400 rounded-full" style={{ width: `${max ? Math.max(2, (value / max) * 100) : 0}%` }} />
+    <div className="h-1 bg-slate-800 rounded-full w-16 hidden md:inline-block align-middle ml-2 overflow-hidden" aria-hidden>
+      <div className="h-1 bg-slate-400 rounded-full" style={{ width: `${max ? Math.max(2, (value / max) * 100) : 0}%` }} />
     </div>
   );
 }

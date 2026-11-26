@@ -89,7 +89,7 @@ export function Authorization() {
       <Loading q={roles} />
       {roles.data && (!roles.data.items.length ? <Empty text="No roles yet. Add the built-in roles as a starting point." /> :
         <TableWrap><table className="tbl"><thead><tr><th>Role</th><th>Cisco</th><th>Ruckus</th><th>FortiGate</th><th>Permitted categories</th><th>Default</th><th /></tr></thead>
-          <tbody>{roles.data.items.map((r: any) => <tr key={r.id}><td className="font-medium">{r.name}{r.privileged && <span className="pill bg-amber-500/15 text-amber-300 ml-1">privileged</span>}
+          <tbody>{roles.data.items.map((r: any) => <tr key={r.id}><td className="font-medium">{r.name}{r.privileged && <span className="pill text-amber-300 ml-1">privileged</span>}
             <div className="text-2xs text-muted">{r.description}</div></td>
             <td className="text-xs">{r.explain.vendors.cisco.privilege}</td><td className="text-xs">{r.explain.vendors.ruckus.privilege}</td><td className="text-xs">{r.explain.vendors.fortinet.privilege}</td>
             <td className="text-xs">{r.command_categories.join(", ")}</td><td>{r.default_command_action}</td>

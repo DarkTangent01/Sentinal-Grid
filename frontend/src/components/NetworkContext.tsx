@@ -7,7 +7,7 @@ import { api } from "../lib/api";
 import { Card, Loading, Time } from "./ui";
 
 const CONF: Record<string, string> = {
-  confirmed: "bg-emerald-500/15 text-emerald-300", high: "bg-sky-500/15 text-sky-300", probable: "bg-indigo-500/15 text-indigo-300",
+  confirmed: "text-emerald-300", high: "text-sky-300", probable: "text-slate-300",
 };
 const SOURCE: Record<string, string> = {
   wireless: "Wireless controller", switch_mac: "Switch MAC table", sflow: "sFlow", fortigate: "FortiGate device detection", dhcp: "DHCP",

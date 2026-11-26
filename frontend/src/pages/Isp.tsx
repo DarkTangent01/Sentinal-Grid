@@ -43,7 +43,7 @@ export function Isp() {
 }
 
 const STATUS: Record<string, [string, string]> = {
-  up: ["bg-emerald-400", "Up"], down: ["bg-red-500 animate-pulse", "Down"], degraded: ["bg-amber-400", "Degraded"], no_data: ["bg-slate-500", "No data"],
+  up: ["bg-emerald-400", "Up"], down: ["bg-red-500", "Down"], degraded: ["bg-amber-400", "Degraded"], no_data: ["bg-slate-500", "No data"],
 };
 const bps = (v?: number | null) => (v == null ? "—" : `${fmtBytes(v / 8).replace(/B$/, "B/s")}`);
 const ms = (v?: number | null) => (v == null ? "—" : `${v.toFixed(1)} ms`);
@@ -106,10 +106,10 @@ function IspSdwan() {
               <th className="num">Downtime</th><th className="num">MTTR</th><th className="num">Longest</th><th className="num">Latency</th><th className="num">Jitter</th><th className="num">Loss</th>
               <th className="num">SLA breaches</th><th className="num">Partial</th></tr></thead>
             <tbody>{d.isps.map((i: any) => <tr key={i.isp_name}>
-              <td className="font-semibold">{i.isp_name}{i.down_now > 0 && <span className="pill bg-red-500/15 text-red-300 ml-1.5">{i.down_now} down</span>}</td>
+              <td className="font-semibold">{i.isp_name}{i.down_now > 0 && <span className="pill text-red-300 ml-1.5">{i.down_now} down</span>}</td>
               <td className="text-xs">{i.sites.join(", ")}</td><td className="num">{i.links}</td>
               <td className="num"><Avail v={i.availability} target={i.target_availability} /></td>
-              <td><span className={`pill ${i.sla_met ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>{i.sla_met ? "met" : "missed"} · {i.target_availability}%</span></td>
+              <td><span className={`pill ${i.sla_met ? "text-emerald-300" : "text-red-300"}`}>{i.sla_met ? "met" : "missed"} · {i.target_availability}%</span></td>
               <td className="num">{fmtNum(i.outages)}</td><td className="num">{fmtNum(i.blips)}</td><td className="num">{dur(i.downtime_s)}</td>
               <td className="num">{dur(i.mttr_s)}</td><td className="num">{dur(i.longest_s)}</td><td className="num">{ms(i.latency_ms)}</td><td className="num">{ms(i.jitter_ms)}</td>
               <td className="num">{pct(i.packet_loss_pct)}</td><td className="num">{fmtNum(i.sla_breach_total)}</td><td className="num">{fmtNum(i.partial_events)}</td>
@@ -237,7 +237,7 @@ function LinkDrawer({ l, range, minOut, admin, onClose }: { l: any; range: strin
         <Card title={`Outage & partial log (${d.events.length})`} bodyClass="p-0">
           {d.events.length ? <TableWrap maxH="max-h-72"><table className="tbl"><thead><tr><th>Type</th><th>Start</th><th>End</th><th className="num">Duration</th><th className="w-full">Failed checks</th></tr></thead>
             <tbody>{d.events.map((e: any, i: number) => <tr key={i}>
-              <td>{e.type === "outage" ? <span className="pill bg-red-500/15 text-red-300">outage</span> : <span className="pill bg-amber-500/15 text-amber-300">partial</span>}{e.ongoing && <span className="pill bg-red-500/25 text-red-200 ml-1">ongoing</span>}</td>
+              <td>{e.type === "outage" ? <span className="pill text-red-300">outage</span> : <span className="pill text-amber-300">partial</span>}{e.ongoing && <span className="pill text-red-300 ml-1">ongoing</span>}</td>
               <td><Time v={e.start} /></td><td>{e.ongoing ? "—" : <Time v={e.end} />}</td><td className="num">{dur(e.duration_s)}</td>
               <td className="text-xs font-mono cell-wrap">{e.checks.join(", ")}</td></tr>)}</tbody></table></TableWrap> : <Empty text="No outages or partial failures." />}
         </Card>

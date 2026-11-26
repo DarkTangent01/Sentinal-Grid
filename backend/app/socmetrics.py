@@ -13,11 +13,30 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 
 from sqlalchemy import select
+from sqlalchemy.orm import load_only
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db.models import Alert, Incident
 from .incidents import OPEN, priority_of, sla_state, stage_of
-from .products import alert_product
+from .products import alert_product, product_rule_keys
+
+
+_CACHE: dict[tuple, tuple[float, dict]] = {}
+CACHE_TTL = 60.0
+
+
+async def cached(key: tuple, make) -> dict:
+    """These summaries read every alert of the period (85k+ a month on a busy network, 10-25 s). A dashboard opened by
+    several analysts, or refreshed, reuses one result for a minute; the response says when it was computed."""
+    import time
+    now = time.monotonic()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < CACHE_TTL:
+        return hit[1]
+    out = await make()
+    out["computed_at"] = datetime.now(timezone.utc).isoformat()
+    _CACHE[key] = (now, out)
+    return out
 
 
 def _aware(v):
@@ -34,7 +53,10 @@ def _stats(seconds: list[float]) -> dict:
 async def operations(s: AsyncSession, days: int = 30) -> dict:
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
-    alerts = [a for a in (await s.execute(select(Alert).where(Alert.created_at >= since))).scalars() if alert_product(a.rule_key) == "grid"]
+    # Grid alerts only, filtered in SQL, and without the evidence JSON (not used here): a busy network has 150k+ alerts a month
+    keys = await product_rule_keys(s, "grid", since)
+    cols = load_only(Alert.id, Alert.rule_key, Alert.name, Alert.severity, Alert.status, Alert.disposition, Alert.created_at, Alert.first_seen)
+    alerts = list((await s.execute(select(Alert).options(cols).where(Alert.created_at >= since, Alert.rule_key.in_(keys)))).scalars()) if keys else []
     incs = list((await s.execute(select(Incident).where(Incident.category == "security", (Incident.created_at >= since) | Incident.status.in_(OPEN)))).scalars())
     per_day: dict[str, Counter] = defaultdict(Counter)
     for a in alerts:

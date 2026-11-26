@@ -6,7 +6,7 @@ import { fmtNum } from "../lib/format";
 import { Card, Empty, IpLink, Kpi, Loading, Modal, Pager, rowProps, TableWrap, Time, Trunc, useDebounced } from "../components/ui";
 
 export const CRIT_CLS: Record<string, string> = {
-  critical: "bg-red-500/15 text-red-300", high: "bg-orange-500/15 text-orange-300", normal: "bg-slate-700/60 text-slate-300", low: "bg-slate-800 text-slate-400",
+  critical: "text-red-300", high: "text-orange-300", normal: "text-slate-300", low: "bg-slate-800 text-slate-400",
 };
 
 export function Assets() {

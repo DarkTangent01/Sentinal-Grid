@@ -162,7 +162,7 @@ function Tuning({ admin }: { admin: boolean }) {
       {q.data && !q.data.length && <Empty text="No suggestions — not enough decided alerts yet, or the rules are already well tuned." />}
       {!!q.data?.length && <TableWrap><table className="tbl"><thead><tr><th>Suggestion</th><th>Rule</th><th className="w-full">Why</th><th>Effect</th><th /></tr></thead>
         <tbody>{q.data.map((x, i) => <tr key={i}>
-          <td className="nowrap"><span className="pill bg-brand-500/10 text-brand-400">{TUNE_LABEL[x.type]}</span></td>
+          <td className="nowrap"><span className="pill text-slate-300">{TUNE_LABEL[x.type]}</span></td>
           <td className="text-xs">{x.rule}</td>
           <td className="text-xs">{x.reason}{x.type === "suppress_entity" && <div className="font-mono text-muted">{x.group_key}</div>}
             {x.type === "raise_threshold" && <div className="font-mono text-muted">{x.param}: {x.current} → {x.proposed}</div>}</td>

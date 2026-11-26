@@ -6,12 +6,12 @@ import { fmtAgo, fmtBytes, fmtDuration, fmtTime } from "../lib/format";
 import { Card, Drawer, Empty, Loading, Modal, rowProps } from "../components/ui";
 import { Chart, axisStyle } from "../components/Chart";
 
-const VENDOR: Record<string, [string, string]> = { fortinet: ["FortiGate", "bg-red-500/10 text-red-300"], paloalto: ["Palo Alto", "bg-orange-500/15 text-orange-300"] };
+const VENDOR: Record<string, [string, string]> = { fortinet: ["FortiGate", "text-red-300"], paloalto: ["Palo Alto", "text-orange-300"] };
 const ZONES = ["UTC", "Asia/Kolkata", "Asia/Dubai", "Asia/Singapore", "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles"];
 const linkUp = (v: any) => v === true || v === "up";
 
-const API_TONE: Record<string, string> = { ok: "bg-emerald-700/30 text-emerald-200", auth_error: "bg-red-700/40 text-red-200",
-  unreachable: "bg-red-700/40 text-red-200", error: "bg-amber-700/40 text-amber-200", unknown: "bg-slate-700 text-slate-300", demo: "bg-amber-600/30 text-amber-200" };
+const API_TONE: Record<string, string> = { ok: "text-emerald-300", auth_error: "text-red-300",
+  unreachable: "text-red-300", error: "text-amber-300", unknown: "bg-slate-700 text-slate-300", demo: "text-amber-300" };
 
 function ingestTone(lag?: number | null) {
   if (lag == null) return "text-slate-500";
@@ -41,7 +41,7 @@ export function Firewalls() {
             const ing = (f.ingest || []).sort((a: any, b: any) => String(b.last_ingest_time).localeCompare(String(a.last_ingest_time)))[0];
             return (
               <tr key={f.id} {...rowProps(() => setDetail(f))}>
-                <td><div className="font-medium">{f.name}</div><div className="text-xs text-muted"><span className={`pill ${VENDOR[f.vendor]?.[1] || ""} mr-1`}>{VENDOR[f.vendor]?.[0] || f.vendor}</span>{f.serial || "serial unknown"} {f.is_demo && <span className="pill bg-amber-600/30 text-amber-200">DEMO</span>}</div></td>
+                <td><div className="font-medium">{f.name}</div><div className="text-xs text-muted"><span className={`pill ${VENDOR[f.vendor]?.[1] || ""} mr-1`}>{VENDOR[f.vendor]?.[0] || f.vendor}</span>{f.serial || "serial unknown"} {f.is_demo && <span className="pill text-amber-300">DEMO</span>}</div></td>
                 <td className="font-mono text-xs">{f.host}:{f.https_port}</td>
                 <td className="text-xs">{f.fortios_version_detected || <span className="text-muted">{f.fortios_version_declared || "?"} (declared)</span>}<div className="text-muted">{f.version_support}</div></td>
                 <td className="text-xs">{f.site}</td>

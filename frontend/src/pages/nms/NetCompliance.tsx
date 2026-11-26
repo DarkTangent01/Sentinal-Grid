@@ -14,16 +14,16 @@ const TABS = [{ key: "overview", label: "Overview" }, { key: "controls", label: 
   { key: "devices", label: "Devices" }, { key: "exceptions", label: "Exceptions" }];
 const FW_KEYS = ["cis", "pci", "nist", "iso"];
 const STATUS: Record<string, [string, string]> = {
-  pass: ["Met", "bg-emerald-500/15 text-emerald-300"], fail: ["Not met", "bg-red-500/15 text-red-300"],
-  not_evaluated: ["No evidence", "bg-slate-500/15 text-slate-300"], excepted: ["Excepted", "bg-sky-500/15 text-sky-300"],
-  met: ["Met", "bg-emerald-500/15 text-emerald-300"], partial: ["Partially met", "bg-amber-500/15 text-amber-300"],
-  not_met: ["Not met", "bg-red-500/15 text-red-300"], no_evidence: ["No evidence", "bg-slate-500/15 text-slate-300"],
+  pass: ["Met", "text-emerald-300"], fail: ["Not met", "text-red-300"],
+  not_evaluated: ["No evidence", "text-slate-300"], excepted: ["Excepted", "text-sky-300"],
+  met: ["Met", "text-emerald-300"], partial: ["Partially met", "text-amber-300"],
+  not_met: ["Not met", "text-red-300"], no_evidence: ["No evidence", "text-slate-300"],
 };
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v}%`);
 const KIND: Record<string, string> = { switch: "Switch / router / WLC", firewall: "FortiGate" };
 
 function Pill({ s }: { s: string }) {
-  const [label, cls] = STATUS[s] || [s, "bg-slate-500/15 text-slate-300"];
+  const [label, cls] = STATUS[s] || [s, "text-slate-300"];
   return <span className={`pill ${cls}`}>{label}</span>;
 }
 
@@ -116,7 +116,7 @@ function Overview({ d, fw, catalog, set }: { d: any; fw: string; catalog: any; s
     <div className="grid-cards md:grid-cols-2 xl:grid-cols-4">
       {FW_KEYS.map((k) => { const f = d.frameworks[k]; return (
         <button key={k} type="button" onClick={() => set({ fw: k, tab: "controls" })}
-          className={`card p-4 text-left hover:border-brand-500/50 transition-colors ${fw === k ? "border-brand-500/60" : ""}`}>
+          className={`card p-4 text-left card-interactive ${fw === k ? "border-line-strong" : ""}`}>
           <div className="text-2xs uppercase tracking-wide text-muted font-semibold">{f.name}</div>
           <div className="text-2xl font-extrabold tabular-nums mt-1">{pct(f.score)}</div>
           <div className="text-2xs text-muted mb-2">coverage {pct(f.coverage)}</div>
@@ -151,7 +151,7 @@ function Controls({ fw, catalog, set }: { fw: string; catalog: any; set: (p: Rec
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex flex-wrap gap-1" role="group" aria-label="Framework">{FW_KEYS.map((k) =>
         <button key={k} type="button" aria-pressed={fw === k} onClick={() => set({ fw: k })}
-          className={`btn py-1 ${fw === k ? "border-brand-500 text-brand-400 font-semibold" : ""}`}>{catalog.frameworks[k].short}</button>)}</div>
+          className={`btn py-1 ${fw === k ? "border-line-strong text-slate-100 font-semibold" : ""}`}>{catalog.frameworks[k].short}</button>)}</div>
       {d && <span className="text-xs text-muted">{d.note}</span>}
     </div>
     <Loading q={q} />
@@ -303,7 +303,7 @@ function Exceptions({ admin }: { admin: boolean }) {
         <tbody>{q.data.items.map((e: any) => <tr key={e.id} className={e.expired ? "opacity-60" : ""}>
           <td className="cell-wrap min-w-[14rem]"><span className="font-mono text-xs text-muted mr-1.5">{e.check_id}</span>{e.check_title}</td>
           <td>{e.device_name}<div className="text-2xs text-muted">{KIND[e.device_kind]}</div></td><td className="cell-wrap min-w-[16rem] text-xs">{e.reason}</td>
-          <td className="nowrap">{e.expired ? <span className="pill bg-slate-500/15 text-slate-300">expired</span> : <Time v={e.expires_at} />}</td><td>{e.created_by}</td>
+          <td className="nowrap">{e.expired ? <span className="pill text-slate-300">expired</span> : <Time v={e.expires_at} />}</td><td>{e.created_by}</td>
           {admin && <td><button type="button" className="btn btn-danger py-0.5 text-xs" aria-label={`Remove exception ${e.check_id} on ${e.device_name}`} onClick={() => setDel(e)}>Remove</button></td>}</tr>)}</tbody></table></TableWrap>)}
     {del && <Modal title="Remove exception" onClose={() => setDel(null)}>
       <p className="text-sm mb-3">Remove the exception for {del.check_id} on {del.device_name}? The result counts again as {""}

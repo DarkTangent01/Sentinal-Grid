@@ -11,7 +11,7 @@ export function useWanMeta() {
 
 /** One palette for target / circuit state on every WAN page (live table, circuits, overview, history). */
 const STATE: Record<string, [string, string]> = {
-  up: ["bg-emerald-400", "Up"], down: ["bg-red-500 animate-pulse", "Down"], degraded: ["bg-amber-400", "Degraded"],
+  up: ["bg-emerald-400", "Up"], down: ["bg-red-500", "Down"], degraded: ["bg-amber-400", "Degraded"],
   unknown: ["bg-slate-500", "Unknown"], paused: ["bg-slate-700 ring-1 ring-slate-500", "Paused"], disabled: ["bg-slate-700", "Paused"],
 };
 
@@ -21,8 +21,8 @@ export function StateDot({ s }: { s: string }) {
 }
 
 const INC: Record<string, string> = {
-  open: "bg-red-500/15 text-red-300", in_progress: "bg-amber-500/15 text-amber-300", monitoring: "bg-sky-500/15 text-sky-300",
-  resolved: "bg-emerald-500/15 text-emerald-300", closed: "bg-slate-700/60 text-slate-300",
+  open: "text-red-300", in_progress: "text-amber-300", monitoring: "text-sky-300",
+  resolved: "text-emerald-300", closed: "text-slate-300",
 };
 const INC_LABEL: Record<string, string> = { open: "Open", in_progress: "Investigating", monitoring: "Monitoring", resolved: "Resolved", closed: "Closed" };
 export function IncStatus({ s }: { s: string }) {
@@ -69,7 +69,7 @@ export { Field, Pager, SortTh } from "../../components/ui";
 
 export function CollectorBadge({ c }: { c?: any }) {
   if (!c) return null;
-  const cls = c.status === "ok" ? "bg-emerald-500/15 text-emerald-300" : c.status === "degraded" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300";
+  const cls = c.status === "ok" ? "text-emerald-300" : c.status === "degraded" ? "text-amber-300" : "text-red-300";
   const label = { ok: "Collector OK", degraded: "Collector degraded", stale: "Collector stale", never_ran: "Collector not started" }[c.status as string] || c.status;
   return <span className={`pill ${cls}`} title={c.detail}>{label}</span>;
 }

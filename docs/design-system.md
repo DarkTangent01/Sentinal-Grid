@@ -5,16 +5,17 @@ colours) and differ only in name and accent.
 
 | Product | Tagline | Accent |
 |---|---|---|
-| **Sentinel NMS** | Network Monitoring & Intelligence | sky / cyan `#38BDF8` (hover `#0EA5E9`; supporting `#06B6D4`, `#3B82F6`) |
-| **Sentinel Grid** | Security Intelligence Platform | violet `#A78BFA` (hover `#8B5CF6`; supporting `#6366F1`) |
+| **Sentinel NMS** | Network Monitoring & Intelligence | sky `#38BDF8` (restrained: selected navigation, own chart series, highlights) |
+| **Sentinel Grid** | Security Intelligence Platform | violet `#A78BFA` (same restraint) |
 
 Use exactly these names. Not "Sentinel SIEM", "Grid SIEM" or "Sentinel Security".
 
 ## 1. Brand identity
 
 Sentinel stands for visibility, intelligence, protection, precision and operational control. The voice is calm and
-exact: say what is measured, what is estimated, and what is not known. The visual language is navy surfaces, one
-accent per product, thin borders, compact density, and gradients only in the logo.
+exact: say what is measured, what is estimated, and what is not known. The visual language is **minimal black**: true
+black and neutral graphite surfaces, one hairline border, neutral primary actions, restrained product accents, status
+colours only for status, compact density, and no gradients, glows, patterns or decorative animation anywhere.
 
 ## 2. Logo
 
@@ -39,28 +40,27 @@ centre is the sentinel's eye and core. It is drawn on a 32-unit grid with 2.6-un
 | Favicon | `public/favicon.svg`, `favicon.ico` (16–64 px), `apple-touch-icon.png` | browser, home screen |
 | Login | `<SentinelLogo size={30} />` on `AuthShell` | sign-in, product selection |
 
-**Gradients** (logo only):
+**Colour** (solid, no gradients):
 
-| Use | Gradient |
-|---|---|
-| Platform | `#38BDF8` → `#A78BFA` |
-| NMS | `#38BDF8` → `#3B82F6` |
-| Grid | `#A78BFA` → `#6366F1` |
+| Use | Dark background | Light background |
+|---|---|---|
+| Platform | `#F5F5F5` | `#09090B` |
+| NMS | `#38BDF8` | `#0284C7` |
+| Grid | `#A78BFA` | `#7C3AED` |
 
-On light backgrounds use the darker pairs (`#0284C7` → `#7C3AED` and so on), as the `-light.svg` files do.
+The tile is `#0A0A0A` with a 1 px `#292929` border, no shadow.
 
 **Rules:**
 - Keep clear space of at least the centre node's diameter around the mark.
 - Minimum size is 16 px (mark) and 96 px wide (logo with wordmark).
-- Don't rotate, outline, add effects to, re-colour outside the defined gradients, or place the gradient mark on a busy
-  image. On colour, use the mono mark.
+- Don't rotate, outline, add effects to, re-colour outside the defined colours, or place the mark on a busy image. On colour, use the mono mark.
 - The wordmark is Inter Semibold with −2 % tracking. "Sentinel" is set in the text colour; the product word is set in
   its accent.
 
 Regenerate the static assets after a geometry change with:
 
 ```bash
-cd frontend && ../.venv/bin/python scripts/generate-brand.py
+cd frontend && python3 scripts/generate-brand.py   # needs Pillow
 ```
 
 ## 3. Colour
@@ -69,30 +69,39 @@ Every colour is a token: CSS variables in `src/index.css` and Tailwind names in 
 - **Components never use hex literals.** `src/lib/uiConsistency.test.ts` enforces this. The only allowlisted files
   are the logo, the always-dark launch screens and the chart palette.
 - **Themes.** Night is the default. Day mirrors every scale one step darker so the same classes keep AA contrast.
-- **Accent switch.** `<html data-product="nms|grid">` switches the `brand-*` scale and the `solid-*` fills.
+- **Accent switch.** `<html data-product="nms|grid">` switches `--accent` / `brand-*` and `--chart-primary`. It does
+  **not** recolour primary buttons: those are neutral in both products.
 
 ### Foundation (night)
 
 | Token | Value | Tailwind |
 |---|---|---|
-| Primary background | `#0B1220` | `bg-bg` |
-| Secondary background (sidebar, header, table heads) | `#0F172A` | `bg-panel2` |
-| Surface (cards) | `#111C2E` | `bg-panel` |
-| Elevated (menus, dialogs, tooltips) | `#162238` | `bg-elevated` |
-| Border | `#263449` | `border-line` |
-| Primary text | `#F1F5F9` | `text-slate-100` |
-| Secondary text | `#94A3B8` | `text-muted` / `text-slate-400` |
-| Muted text | `#64748B` | `text-subtle` / `text-slate-500` |
-| Accent | NMS `#38BDF8` · Grid `#A78BFA` | `text-brand-400`, `bg-brand-500/10`, `bg-solid-brand` |
-| Text on accent fills | `#0B1220` (night) · white (day) | `text-solid-on` |
+| Application background | `#090909` | `bg-bg` |
+| Sidebar / header | `#0A0A0A` | `bg-panel2` |
+| Surface (cards) | `#111111` | `bg-panel` |
+| Secondary surface (tile in a card, row hover) | `#161616` | `--surface-tile` |
+| Elevated (menus, dialogs, tooltips) | `#1C1C1C` | `bg-elevated` |
+| Hover | `#222222` | `bg-hover` |
+| Border | `#292929` | `border-line` |
+| Strong border | `#383838` | `border-line-strong` |
+| Primary text | `#F5F5F5` | `text-slate-100` |
+| Secondary text | `#A1A1AA` | `text-muted` / `text-slate-400` |
+| Muted text | `#71717A` | `text-subtle` / `text-slate-500` |
+| Disabled text | `#52525B` | `text-disabled` |
+| Primary action | `#F5F5F5` fill, `#090909` text (day: black fill, white text) | `bg-solid-brand text-solid-on` |
+
+The `slate-*` scale is mapped to Tailwind's neutral `zinc`, so existing classes carry no blue tint. Day uses white
+`#FFFFFF` / `#FAFAFA` surfaces, `#E4E4E7` borders and `#09090B` text.
 
 ### Product accent: where it appears, and nowhere else
 
-- active navigation and selected tabs;
-- primary buttons and focus rings;
-- links;
-- the product word in the logo;
-- the product's own chart series (`SERIES_ROLE.primary`, read from `--chart-primary`).
+- the active navigation item's 2 px bar;
+- the product's own chart series (`SERIES_ROLE.primary`, read from `--chart-primary`);
+- the product word on launch screens, and the logo mark;
+- a meaningful highlight, sparingly.
+
+Not on buttons, links, tabs, focus rings, pills or badges: links are neutral and underlined, the selected tab has a
+neutral underline, focus is a neutral ring, and pills are neutral chips.
 
 ### Status (one meaning everywhere)
 
@@ -102,22 +111,26 @@ Every colour is a token: CSS variables in `src/index.css` and Tailwind names in 
 | Warning / degraded | `#F59E0B` | `amber-*`, `text-warn`, `.dot-warn` |
 | Critical / down | `#EF4444` | `red-*`, `text-bad`, `.dot-bad` |
 | Informational | `#38BDF8` | `sky-*`, `.dot-info` |
-| Unknown / disabled | `#64748B` | `slate-500`, `.dot-unknown` |
+| Unknown / disabled | `#71717A` | `slate-500`, `.dot-unknown` |
 
-**Severity** (`<Sev>`, `.sev-*`): critical `#EF4444`, high `#F97316`, medium `#F59E0B`, low `#38BDF8`, informational
-`#64748B`.
+**Severity** (`<Sev>`, `.sev-*`): a small dot plus the coloured word, no tinted background. Critical `#EF4444`, high
+`#F97316`, medium `#F59E0B`, low `#38BDF8`, informational `#71717A`.
+
+**Status pills** (alert state, compliance result, health and so on) are neutral chips (`.pill`) with the state's text
+colour; no tinted fill or ring. Status dots never pulse.
 
 Never convey state by colour alone. A status dot sits beside a text label: `<Kpi tone>` adds a dot with an accessible
 name, and pills carry the word.
 
 ### Charts (`components/Chart.tsx`)
 
-- **Categorical palette.** It leads with the two product accents and avoids pure green, red and amber, so a category
-  is never read as a status. Night: `#38BDF8 #A78BFA #2DD4BF #F472B6 #FBBF24 #818CF8 #FB923C #94A3B8`.
+- **Categorical palette.** Product accent first, then neutral greys and a few muted hues; avoids pure green, red and
+  amber so a category is never read as a status. Night: `#38BDF8 #2DD4BF #A78BFA #A1A1AA #F472B6 #FBBF24 #71717A #D4D4D8`; "Other" and "Unknown" are always the muted grey.
 - **More than 8 series:** fold the rest into "Other".
-- **Roles:** `primary` (product accent), `alert` (`#EF4444`), `warn` (`#F59E0B`, drawn dashed beside alert), `muted`.
+- **Roles:** `primary` (product accent), `alert` (`#EF4444`), `warn` (`#F59E0B`, dashed beside alert), `muted`.
 - **Status:** `STATUS_HEX` and `statusColor(theme, state)`.
-- **Chrome:** navy tooltips, `#263449` axes, `#1A263A` grid lines, Inter with tabular numbers.
+- **Chrome:** `#1C1C1C` tooltips with a `#383838` border and no shadow, `#292929` axes, `#1C1C1C` grid lines, `#A1A1AA`
+  labels. Lines are 1.5 px and straight (no smoothing); area fills are 6 % opacity.
 
 ## 4. Typography
 
@@ -127,13 +140,13 @@ name, and pills carry the word.
 
 | Role | Size / weight | Class |
 |---|---|---|
-| Page title | 24 px semibold | `.page-title` |
-| Section title | 18 px semibold | `.section-title` |
-| Card title | 14 px semibold | `.card-h` (via `<Card title>`) |
-| Body | 13.5 px regular | default |
-| Secondary / table | 12–13 px | `.tbl`, `text-xs` |
-| Labels / eyebrows | 11 px semibold, uppercase, +8 % tracking | `.eyebrow`, table heads |
-| Metrics | 20 → 24 → 26 px semibold, tabular | `.metric` (responsive) |
+| Page title | 22 px semibold | `.page-title` |
+| Section title | 15 px semibold | `.section-title` |
+| Card title | 13 px semibold | `.card-h` (via `<Card title>`) |
+| Body | 13 px regular | default |
+| Table | 12.5 px; heads 12 px medium, normal case, muted, no shaded band | `.tbl` |
+| Metadata / labels | 11–12 px | `.eyebrow`, `text-xs`, `text-2xs` |
+| Metrics | 20 → 22 px semibold, tabular | `.metric` (responsive) |
 
 **Usage:**
 - Use tabular numerals (`tabular-nums`, automatic in `<time>`, `.num` cells and metrics) for counters, traffic,
@@ -143,55 +156,53 @@ name, and pills carry the word.
 
 ## 5. Spacing, shape and elevation
 
-- **Spacing:** a 4 px base. Card padding is 16 px (`.card-b`); grid gaps are 12 px for KPI rows and 16 px for cards;
-  page padding is 12 px on phones and 20 px from `sm`.
-- **Radius:** 12 px for cards, 8 px for controls, 6 px for pills and menu items, and 28 % for the logo tile.
-- **Elevation:**
-
-  | Element | Treatment |
-  |---|---|
-  | Cards | `shadow-card` (subtle) |
-  | Menus, dialogs, drawers | `shadow-pop` |
-  | Elevated surfaces | lighter fill, not a heavier shadow |
-
-- **Borders:** 1 px `border-line`. Don't nest cards inside cards; use sections inside one card.
+- **Spacing:** a 4 px base. Card padding is 16 px (`.card-b`); KPI gaps are 10 px, card gaps 12 px; page padding 12 px
+  on phones and 20 px from `sm`.
+- **Radius:** 8 px for cards (`rounded-card`), 6 px for controls, 4 px for pills, 24 % for the logo tile.
+- **Elevation:** none on cards (`shadow-card` is `none`). Menus, dialogs and drawers use `shadow-pop` and the elevated
+  surface; scrims have no blur.
+- **Borders:** 1 px `border-line`; hover raises it to `border-line-strong`.
+- **No boxes in boxes:** a `.card` inside a `.card` loses its border and becomes a flat `#161616` tile (CSS rule in
+  `index.css`), so KPI cards inside a section card do not draw nested frames.
+- **Density:** about four KPI cards per row at most (`.kpi-grid`, or `grid-cols-2 lg:grid-cols-4`); secondary figures go
+  in one `<StatStrip>` row instead of more cards.
 
 ## 6. Components (`src/components/ui.tsx`, `src/index.css`)
 
 | Component | API / classes | Notes |
 |---|---|---|
 | Card | `<Card title right bodyClass>` · `.card .card-h .card-b` | default; `card-interactive` for clickable cards |
-| Metric card | `<Kpi label value sub tone onClick>` | label eyebrow, tabular value, context line, status dot with text; clickable = drill-down |
+| Metric card | `<Kpi label value sub tone onClick>` | 12 px label, tabular value (red / amber only for a problem), context line, status dot with text; clickable = drill-down |
+| Stat strip | `<StatStrip items>` · `.stat-strip` | a quiet row of secondary figures (label over value); values can be links |
 | Buttons | `.btn` (secondary), `.btn-primary`, `.btn-ghost`, `.btn-danger`, `.btn-icon`, `.btn-sm` | hover, active press, focus ring, disabled; loading = `<Spinner />` + "…ing" label |
-| Inputs | `.input`, `.label`, `.help`, `.field-error`, `<Field label hint>` | the label wraps the control; checkboxes and radios use the accent |
-| Tables | `.tbl` in `<TableWrap maxH>` | compact rows, uppercase heads, sticky head with `maxH`, hover, `.num` right-aligned tabular, `rowProps()` for keyboard-accessible rows, `<SortTh>`, `<Pager>` |
+| Inputs | `.input`, `.label`, `.help`, `.field-error`, `<Field label hint>` | the label wraps the control; neutral focus border; checkboxes use the text colour |
+| Tables | `.tbl` in `<TableWrap maxH>` | compact rows (5 px), normal-case muted heads, sticky head with `maxH`, hover, `.num` right-aligned tabular, `rowProps()` for keyboard-accessible rows, `<SortTh>`, `<Pager>` |
 | States | `<Loading q>` (skeleton / error), `<Empty text>` | every list has all three |
-| Tabs | `<Tabs>` | accent underline; arrow keys, Home, End |
+| Tabs | `<Tabs>` | neutral white underline; arrow keys, Home, End |
 | Modal / Drawer | `<Modal>`, `<Drawer>` | scrim, pop / slide-in, focus trap, Escape, focus returns to the opener |
-| Pills | `.pill`, `<Sev>`, `.sev-*` | |
+| Pills | `.pill`, `<Sev>`, `.sev-*` | neutral chip; severity is dot + word |
 | Status dot | `.dot .dot-ok/-warn/-bad/-info/-unknown` | always beside a label |
 | Skeleton | `.skeleton` | shimmer, disabled with reduced motion |
 | Tooltip | `.tip[data-tip]` | hover and keyboard focus; use `title` inside scroll containers |
 | Logo | `<SentinelMark>`, `<SentinelTile>`, `<SentinelLogo>`, `<SplashScreen>` | `components/Brand.tsx` |
-| Launch surfaces | `<AuthShell>`, `AUTH.*` | always dark: login, product selection, no access |
+| Launch surfaces | `<AuthShell>`, `AUTH.*` | always plain black, no pattern or gradient: login, product selection, no access |
 
 ## 7. Application shell
 
-**Sidebar** (`components/Sidebar.tsx`):
-- logo tile, product name, tagline / status, product switcher;
-- grouped navigation with foldable groups and SVG chevrons;
-- active item: an accent bar, an accent icon and a tinted row;
-- badges for open alerts and incidents (with accessible counts);
-- collapse to a 68 px rail (native tooltips, `aria-label`s);
-- user block with sign-out;
+**Sidebar** (`components/Sidebar.tsx`), 240 px, `#0A0A0A`:
+- the product mark (no tile), "Sentinel NMS" / "Sentinel Grid" in neutral text, tagline / status, product switcher;
+- grouped navigation: **groups are collapsed by default except the one holding the current page**; a group the user
+  opens or closes keeps that choice (per product, in the browser);
+- active item: neutral `#222222` row, white text and icon, and a 2 px product-accent bar;
+- badges for open alerts and incidents: a neutral chip with a red count (accessible names kept);
+- collapse to a 64 px rail (native tooltips, `aria-label`s); user block with a neutral avatar and sign-out;
 - on phones it becomes a drawer with a scrim.
 
-**Header** (`components/Layout.tsx`):
-- breadcrumbs (product / section / page, from the navigation definition), last updated, refresh and theme toggle;
-- a second row with the global scope (time range, firewall, site, search, auto-refresh), hidden on pages with their own
-  filters (Traffic Intelligence) and folded behind "Filters" on phones;
-- "Skip to content" link;
-- the document title follows the page.
+**Header** (`components/Layout.tsx`), on the page background with one bottom border, no blur:
+- one title line (product / section / page, no icon), last updated, refresh and theme toggle;
+- the global scope row (time range, firewall, site, search, auto-refresh), hidden on pages with their own filters
+  (Traffic Intelligence) and folded behind "Filters" on phones;
+- "Skip to content" link; the document title follows the page.
 
 **Content:** fluid width, 20 px padding, cards in responsive grids (`.kpi-grid`, `.grid-cards`).
 
@@ -206,19 +217,15 @@ joins, and `currentColor`.
 
 ## 9. Motion
 
-Motion is short and purposeful:
-- 150 ms colour and border transitions;
-- 160 ms pop-in for menus and dialogs;
-- 200 ms drawer slide;
-- skeleton shimmer.
-
-`prefers-reduced-motion` turns all of it off (`index.css`). There are no animated backgrounds.
+Motion is short and purposeful: 100–150 ms colour and border transitions, a quick pop-in for menus and dialogs, the
+drawer slide and the skeleton shimmer. No hover lift, glow, pulsing status dot or animated background.
+`prefers-reduced-motion` turns all of it off (`index.css`).
 
 ## 10. Accessibility
 
-- **Contrast:** AA on text in both themes. Secondary text is 7:1 on night surfaces, and accent fills carry dark text in
-  night (9:1 / 7.6:1) and white in day.
-- **Focus:** a visible 2 px accent focus ring on every control.
+- **Contrast:** AA on text in both themes. Secondary text `#A1A1AA` on `#111111` is about 7.5:1; the neutral
+  primary button is black on near-white (about 18:1).
+- **Focus:** a visible 1.5 px neutral focus ring on every control.
 - **Keyboard:**
   - keyboard-operable rows (`rowProps`), tabs and menus;
   - dialogs trap focus and return it to the opener;
@@ -234,8 +241,8 @@ Motion is short and purposeful:
 - **Don't:**
   - use hex literals in components;
   - use `var(--token)` directly as a colour (tokens are RGB triplets: use `rgb(var(--token) / a)` in CSS);
-  - set product colours outside `brand-*`.
-- The launch screens (sign-in, product selection) are always dark by design.
+  - set product colours outside `brand-*`, or use the accent for buttons, links or pills.
+- The launch screens (sign-in, product selection) are always black by design.
 
 ## 12. Examples
 

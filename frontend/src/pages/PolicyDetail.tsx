@@ -28,7 +28,7 @@ export function PolicyDetail() {
         <div className="min-w-0">
           <button className="link text-xs" onClick={() => nav("/policies")}>← Policy inventory</button>
           <h1 className="text-lg font-semibold break-words">Policy {pid}{p?.name ? ` — ${p.name}` : ""}</h1>
-          {p && <div className="text-xs text-muted">{p.firewall} / {p.vdom} · sequence {p.seq} · UUID <span className="font-mono">{p.uuid || "n/a"}</span>{p.source === "demo" && <span className="pill bg-amber-600/30 text-amber-200 ml-1">demo</span>}{d?.deleted_at && <span className="text-red-400"> · deleted from firewall <Time v={d.deleted_at} /></span>}</div>}
+          {p && <div className="text-xs text-muted">{p.firewall} / {p.vdom} · sequence {p.seq} · UUID <span className="font-mono">{p.uuid || "n/a"}</span>{p.source === "demo" && <span className="pill text-amber-300 ml-1">demo</span>}{d?.deleted_at && <span className="text-red-400"> · deleted from firewall <Time v={d.deleted_at} /></span>}</div>}
         </div>
         <div className="flex-1" />
         <label className="block min-w-0"><span className="label">Observation window</span><select className="input" value={win} onChange={(e) => setWin(Number(e.target.value))}>{[7, 30, 60, 90].map((x) => <option key={x} value={x}>{x} days</option>)}</select></label>

@@ -63,7 +63,7 @@ export function Hardening() {
 
   return (
     <div className="space-y-3 min-w-0">
-      <div className="card !block p-3 border-sky-800/60 bg-sky-500/5 text-xs text-sky-100">
+      <div className="card !block p-3 text-xs text-muted">
         The SIEM stays <b>read-only</b>. Plans are rendered as FortiOS CLI that an engineer reviews and applies on the firewall
         (take a config backup first). Suggestions come from logged traffic. Confirm business requirements before restricting access.
       </div>
@@ -74,7 +74,7 @@ export function Hardening() {
           <ul className="space-y-1">
             {(plans.data || []).map((p) => (
               <li key={p.id}>
-                <button onClick={() => setSelId(p.id)} className={`w-full text-left rounded px-2 py-1.5 border ${selId === p.id ? "border-brand-500/60 bg-brand-500/10" : "border-transparent hover:bg-slate-800/50"}`}>
+                <button onClick={() => setSelId(p.id)} className={`w-full text-left rounded px-2 py-1.5 border ${selId === p.id ? "border-line-strong bg-hover" : "border-transparent hover:bg-slate-800/50"}`}>
                   <div className="text-sm truncate">{p.name}</div>
                   <div className="text-2xs text-muted">{p.status} · <Time v={p.updated_at} /></div>
                 </button>
@@ -348,7 +348,7 @@ function Suggestions({ firewallId, spec, setSpec, readOnly }: { firewallId: numb
             {q.data?.ports?.length ? <TableWrap maxH="max-h-80"><table className="tbl"><thead><tr><th /><th>Port</th><th>Logged service</th><th className="num">Allowed</th><th className="num">Denied</th><th className="num">Sources</th><th className="num">Bytes</th></tr></thead>
               <tbody>{q.data.ports.map((r: any) => { const k = `${r.proto}/${r.port}`; const member = PREDEFINED[k] || `${r.proto}-${r.port}`; return (
                 <tr key={k}><td><input type="checkbox" aria-label={`Select ${k}`} disabled={readOnly} checked={selPorts.has(k)} onChange={() => toggle(selPorts, setSelPorts, k)} /></td>
-                  <td className="font-mono nowrap">{k}{inPlan.has(member) && <span className="pill bg-emerald-800/50 text-emerald-200 ml-1">in plan</span>}</td>
+                  <td className="font-mono nowrap">{k}{inPlan.has(member) && <span className="pill text-emerald-300 ml-1">in plan</span>}</td>
                   <td className="text-xs">{r.service || <span className="text-slate-600">not logged</span>}</td>
                   <td className="num text-emerald-400">{fmtNum(r.allowed)}</td><td className="num text-red-400">{fmtNum(r.denied)}</td>
                   <td className="num">{fmtNum(r.sources)}</td><td className="num">{fmtBytes(r.bytes)}</td></tr>); })}</tbody></table></TableWrap>

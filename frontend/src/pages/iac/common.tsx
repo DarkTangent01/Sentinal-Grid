@@ -20,7 +20,7 @@ export function SevBadge({ s }: { s: string }) {
 
 const STATUS_C: Record<string, string> = {
   draft: "text-slate-400", validation_failed: "text-red-300", ready_for_review: "text-sky-300", pending_approval: "text-amber-300", approved: "text-emerald-300",
-  rejected: "text-red-300", queued: "text-amber-300", running: "text-sky-300 animate-pulse", succeeded: "text-emerald-300", failed: "text-red-400",
+  rejected: "text-red-300", queued: "text-amber-300", running: "text-sky-300", succeeded: "text-emerald-300", failed: "text-red-400",
   rolled_back: "text-violet-300", cancelled: "text-slate-400", stale: "text-orange-300", in_sync: "text-emerald-300", drift: "text-red-300",
   unknown: "text-slate-400", error: "text-red-400", unmanaged: "text-slate-500", dry_run_ok: "text-emerald-300", skipped: "text-slate-400", pending: "text-slate-400",
 };

@@ -100,6 +100,22 @@ async def test_risk_is_explainable_and_learns_from_verdicts(db):
     assert fp["factors"][0]["feedback"].startswith("reduced") and fp["score"] < by["10.1.1.60"]["score"] / 2
 
 
+async def test_risk_ranking_batches_assets_and_skips_nms_alerts(db, monkeypatch):
+    """Production had >32,767 alerting IPs: one IN list over every IP exceeded PostgreSQL's parameter limit and the
+    executive summary failed. Assets are looked up in batches, and NMS alerts never enter the Grid ranking."""
+    monkeypatch.setattr(risk, "ASSET_BATCH", 2)
+    db.add_all([Asset(ip=f"10.9.0.{i}", hostname=f"h{i}", criticality="critical", users=[], firewall_ids=[], tags=[]) for i in range(5)])
+    db.add_all([_alert(ip=f"10.9.0.{i}", sev="high", conf="high", n=0) for i in range(5)])
+    db.add(_alert(rule="wireless_retry_high", ip="10.9.9.9", sev="high", n=0))
+    await db.commit()
+    r = await risk.ranking(db)
+    by = {x["entity"]: x for x in r["items"]}
+    assert all(by[f"10.9.0.{i}"]["hostname"] == f"h{i}" for i in range(5))      # every batch resolved
+    assert "10.9.9.9" not in by
+    ops = await socmetrics.operations(db, 30)
+    assert ops["alerts"]["total"] == 5 and "wireless_retry_high" not in {x["rule_key"] for x in ops["alerts"]["top_rules"]}
+
+
 async def test_mitre_coverage_counts_rules_alerts_precision_and_gaps(db):
     db.add_all([AlertRule(key="vpn_bruteforce", name="VPN brute force", severity="high", enabled=True, params={}, mitre={"tactic": "TA0006", "techniques": ["T1110"]}),
                 AlertRule(key="dns_tunnel", name="DNS tunnel", severity="medium", enabled=False, params={}, mitre={"tactic": "TA0011", "techniques": ["T1071.004"]}),

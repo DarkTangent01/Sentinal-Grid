@@ -11,15 +11,15 @@ import { Mitre, TACTIC_NAMES } from "../components/Mitre";
 export { Mitre, TACTIC_NAMES };   // existing importers
 
 const STATUS_CLS: Record<string, string> = {
-  open: "bg-red-500/15 text-red-300", in_progress: "bg-amber-500/15 text-amber-300", resolved: "bg-emerald-500/15 text-emerald-300", closed: "bg-slate-700/60 text-slate-300",
+  open: "text-red-300", in_progress: "text-amber-300", resolved: "text-emerald-300", closed: "text-slate-300",
 };
 const REASONS: [string, string][] = [["true_positive", "True positive"], ["false_positive", "False positive"], ["benign", "Benign / expected"], ["duplicate", "Duplicate"]];
 
 function SlaBadge({ sla, status }: { sla: any; status: string }) {
   if (!sla?.resolve_due) return null;
-  if (status === "resolved" || status === "closed") return sla.resolve_breached ? <span className="pill bg-red-500/15 text-red-300">SLA missed</span> : <span className="pill bg-emerald-500/15 text-emerald-300">within SLA</span>;
-  if (sla.ack_breached && status === "open") return <span className="pill bg-red-500/20 text-red-300" title={`Acknowledge by ${sla.ack_due}`}>ack overdue</span>;
-  if (sla.resolve_breached) return <span className="pill bg-red-500/20 text-red-300">resolve overdue</span>;
+  if (status === "resolved" || status === "closed") return sla.resolve_breached ? <span className="pill text-red-300">SLA missed</span> : <span className="pill text-emerald-300">within SLA</span>;
+  if (sla.ack_breached && status === "open") return <span className="pill text-red-300" title={`Acknowledge by ${sla.ack_due}`}>ack overdue</span>;
+  if (sla.resolve_breached) return <span className="pill text-red-300">resolve overdue</span>;
   return <span className="pill bg-slate-800 text-slate-300" title="Resolve-by">due <Time v={sla.resolve_due} /></span>;
 }
 
@@ -54,7 +54,7 @@ export function Incidents() {
           <tbody>{q.data.items.map((i: any) => (
             <tr key={i.id} {...rowProps(() => nav(`/incidents/${i.id}`))} aria-label={`Open incident ${i.id}`}>
               <td className="num font-mono">{i.id}</td><td className="nowrap"><Sev s={i.severity} /></td>
-              <td className="min-w-[16rem]"><Trunc text={i.title} max="max-w-[34rem]" />{i.asset_criticality === "critical" && <span className="pill bg-red-500/15 text-red-300 ml-1">critical asset</span>}</td>
+              <td className="min-w-[16rem]"><Trunc text={i.title} max="max-w-[34rem]" />{i.asset_criticality === "critical" && <span className="pill text-red-300 ml-1">critical asset</span>}</td>
               <td className="nowrap"><span className={`pill ${STATUS_CLS[i.status]}`}>{i.status.replace("_", " ")}</span></td>
               <td className="text-xs min-w-[10rem]">{i.tactics.map((t: string) => TACTIC_NAMES[t] || t).join(" → ") || "—"}</td>
               <td className="num">{i.alert_count}</td><td className="text-xs nowrap">{i.assignee || <span className="text-slate-400">unassigned</span>}</td>
@@ -171,7 +171,7 @@ export function IncidentDetail() {
             <div className="flex flex-wrap items-center gap-2 text-sm">
               {i.tactics.length ? i.tactics.map((t: string, n: number) => <span key={t} className="flex items-center gap-2">{n > 0 && <span className="text-slate-400" aria-hidden>→</span>}<span className="pill bg-indigo-500/15 text-sky-200">{TACTIC_NAMES[t] || t}</span></span>) : <span className="text-muted">—</span>}
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">{i.techniques.map((t: string) => <a key={t} className="pill bg-slate-800 text-slate-300 hover:text-brand-400" href={`https://attack.mitre.org/techniques/${t.replace(".", "/")}/`} target="_blank" rel="noopener noreferrer">{t}</a>)}</div>
+            <div className="mt-2 flex flex-wrap gap-1">{i.techniques.map((t: string) => <a key={t} className="pill bg-slate-800 text-slate-300 hover:text-slate-100" href={`https://attack.mitre.org/techniques/${t.replace(".", "/")}/`} target="_blank" rel="noopener noreferrer">{t}</a>)}</div>
           </Card>
           <Card title="Case">
             <div className="space-y-2 text-sm">

@@ -198,7 +198,7 @@ export function TargetDetail({ x, r, admin, onClose }: { x: any; r: any; admin: 
               <TableWrap maxH="max-h-72"><table className="tbl"><thead><tr><th>Kind</th><th>Last healthy</th><th>First failure</th><th>Confirmed</th><th>Recovered</th>
                 <th className="num">Duration</th><th>Incident</th></tr></thead>
                 <tbody>{d.outages.map((o: any) => <tr key={o.id} {...rowProps(() => setObs({ start: o.last_ok_at || o.started_at, end: o.recovery_detected_at || new Date().toISOString() }))}>
-                  <td>{o.kind}{o.maintenance_id && <span className="pill bg-slate-700/60 text-slate-300 ml-1">maintenance</span>}</td>
+                  <td>{o.kind}{o.maintenance_id && <span className="pill text-slate-300 ml-1">maintenance</span>}</td>
                   <td className="text-xs"><Time v={o.last_ok_at} /></td><td className="text-xs"><Time v={o.started_at} /></td><td className="text-xs"><Time v={o.detected_at} /></td>
                   <td className="text-xs">{o.ongoing ? <span className="text-red-300">ongoing</span> : <Time v={o.recovered_at} />}</td>
                   <td className="num"><Dur s={o.duration_s} /></td><td>{o.incident_id ? `#${o.incident_id}` : "—"}</td></tr>)}</tbody></table></TableWrap>}
