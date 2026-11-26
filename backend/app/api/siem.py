@@ -114,13 +114,13 @@ async def risk_entity(kind: str, entity: str, days: int = Query(30, ge=1, le=90)
 # ------------------------------------------------------------------ SOC metrics
 @router.get("/soc/metrics")
 async def soc_metrics(days: int = Query(30, ge=1, le=365), _: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    return await socmetrics.cached(("operations", days), lambda: socmetrics.operations(s, days))
+    return await socmetrics.summary(s, None, "operations", days)
 
 
 @router.get("/soc/executive")
 async def soc_executive(days: int = Query(7, ge=1, le=90), _: User = Depends(current_user), s: AsyncSession = Depends(get_session),
                         ch: ClickHouse = Depends(ch_dep)):
-    return await socmetrics.cached(("executive", days), lambda: socmetrics.executive(s, ch, days))
+    return await socmetrics.summary(s, ch, "executive", days)
 
 
 # ------------------------------------------------------------------ investigation brief and AI

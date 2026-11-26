@@ -21,22 +21,78 @@ from .incidents import OPEN, priority_of, sla_state, stage_of
 from .products import alert_product, product_rule_keys
 
 
-_CACHE: dict[tuple, tuple[float, dict]] = {}
-CACHE_TTL = 60.0
+# ---- precomputed summaries -------------------------------------------------------------------------------------------
+# Each summary reads every alert of its period (85k+ a month on a busy network: 20-40 s). The worker loop
+# `soc_summaries` recomputes the default periods (and any period a viewer opened in the last 30 minutes) every few
+# minutes into summary_snapshots; the API serves the stored result. A period nobody has opened yet is computed once on
+# request and then kept fresh the same way.
+DEFAULTS = {"executive": [7], "operations": [30]}
+ALLOWED = {"executive": {1, 7, 30, 90}, "operations": {7, 30, 90, 365}}
+STALE_AFTER = timedelta(minutes=15)     # older than this is recomputed on request instead of served
+KEEP_WARM = timedelta(minutes=30)       # a period opened within this is refreshed by the worker
+REFRESH_SECONDS = 180
 
 
-async def cached(key: tuple, make) -> dict:
-    """These summaries read every alert of the period (85k+ a month on a busy network, 10-25 s). A dashboard opened by
-    several analysts, or refreshed, reuses one result for a minute; the response says when it was computed."""
+def _key(kind: str, days: int) -> str:
+    return f"{kind}:{days}"
+
+
+async def _compute(s: AsyncSession, ch, kind: str, days: int) -> dict:
+    return await (executive(s, ch, days) if kind == "executive" else operations(s, days))
+
+
+async def _store(s: AsyncSession, key: str, data: dict, seconds: float, requested: bool = False) -> None:
+    from .db.models import SummarySnapshot
+    now = datetime.now(timezone.utc)
+    row = await s.get(SummarySnapshot, key)
+    if row is None:
+        row = SummarySnapshot(key=key)
+        s.add(row)
+    row.data, row.computed_at, row.seconds = data, now, round(seconds, 2)
+    if requested:
+        row.requested_at = now
+    await s.commit()
+
+
+async def summary(s: AsyncSession, ch, kind: str, days: int) -> dict:
+    """The stored summary (instant), or a fresh computation when there is none or it is stale."""
     import time
-    now = time.monotonic()
-    hit = _CACHE.get(key)
-    if hit and now - hit[0] < CACHE_TTL:
-        return hit[1]
-    out = await make()
-    out["computed_at"] = datetime.now(timezone.utc).isoformat()
-    _CACHE[key] = (now, out)
-    return out
+    from .db.models import SummarySnapshot
+    key = _key(kind, days)
+    now = datetime.now(timezone.utc)
+    if days not in ALLOWED[kind]:      # a period the dashboard does not offer: computed, not stored
+        return {**await _compute(s, ch, kind, days), "computed_at": now.isoformat(), "precomputed": False}
+    row = await s.get(SummarySnapshot, key)
+    if row is not None and now - _aware(row.computed_at) < STALE_AFTER:
+        if not row.requested_at or now - _aware(row.requested_at) > timedelta(minutes=5):
+            row.requested_at = now
+            await s.commit()
+        return {**row.data, "computed_at": _aware(row.computed_at).isoformat(), "compute_seconds": row.seconds, "precomputed": True}
+    t = time.monotonic()
+    data = await _compute(s, ch, kind, days)
+    secs = time.monotonic() - t
+    await _store(s, key, data, secs, requested=True)
+    return {**data, "computed_at": now.isoformat(), "compute_seconds": round(secs, 2), "precomputed": False}
+
+
+async def refresh_summaries(ch, s: AsyncSession) -> dict:
+    """Worker loop body: recompute the default periods and every period opened recently."""
+    import time
+    from sqlalchemy import select as _select
+    from .db.models import SummarySnapshot
+    now = datetime.now(timezone.utc)
+    want = {(k, d) for k, ds in DEFAULTS.items() for d in ds}
+    for row in (await s.execute(_select(SummarySnapshot.key, SummarySnapshot.requested_at))).all():
+        kind, _, d = row.key.partition(":")
+        if row.requested_at and now - _aware(row.requested_at) < KEEP_WARM and kind in ALLOWED and d.isdigit() and int(d) in ALLOWED[kind]:
+            want.add((kind, int(d)))
+    done = {}
+    for kind, days in sorted(want):
+        t = time.monotonic()
+        data = await _compute(s, ch, kind, days)
+        await _store(s, _key(kind, days), data, time.monotonic() - t)
+        done[_key(kind, days)] = round(time.monotonic() - t, 1)
+    return done
 
 
 def _aware(v):

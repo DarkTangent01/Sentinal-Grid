@@ -68,11 +68,3 @@ async def db():
 def fixture_lines():
     return [l for l in (FIXTURES / "fortigate_syslog.log").read_text().splitlines() if l and not l.startswith("#")]
 
-
-@pytest.fixture(autouse=True)
-def _clear_soc_cache():
-    """SOC summaries are cached per process for a minute; each test has its own database."""
-    from app import socmetrics
-    socmetrics._CACHE.clear()
-    yield
-    socmetrics._CACHE.clear()

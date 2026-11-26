@@ -2468,3 +2468,16 @@ class IpUserBinding(Base):
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     seen: Mapped[int] = mapped_column(Integer, default=1)
+
+
+# ------------------------------------------------------------------ precomputed dashboard summaries (app/socmetrics.py)
+class SummarySnapshot(Base):
+    """A dashboard summary computed by the worker in the background (SOC executive summary, SOC operations), so the
+    page opens instantly instead of reading every alert of the period per request. requested_at marks keys a viewer
+    asked for, so the worker keeps those fresh too."""
+    __tablename__ = "summary_snapshots"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)

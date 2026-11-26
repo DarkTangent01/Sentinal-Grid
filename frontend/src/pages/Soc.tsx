@@ -11,6 +11,14 @@ import { useTheme } from "../lib/theme";
 import { Chart, PALETTES, SEV_HEX, SERIES_ROLE, axisStyle } from "../components/Chart";
 import { Card, Drawer, Empty, Field, Kpi, Loading, Modal, rowProps, Sev, TableWrap, Tabs, Time, Trunc } from "../components/ui";
 
+/** When the summary was computed: the worker precomputes it every few minutes, so it can be a little behind live data. */
+function Computed({ d, loading }: { d?: any; loading: boolean }) {
+  if (loading && !d) return <span className="text-xs text-subtle">Computing — the first load of a period can take up to a minute…</span>;
+  if (!d?.computed_at) return null;
+  return <span className="text-xs text-subtle" title={d.compute_seconds ? `computed in ${d.compute_seconds} s` : undefined}>
+    Updated <Time v={d.computed_at} />{d.precomputed ? " · refreshed every 3 minutes" : ""}</span>;
+}
+
 export function dur(s: number | null | undefined): string {
   if (s == null) return "—";
   if (s < 90) return `${Math.round(s)} s`;
@@ -52,7 +60,8 @@ function Executive() {
   }), [d, theme]);
   return <>
     <div className="flex items-center gap-2"><span className="text-xs text-muted">Period</span>
-      <select aria-label="Period" className="input py-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[1, 7, 30, 90].map((n) => <option key={n} value={n}>{n} day{n > 1 ? "s" : ""}</option>)}</select></div>
+      <select aria-label="Period" className="input py-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[1, 7, 30, 90].map((n) => <option key={n} value={n}>{n} day{n > 1 ? "s" : ""}</option>)}</select>
+      <Computed d={q.data} loading={q.isFetching} /></div>
     <Loading q={q} />
     {d && <>
       <div className="kpi-grid">
@@ -87,7 +96,8 @@ function Operations() {
   const d = q.data;
   return <>
     <div className="flex items-center gap-2"><span className="text-xs text-muted">Period</span>
-      <select aria-label="Period" className="input py-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[7, 30, 90, 365].map((n) => <option key={n} value={n}>{n} days</option>)}</select></div>
+      <select aria-label="Period" className="input py-1" value={days} onChange={(e) => setDays(Number(e.target.value))}>{[7, 30, 90, 365].map((n) => <option key={n} value={n}>{n} days</option>)}</select>
+      <Computed d={q.data} loading={q.isFetching} /></div>
     <Loading q={q} />
     {d && <>
       <div className="kpi-grid">

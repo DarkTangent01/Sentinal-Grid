@@ -47,6 +47,7 @@ LOOP_PRODUCT = {
     "switch_polling": "nms", "firewall_polling": "nms", "policy_sync": "nms", "icmp": "nms", "tacacs": "nms",
     "service_checks": "nms", "iac": "nms", "wireless_analytics": "nms", "config_backup": "nms", "network_compliance": "nms",
     "wireless_integrations": "nms", "traffic_enrichment": "nms", "identity_index": "any",
+    "soc_summaries": "grid",
 }
 # ngen_jobs entries -> product, same meaning
 JOB_PRODUCT = {"notifications": "shared", "reports": "any", "ti_feeds": "grid", "assets": "grid", "saved_searches": "grid",
@@ -372,7 +373,8 @@ def loop_plan(roles: set[str], shard: int, product: str | None = None, shared: b
         plan += ["firewall_polling", "policy_sync"]
         if shard == 0:
             plan += ["alert_evaluation", "retention", "ngen_jobs", "icmp", "tacacs", "service_checks", "iac", "wireless_analytics",
-                     "config_backup", "network_compliance", "wireless_integrations", "traffic_enrichment", "identity_index"]
+                     "config_backup", "network_compliance", "wireless_integrations", "traffic_enrichment", "identity_index",
+                     "soc_summaries"]
     return [x for x in plan if runs(LOOP_PRODUCT[x], product, shared)]
 
 
@@ -397,6 +399,7 @@ async def main():
     from .traffic.enrich import run_enrichment as traffic_enrichment
     from .platform.identity import run_identity as identity_index
     from .composition import LOADED
+    from .socmetrics import REFRESH_SECONDS, refresh_summaries
     factories = {
         "loop_monitor": lambda: loop_monitor(stop), "switch_polling": lambda: switch_loop(stop), "firewall_polling": lambda: poll_loop(stop),
         "policy_sync": lambda: policy_loop(stop), "alert_evaluation": lambda: periodic(stop, s.alert_interval_seconds, lambda ch, db: run_rules(ch, db, product=product), "alert evaluation"),
@@ -414,7 +417,9 @@ async def main():
         # application & protocol intelligence (app/traffic/enrich.py): DNS / firewall-app / ASN enrichment of busy destinations
         "traffic_enrichment": lambda: periodic(stop, 300, traffic_enrichment, "traffic enrichment"),
         # shared identity index (app/platform/identity.py): each product's contributors, every 5 minutes
-        "identity_index": lambda: periodic(stop, 300, lambda ch, db: identity_index(ch, db, products=set(LOADED) or None), "identity index")}
+        "identity_index": lambda: periodic(stop, 300, lambda ch, db: identity_index(ch, db, products=set(LOADED) or None), "identity index"),
+        # SOC executive summary / SOC operations (app/socmetrics.py): precomputed so the dashboards open instantly
+        "soc_summaries": lambda: periodic(stop, REFRESH_SECONDS, refresh_summaries, "SOC summaries")}
     tasks = [asyncio.create_task(factories[name](), name=name) for name in loop_plan(roles, SHARD, product, shared)]
     if "core" in roles and SHARD == 0 and shared:
         if s.demo_mode:
