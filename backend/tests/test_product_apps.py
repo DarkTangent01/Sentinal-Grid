@@ -47,7 +47,7 @@ def test_worker_plan_per_product():
     grid = loop_plan(both, 0, "grid", shared=True)
     nms = loop_plan(both, 0, "nms", shared=False)
     assert set(grid) | set(nms) == set(combined)                    # nothing lost, nothing new
-    assert grid == ["loop_monitor", "alert_evaluation", "retention", "ngen_jobs", "identity_index"]
+    assert grid == ["loop_monitor", "alert_evaluation", "retention", "ngen_jobs", "identity_index", "soc_summaries"]
     assert "retention" not in nms and "switch_polling" in nms and "alert_evaluation" in nms
     assert all(LOOP_PRODUCT[x] in ("any", "nms") for x in nms)
     assert loop_plan(worker_roles("snmp"), 0, "grid") == ["loop_monitor"]   # no SNMP polling in a Grid process

@@ -114,6 +114,8 @@ def intervals_of(sw: Switch) -> dict[str, int]:
         if d.get("wlc") and not is_wlc(sw):
             continue
         v = (sw.group_intervals or {}).get(g)
+        if v is None:            # the device's own setting, then its monitoring template, then the group default
+            v = ((sw.template_config or {}).get("group_intervals") or {}).get(g)
         if v is None:
             v = base if g in FAST else max(d["interval"], base)
         out[g] = int(v) if int(v) == 0 else max(30, int(v))
@@ -292,9 +294,11 @@ async def poll_switch(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | 
             setattr(sw, k, str(ident[k])[:128])
     if ident:
         sw.product_line = (ident.get("product_line") or "")[:64]
-        sw.device_type = (ident.get("device_type") or "")[:16]
+        sw.device_type = (sw.device_type_override or ident.get("device_type") or "")[:16]   # manual classification wins
         sw.id_confidence = (ident.get("confidence") or "")[:16]
-        health["identity"] = {k: ident.get(k) for k in ("matched_by", "confidence", "enterprise", "override_conflict", "product_line", "device_type")}
+        health["identity"] = {k: ident.get(k) for k in ("matched_by", "confidence", "enterprise", "override_conflict", "product_line", "device_type",
+                                                         "manufacturer")}
+        health["identity"]["detected_device_type"] = ident.get("device_type")
     if data.get("engine_id"):
         sw.engine_id = data["engine_id"][:80]
     for k in ("sys_descr", "sys_object_id", "sys_name", "location"):

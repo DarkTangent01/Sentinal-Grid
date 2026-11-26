@@ -173,6 +173,35 @@ def _conv_view_and_backfill(ch: ClickHouse) -> None:
 
 
 
+# 5-minute interface rollup (v23; flags: 8 = counter reset → no rate, 2 = uncertain speed → no utilisation): the resolution of 95th-percentile billing and of 2-90 day graphs. Raw 60 s samples
+# keep 35 days, this 90 days, switch_if_hourly 400 days (all three TTLs are editable: app/switches/bandwidth.py).
+_IF5_SELECT = """
+    SELECT toStartOfFiveMinutes(ts) AS bucket, switch_id, ifindex, count() AS samples, countIf(rx_bps IS NOT NULL AND bitAnd(flags, 8) = 0) AS rated,
+           sumIf(ifNull(rx_bps, 0), bitAnd(flags, 8) = 0) AS rx_bps_sum, sumIf(ifNull(tx_bps, 0), bitAnd(flags, 8) = 0) AS tx_bps_sum,
+           maxIf(rx_bps, bitAnd(flags, 8) = 0) AS rx_bps_max, maxIf(tx_bps, bitAnd(flags, 8) = 0) AS tx_bps_max,
+           minIf(rx_bps, bitAnd(flags, 8) = 0) AS rx_bps_min, minIf(tx_bps, bitAnd(flags, 8) = 0) AS tx_bps_min,
+           sumIf(ifNull(rx_bps, 0) * interval_s, bitAnd(flags, 8) = 0) AS rx_bits, sumIf(ifNull(tx_bps, 0) * interval_s, bitAnd(flags, 8) = 0) AS tx_bits,
+           maxIf(rx_util, bitAnd(flags, 10) = 0) AS rx_util_max, maxIf(tx_util, bitAnd(flags, 10) = 0) AS tx_util_max,
+           sum(ifNull(in_errors, 0)) AS in_errors, sum(ifNull(out_errors, 0)) AS out_errors,
+           sum(ifNull(in_discards, 0)) AS in_discards, sum(ifNull(out_discards, 0)) AS out_discards,
+           countIf(oper = 0 AND admin = 1) AS down_samples
+    FROM switch_if_samples {where} GROUP BY bucket, switch_id, ifindex"""
+
+
+def _if5_view_and_backfill(ch: ClickHouse) -> None:
+    """The view first, then the samples stored before it, one day per statement (each well inside the client's 60 s
+    limit). A retried migration whose view already exists does nothing (a second backfill would double-count)."""
+    existed = ch.query("SELECT count() AS n FROM system.tables WHERE database = currentDatabase() AND name = 'switch_if_5m_mv'")
+    if existed and int(existed[0]["n"]):
+        return
+    t = datetime.now(timezone.utc).replace(microsecond=0)
+    ch.command("CREATE MATERIALIZED VIEW IF NOT EXISTS switch_if_5m_mv TO switch_if_5m AS " + _IF5_SELECT.format(where=""))
+    days = [str(r["d"]) for r in ch.query("SELECT DISTINCT toDate(ts) AS d FROM switch_if_samples WHERE ts < {t:DateTime64(3)} ORDER BY d", {"t": t})]
+    for d in days:
+        ch.command("INSERT INTO switch_if_5m " + _IF5_SELECT.format(where="WHERE toDate(ts) = {d:Date} AND ts < {t:DateTime64(3)}"), {"d": d, "t": t})
+    log.info("switch_if_5m backfilled for %d day(s) before %s", len(days), t.isoformat())
+
+
 MIGRATIONS: list[tuple[int, str, list]] = [
     (1, "events table", [
         """
@@ -886,6 +915,36 @@ MIGRATIONS: list[tuple[int, str, list]] = [
         TTL hour + INTERVAL 35 DAY
         """,
         _conv_view_and_backfill,
+    ]),
+    (23, "5-minute interface rollup (bandwidth graphs for 2-90 days, 95th percentile, bits transferred)", [
+        """
+        CREATE TABLE IF NOT EXISTS switch_if_5m (
+            bucket DateTime('UTC'),
+            switch_id UInt32,
+            ifindex UInt32,
+            samples SimpleAggregateFunction(sum, UInt64),
+            rated SimpleAggregateFunction(sum, UInt64),
+            rx_bps_sum SimpleAggregateFunction(sum, Float64),
+            tx_bps_sum SimpleAggregateFunction(sum, Float64),
+            rx_bps_max SimpleAggregateFunction(max, Nullable(Float64)),
+            tx_bps_max SimpleAggregateFunction(max, Nullable(Float64)),
+            rx_bps_min SimpleAggregateFunction(min, Nullable(Float64)),
+            tx_bps_min SimpleAggregateFunction(min, Nullable(Float64)),
+            rx_bits SimpleAggregateFunction(sum, Float64),
+            tx_bits SimpleAggregateFunction(sum, Float64),
+            rx_util_max SimpleAggregateFunction(max, Nullable(Float32)),
+            tx_util_max SimpleAggregateFunction(max, Nullable(Float32)),
+            in_errors SimpleAggregateFunction(sum, UInt64),
+            out_errors SimpleAggregateFunction(sum, UInt64),
+            in_discards SimpleAggregateFunction(sum, UInt64),
+            out_discards SimpleAggregateFunction(sum, UInt64),
+            down_samples SimpleAggregateFunction(sum, UInt64)
+        ) ENGINE = AggregatingMergeTree
+        PARTITION BY toYYYYMMDD(bucket)
+        ORDER BY (switch_id, ifindex, bucket)
+        TTL bucket + INTERVAL 90 DAY
+        """,
+        _if5_view_and_backfill,
     ]),
 ]
 

@@ -1207,6 +1207,13 @@ class Switch(Base):
     thresholds: Mapped[dict] = mapped_column(JSON, default=dict)             # per-switch alert threshold overrides
     timeout_ms: Mapped[int] = mapped_column(Integer, default=3000)
     retries: Mapped[int] = mapped_column(Integer, default=1)
+    # generic device inventory (migration 0041): any SNMP device, not only switches
+    fqdn: Mapped[str] = mapped_column(String(255), default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    device_type_override: Mapped[str] = mapped_column(String(16), default="")   # administrator classification wins over detection
+    icmp_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("monitoring_templates.id", ondelete="SET NULL"), nullable=True)
+    template_config: Mapped[dict] = mapped_column(JSON, default=dict)   # copy of the template (intervals, thresholds, interface rules)
     # live state (written by the poller)
     state: Mapped[str] = mapped_column(String(16), default="unknown")        # up | down | auth_failed | unknown
     state_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1285,6 +1292,8 @@ class SwitchInterface(Base):
     last_change_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sample_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     present: Mapped[bool] = mapped_column(Boolean, default=True)
+    monitored: Mapped[bool] = mapped_column(Boolean, default=True)            # False: no alerts (traffic is still stored)
+    thresholds: Mapped[dict] = mapped_column(JSON, default=dict)              # per-interface overrides (util_warn_pct, util_high_pct, ...)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -2481,3 +2490,32 @@ class SummarySnapshot(Base):
     seconds: Mapped[float] = mapped_column(Float, default=0.0)
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# ------------------------------------------------------------------ device monitoring templates (app/switches/templates.py)
+class MonitoringTemplate(Base):
+    """Reusable monitoring profile for a kind of device: polling intervals per metric group, alert thresholds and
+    interface rules. Applying a template copies it into the device (Switch.template_config); the device's own
+    overrides still win."""
+    __tablename__ = "monitoring_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str | None] = mapped_column(String(48), unique=True, nullable=True)     # built-in templates
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    device_type: Mapped[str] = mapped_column(String(16), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    group_intervals: Mapped[dict] = mapped_column(JSON, default=dict)
+    thresholds: Mapped[dict] = mapped_column(JSON, default=dict)
+    interface_rules: Mapped[dict] = mapped_column(JSON, default=dict)     # {"exclude_types": [...], "exclude_regex": "..."}
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(128), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MonitoringSetting(Base):
+    """Platform-wide NMS settings by key (e.g. "interface_retention": days per resolution)."""
+    __tablename__ = "monitoring_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str] = mapped_column(String(128), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -182,7 +182,8 @@ def _fresh(sw: Switch, now) -> bool:
 
 
 def _thr(sw: Switch, p: dict, k: str):
-    return (sw.thresholds or {}).get(k, p.get(k))
+    """Device override, then the device's monitoring template, then the rule parameter."""
+    return (sw.thresholds or {}).get(k, ((sw.template_config or {}).get("thresholds") or {}).get(k, p.get(k)))
 
 
 async def _events(kinds: list[str], since: datetime) -> list[SwitchEvent]:

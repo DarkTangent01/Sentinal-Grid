@@ -20,7 +20,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-DEVICE_TYPES = ("switch", "router", "firewall", "wlc", "ap", "server", "other")
+DEVICE_TYPES = ("switch", "l3switch", "router", "firewall", "wlc", "ap", "server", "linux", "windows", "printer", "ups", "load_balancer",
+                "storage", "hypervisor", "appliance", "iot", "other")
+DEVICE_TYPE_LABELS = {"switch": "Switch", "l3switch": "Layer 3 switch", "router": "Router", "firewall": "Firewall", "wlc": "Wireless controller",
+                      "ap": "Access point", "server": "Server", "linux": "Linux server", "windows": "Windows server", "printer": "Printer",
+                      "ups": "UPS", "load_balancer": "Load balancer", "storage": "Storage system", "hypervisor": "Hypervisor",
+                      "appliance": "Network appliance", "iot": "IoT / building device", "other": "Generic SNMP device"}
 VENDORS = ("cisco", "fortinet", "juniper", "ruckus", "generic")
 
 
@@ -99,6 +104,41 @@ MODEL_PATTERNS = {
 }
 
 
+# Manufacturer and device category for every other SNMP device. These never select a vendor adapter (those exist only
+# for the vendors above): such devices get standard-MIB monitoring (IF-MIB, HOST-RESOURCES, ENTITY, UPS-MIB, Printer-MIB).
+# enterprise → (manufacturer, default category or "")
+MANUFACTURERS: dict[int, tuple[str, str]] = {
+    9: ("Cisco", ""), 12356: ("Fortinet", ""), 2636: ("Juniper", ""), 1991: ("Ruckus", ""), 25053: ("Ruckus", ""),
+    8072: ("net-snmp", ""), 2021: ("net-snmp (UCD)", ""), 311: ("Microsoft", "windows"), 6876: ("VMware", "hypervisor"),
+    318: ("APC (Schneider Electric)", "ups"), 534: ("Eaton", "ups"), 935: ("Vertiv / Liebert", "ups"), 4555: ("Socomec", "ups"),
+    11: ("HP / HPE", ""), 47196: ("HPE Aruba", ""), 14823: ("Aruba", "wlc"), 674: ("Dell", "server"), 6027: ("Dell EMC Networking", "switch"),
+    1602: ("Canon", "printer"), 2435: ("Brother", "printer"), 367: ("Ricoh", "printer"), 1347: ("Kyocera", "printer"), 253: ("Xerox", "printer"),
+    641: ("Lexmark", "printer"), 18334: ("Konica Minolta", "printer"), 789: ("NetApp", "storage"), 6574: ("Synology", "storage"),
+    24681: ("QNAP", "storage"), 3375: ("F5", "load_balancer"), 5951: ("Citrix NetScaler", "load_balancer"), 22610: ("A10 Networks", "load_balancer"),
+    25461: ("Palo Alto Networks", "firewall"), 2620: ("Check Point", "firewall"), 8741: ("SonicWall", "firewall"), 14988: ("MikroTik", "router"),
+    41112: ("Ubiquiti", ""), 30065: ("Arista", "switch"), 2011: ("Huawei", ""), 25506: ("H3C", "switch"), 1916: ("Extreme Networks", "switch"),
+    4526: ("Netgear", "switch"), 171: ("D-Link", "switch"), 11863: ("TP-Link", "switch"), 12325: ("pfSense / BSD", "firewall"),
+    2604: ("Sophos", "firewall"), 43: ("3Com", "switch"), 5624: ("Enterasys", "switch"), 3076: ("Cisco (Altiga)", "appliance"),
+    10002: ("Ubiquiti (Frogfoot)", "ap"), 26543: ("IBM", "server"), 232: ("HPE (Compaq) servers", "server"), 2: ("IBM", "server"),
+    5528: ("Netbotz (APC)", "iot"), 20916: ("AVTECH", "iot"), 21796: ("Raritan", "iot"), 13742: ("Raritan PDU", "iot"),
+}
+# sysDescr → category, for generic agents or vendors without a default category (first match wins)
+CATEGORY_RULES: list[tuple[str, str, str]] = [
+    (r"ESXi|VMware ESX", "hypervisor", "ESXi"),
+    (r"Hardware:.*Software: Windows|Microsoft Windows|Windows Server", "windows", "Windows"),
+    (r"LaserJet|OfficeJet|PageWide|Jetdirect|imageRUNNER|MFC-|HL-[0-9]|Aficio|ECOSYS|TASKalfa|WorkCentre|VersaLink|bizhub|Printer", "printer", ""),
+    (r"\bUPS\b|Smart-UPS|Symmetra|Network Management Card|Powerware|Galaxy", "ups", ""),
+    (r"ProCurve|Aruba.*Switch|JL[0-9]{3}A|Comware|Arista|EdgeSwitch|CRS[0-9]{3}|S[0-9]{4}.*Huawei", "switch", ""),
+    (r"RouterOS|EdgeRouter|VyOS|Huawei.*AR[0-9]", "router", ""),
+    (r"pfSense|OPNsense|PAN-OS|Palo Alto|SonicOS|Check Point|Gaia|Sophos", "firewall", ""),
+    (r"BIG-IP|NetScaler|Citrix ADC|ACOS", "load_balancer", ""),
+    (r"Data ONTAP|NetApp|Synology|DSM [0-9]|QTS|TrueNAS|FreeNAS", "storage", ""),
+    (r"UniFi|\bUAP\b|AirOS|Access Point", "ap", ""),
+    (r"Linux|Ubuntu|Debian|CentOS|Red Hat|Rocky|AlmaLinux|SUSE", "linux", "Linux"),
+    (r"FreeBSD|OpenBSD|NetBSD|SunOS|Solaris|AIX|HP-UX", "server", ""),
+]
+
+
 def enterprise_of(oid: str) -> int | None:
     m = re.match(r"^\.?1\.3\.6\.1\.4\.1\.(\d+)(?:\.|$)", oid or "")
     return int(m.group(1)) if m else None
@@ -136,6 +176,17 @@ def identify(sys_object_id: str, sys_descr: str, *, vendor_override: str = "", f
     mp = MODEL_PATTERNS.get(out["vendor"])
     if mp and (m := re.search(mp, d, re.I)):
         out["model"] = m.group(1).replace(" ", "")
+    m = MANUFACTURERS.get(out["enterprise"] or -1)
+    out["manufacturer"] = m[0] if m else ({"cisco": "Cisco", "fortinet": "Fortinet", "juniper": "Juniper", "ruckus": "Ruckus"}.get(out["vendor"], ""))
+    if out["device_type"] in ("", "other"):
+        cat = next(((t, os_) for pat, t, os_ in CATEGORY_RULES if re.search(pat, d, re.I)), None)
+        if cat:
+            out["device_type"] = cat[0]
+            out["os"] = out["os"] or cat[1]
+            out["matched_by"] = (out["matched_by"] + "; " if out["matched_by"] else "") + "device category from sysDescr"
+        elif m and m[1]:
+            out["device_type"] = m[1]
+            out["matched_by"] = (out["matched_by"] + "; " if out["matched_by"] else "") + f"device category of enterprise {out['enterprise']} ({m[0]})"
     if vendor_override:
         if vendor_override != out["vendor"] and out["vendor"] != "generic":
             out["override_conflict"] = f"device identifies as {out['vendor']}, overridden to {vendor_override}"
@@ -147,4 +198,5 @@ def identify(sys_object_id: str, sys_descr: str, *, vendor_override: str = "", f
 
 def catalogue() -> dict:
     return {"enterprises": [e.__dict__ for e in ENTERPRISES], "oid_rules": [r.__dict__ for r in OID_RULES],
-            "descr_rules": [r.__dict__ for r in DESCR_RULES], "vendors": list(VENDORS), "device_types": list(DEVICE_TYPES)}
+            "descr_rules": [r.__dict__ for r in DESCR_RULES], "vendors": list(VENDORS), "device_types": list(DEVICE_TYPES),
+            "device_type_labels": DEVICE_TYPE_LABELS, "manufacturers": {str(k): v[0] for k, v in MANUFACTURERS.items()}}
