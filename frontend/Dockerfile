@@ -12,7 +12,18 @@ FROM nginx:1.30.6-alpine@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6
 # files are root-owned and read-only to the server (uid 101): a compromised worker cannot rewrite the UI or its config
 # apk upgrade: security fixes published after the pinned base image
 RUN apk upgrade --no-cache && rm /etc/nginx/conf.d/default.conf
-COPY --from=build /src/dist /usr/share/nginx/html
+# UI layout (frontend/publish-ui.sh): /srv/ui/releases/<release> holds index.html and the unhashed public files,
+# /srv/ui/assets the content-hashed bundles shared by releases, /srv/ui/current the release nginx serves. In Compose a
+# named volume ("ui") is mounted here and receives new releases without restarting nginx; on first use Docker seeds the
+# volume from this image. Owned by uid 10101 (the publisher); nginx (uid 101 / WEB_UID) only reads.
+COPY --from=build /src/dist /srv/ui/releases/image
+COPY publish-ui.sh /usr/local/bin/publish-ui
+RUN mv /srv/ui/releases/image/assets /srv/ui/assets && (cd /srv/ui/assets && ls -1) > /srv/ui/releases/image/.assets \
+    && ln -s releases/image /srv/ui/current && chown -R 10101:101 /srv/ui && chmod -R u=rwX,go=rX /srv/ui \
+    && chmod 0755 /usr/local/bin/publish-ui \
+    && mkdir -p /target && chown 10101:101 /target   # ui-release mount point: a new "ui" volume inherits this owner
+ARG BUILD_VERSION=dev
+LABEL org.opencontainers.image.version=$BUILD_VERSION
 COPY nginx-main.conf /etc/nginx/nginx.conf
 COPY nginx.conf /etc/nginx/conf.d/siem.conf
 COPY proxy_params.inc /etc/nginx/conf.d/proxy_params.inc

@@ -16,7 +16,14 @@ COPY alembic.ini .
 COPY migrations ./migrations
 COPY app ./app
 COPY rules ./rules
+# release version (scripts/release.sh: <UTC date>-<source hash>); shown to administrators on the Deployments page
+ARG BUILD_VERSION=dev
+ENV SENTINEL_VERSION=$BUILD_VERSION
+LABEL org.opencontainers.image.version=$BUILD_VERSION
 # numeric: lets the runtime verify non-root without resolving names (uid 10001 = siem, its group from /etc/passwd)
 USER 10001
 EXPOSE 8000 5514/udp 5514/tcp
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--no-server-header"]
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--no-server-header", \
+     "--timeout-graceful-shutdown", "25"]
+# SIGTERM (docker stop, rolling deploys): uvicorn stops accepting, finishes in-flight requests for up to 25 s, then exits;
+# docker-compose.yml stop_grace_period (30 s) leaves room for it

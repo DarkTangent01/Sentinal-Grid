@@ -38,7 +38,7 @@ NMS = {
 }
 SHARED = {
     "__init__", "platform", "config", "db", "security", "logging_setup", "observability", "products", "notify",
-    "retention", "rotate_keys", "secret_files", "netguard", "reports",
+    "retention", "rotate_keys", "secret_files", "netguard", "reports", "migrate_check",
     "alerts", "alerts.engine",
     "api", "api.admin", "api.alerts", "api.auth", "api.deps", "api.identities",
 }

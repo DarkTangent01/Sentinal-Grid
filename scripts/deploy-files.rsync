@@ -15,6 +15,7 @@
 - /deploy/certs/*
 - /deploy/certs/fortigate-ca/*
 - /deploy/geoip/*
+- /deploy/state/
 #
 # 2. Never sent, wherever they are.
 - __pycache__/
@@ -61,6 +62,7 @@
 + /frontend/upstream.inc
 + /frontend/proxy_access.inc
 + /frontend/security_headers.inc
++ /frontend/publish-ui.sh
 + /frontend/public/***
 - /frontend/src/**.test.ts
 - /frontend/src/**.test.tsx
@@ -84,6 +86,7 @@
 + /scripts/create-app-db-role.sh
 + /scripts/create-clickhouse-app-user.sh
 + /scripts/fix-syslog-conntrack.sh
++ /scripts/release.sh
 + /scripts/security/
 + /scripts/security/docker-security-audit.sh
 + /scripts/security/container_audit.py

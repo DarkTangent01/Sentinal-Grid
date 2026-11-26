@@ -70,6 +70,14 @@ def create_app(component: str = "api", product: str | None = None) -> FastAPI:
                     log.warning("gateway start: %d interrupted diagnostic job(s) marked failed, %d session(s) closed", n, m)
             except Exception:
                 log.exception("could not check for interrupted access sessions and jobs")
+        # warm the database pools before uvicorn starts listening: a rolling deployment puts this process in nginx's
+        # rotation as soon as it listens, and the first request would otherwise pay for both connection set-ups
+        try:
+            async with get_engine().connect() as c:
+                await c.execute(text("SELECT 1"))
+            await get_ch().aquery("SELECT 1 AS x")
+        except Exception as e:  # start anyway: /api/ready reports the problem and keeps the container out of service
+            log.warning("database warm-up failed: %s", type(e).__name__)
         yield
         await get_engine().dispose()
         log.info("api stopped")

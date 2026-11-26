@@ -89,3 +89,10 @@ async def audit_log(page: int = Query(1, ge=1), size: int = Query(100, ge=1, le=
     rows = (await s.execute(q.order_by(AuditLog.ts.desc()).offset((page - 1) * size).limit(size))).scalars()
     return [{"ts": iso(r.ts), "username": r.username, "action": r.action, "target": r.target, "detail": r.detail,
              "client_ip": r.client_ip, "success": r.success} for r in rows]
+
+
+@router.get("/admin/deployments")
+async def deployments(_: User = Depends(require_admin)):
+    """Deployed versions, service state at the last deployment and the deployment history (administrators only)."""
+    from ..platform import deployments as D
+    return D.state()

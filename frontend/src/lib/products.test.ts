@@ -89,7 +89,7 @@ describe("single-product builds", () => {
     expect(nms).not.toContain("/assets");
     expect(nms).toContain("/bgp");
     const admin = filterNav([ADMIN], "nms")[0].items.map((i) => i.to);
-    expect(admin).toEqual(["/notifications", "/settings"]);
+    expect(admin).toEqual(["/notifications", "/settings", "/admin/deployments"]);   // deployments are shared: both products
     const grid = filterNav(NAV.grid, "grid").flatMap((g) => g.items.map((i) => i.to));
     expect(grid).toEqual(NAV.grid.flatMap((g) => g.items.map((i) => i.to)));   // Grid nav has no NMS pages
   });

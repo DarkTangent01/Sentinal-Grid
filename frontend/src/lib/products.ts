@@ -131,7 +131,7 @@ const ALL_NAV: Record<Product, NavGroup[]> = {
 /** Shared administration, shown in both products according to the user's role. */
 const ALL_ADMIN: NavGroup = {
   title: "Administration", items: [{ to: "/log-sources", label: "Log Sources", icon: "logsrc" }, { to: "/notifications", label: "Notifications", icon: "notifications", admin: true },
-    { to: "/settings", label: "Settings", icon: "settings" }],
+    { to: "/settings", label: "Settings", icon: "settings" }, { to: "/admin/deployments", label: "Deployments", icon: "compliance", admin: true }],
 };
 
 const OWN: Record<Product, string[]> = {

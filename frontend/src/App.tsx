@@ -51,6 +51,7 @@ const Iac = /*#__PURE__*/ page(() => import("./pages/iac/IacPage"), "Iac");
 const LogSources = /*#__PURE__*/ page(() => import("./pages/LogSources"), "LogSources");
 const Switches = /*#__PURE__*/ page(() => import("./pages/switches/SwitchesPage"), "Switches");
 const SwitchDetail = /*#__PURE__*/ page(() => import("./pages/switches/SwitchDetail"), "SwitchDetail");
+const Deployments = /*#__PURE__*/ page(() => import("./pages/Deployments"), "Deployments");
 const InterfaceDetail = /*#__PURE__*/ page(() => import("./pages/devices/InterfaceDetail"), "InterfaceDetail");
 const InterfacesPage = /*#__PURE__*/ page(() => import("./pages/devices/InterfacesPage"), "InterfacesPage");
 const Tacacs = /*#__PURE__*/ page(() => import("./pages/tacacs/TacacsPage"), "Tacacs");
@@ -219,6 +220,7 @@ function Pages({ loadMe }: { loadMe: () => void }) {
             {WITH_NMS && <Route path="/tacacs" element={<Tacacs />} />}
             {WITH_GRID && <Route path="/log-sources" element={<LogSources />} />}
             <Route path="/settings" element={<Settings onMeChange={loadMe} />} />
+            <Route path="/admin/deployments" element={<Deployments />} />
             <Route path="*" element={<Notice title="Page not found">This address does not exist. Use the sidebar to continue.</Notice>} />
           </Routes>
         </Suspense>

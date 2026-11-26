@@ -160,10 +160,11 @@ def test_each_service_mounts_only_the_secrets_it_needs():
             "traps": {"db_app_password", "clickhouse_app_password", "token_encryption_key", "token_encryption_key_previous"},
             "syslog": {"db_app_password", "clickhouse_app_password"}, "flows": {"db_app_password", "clickhouse_app_password"},
             "migrate": {"db_app_password", "clickhouse_app_password", "bootstrap_admin_password"},
-            "postgres": {"postgres_password"}, "clickhouse": {"clickhouse_password"}, "web": set(), "ingress": set(), "tacacs": set()}
+            "postgres": {"postgres_password"}, "clickhouse": {"clickhouse_password"}, "web": set(), "ingress": set(), "tacacs": set(),
+            "ui-release": set()}   # UI publisher (frontend/publish-ui.sh): copies static files, no secret at all
     anchor = set(yaml.safe_load((ROOT / "docker-compose.yml").read_text())["x-backend"]["secrets"])
     for name, svc in services.items():
-        got = set(svc.get("secrets") or ([] if name in ("postgres", "clickhouse", "web", "ingress", "tacacs") else anchor))
+        got = set(svc.get("secrets") or ([] if name in ("postgres", "clickhouse", "web", "ingress", "tacacs", "ui-release") else anchor))
         assert got == want[name], (name, got)
     files = _compose()["secrets"]
     assert all(v["file"].startswith("./secrets/") for v in files.values())
@@ -241,6 +242,7 @@ def test_every_container_is_non_root_with_minimal_capabilities():
     assert s["postgres"]["user"] == "70:70" and s["postgres"]["cap_drop"] == ["ALL"] and not s["postgres"].get("cap_add")
     assert s["web"]["cap_drop"] == ["ALL"] and not s["web"].get("cap_add") and s["web"]["user"].endswith(":101")
     assert not s["web"]["user"].startswith(("0:", "root"))
+    assert s["ui-release"]["user"] == "10101:101"          # the UI publisher owns the release files; nginx only reads them
     # third pass (security/CONTAINER_SECURITY_ASSESSMENT.md): ClickHouse and TACACS+ run as their own users from the
     # start, so no service adds any capability and every service keeps privilege escalation disabled
     assert s["clickhouse"]["user"] == "101:101" and s["tacacs"]["user"] == "10003:10050"

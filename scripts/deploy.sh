@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
-# Syncs this checkout to the SIEM server with rsync, then rebuilds and restarts the stack there.
-#   ./scripts/deploy.sh            dry run: lists what would be copied or deleted, changes nothing
-#   ./scripts/deploy.sh --apply    backup on the server, sync, docker compose build, nginx -t, up -d
-#   SKIP_BACKUP=1 ./scripts/deploy.sh --apply    same, without the backup (only right after a completed one)
+# Syncs this checkout to the Sentinel server with rsync, then deploys only what changed, service by service, with health
+# checks and automatic rollback (scripts/release.sh on the server; docs/deployment-guide.md). Nothing else restarts.
+#   ./scripts/deploy.sh                       dry run: lists what would be copied or deleted, changes nothing
+#   ./scripts/deploy.sh --apply               sync, then deploy whatever changed ("auto")
+#   ./scripts/deploy.sh --apply ui            the web UI only (no restart of anything; nginx keeps serving)
+#   ./scripts/deploy.sh --apply api           the API only (rolling: no downtime)
+#   ./scripts/deploy.sh --apply poller        pollers one by one; also: worker, access, syslog, traps, flows, ansible, edge,
+#                                             ingress, tacacs, migrate, backend, all
+#   options: --no-cache (rebuild images from scratch), --allow-destructive (accept a contracting migration, after a backup)
+#   SKIP_BACKUP=1 ./scripts/deploy.sh --apply …   no backup first (a backup is only taken when the database may change)
+#   ./scripts/rollback.sh <service>           previous image of one service, no rebuild
 # Override the target with DEPLOY_REMOTE=user@host DEPLOY_PATH=/path.
 # Only production files are copied (scripts/deploy-files.rsync). Secrets are never copied from here
 # (security/SECRETS_MANAGEMENT.md).
@@ -23,7 +30,14 @@ sync() {  # $1: extra rsync flags
   rsync -az --delete --itemize-changes $1 "${FILTER[@]}" ./ "$REMOTE:$DEST/"
 }
 
-if [ "${1:-}" != "--apply" ]; then
+APPLY=""; TARGETS=()
+for a in "$@"; do case "$a" in --apply) APPLY=1;; *) TARGETS+=("$a");; esac; done
+for a in "${TARGETS[@]:-}"; do
+  case "$a" in ""|--no-cache|--allow-destructive|--force|auto|all|backend|migrate|api|poller|worker|access|syslog|traps|flows|ansible|ui|edge|ingress|tacacs) ;;
+    *) echo "[deploy] unknown target or option: $a" >&2; exit 2;; esac
+done
+
+if [ -z "$APPLY" ]; then
   echo "[deploy] DRY RUN to $REMOTE:$DEST (nothing is changed). Lines starting with *deleting are removed on --apply."
   sync -n
   echo "[deploy] review the list above, then run: ./scripts/deploy.sh --apply"
@@ -41,7 +55,7 @@ else
   echo "[deploy] WARNING: .venv not found, policy checks skipped (create it as in README, Development)" >&2
 fi
 
-read -r -p "[deploy] sync to $REMOTE:$DEST and restart the SIEM there? type yes: " ok
+read -r -p "[deploy] sync to $REMOTE:$DEST and deploy ${TARGETS[*]:-what changed} there? type yes: " ok
 [ "$ok" = "yes" ] || { echo "aborted"; exit 1; }
 
 "${SSH[@]}" "test -f '$DEST/.env'" || {
@@ -56,7 +70,12 @@ if ! "${SSH[@]}" "grep -Eq '^WEB_BIND_IP=.+' '$DEST/.env' && grep -Eq '^SYSLOG_B
   [ "$ok" = "yes" ] || exit 1
 fi
 
-if [ "${SKIP_BACKUP:-}" = "1" ]; then
+# a backup only matters when the database may change: anything but UI / proxy / collector-only deployments
+DB_SAFE=1
+for a in "${TARGETS[@]:-auto}"; do case "$a" in ui|edge|ingress|tacacs|--*) ;; *) DB_SAFE="";; esac; done
+if [ -n "$DB_SAFE" ]; then
+  echo "[deploy] ${TARGETS[*]}: the database is not touched, no backup needed"
+elif [ "${SKIP_BACKUP:-}" = "1" ]; then
   echo "[deploy] SKIP_BACKUP=1: no backup taken. Latest backups on the server:"
   "${SSH[@]}" "cd '$DEST' && ls -1t backups/clickhouse/*.zip 2>/dev/null | head -3"
 elif "${SSH[@]}" "cd '$DEST' && docker compose ps -q postgres 2>/dev/null | grep -q ."; then
@@ -90,11 +109,9 @@ if "${SSH[@]}" "grep -Eq '$SECRET_KEYS' '$DEST/.env'"; then
 fi
 # nginx runs as the owner of the TLS key (docker-compose.yml, web.user): record that uid once, never loosen the key's mode
 "${SSH[@]}" "cd '$DEST' && { grep -q '^WEB_UID=' .env || echo \"WEB_UID=\$(stat -c %u deploy/certs/siem.key)\" >> .env; }"
-echo "[deploy] building and restarting"
-# One-time cutover to the syslog ingress: the old syslog container still publishes port 514, so it must release the port
-# before the ingress can bind it. Later deploys leave the ingress running (its image does not change), which is what
-# keeps log collection uninterrupted while the rest of the stack is replaced.
-"${SSH[@]}" "cd '$DEST' && docker compose build && docker compose run --rm --no-deps web nginx -t \
-  && if [ -z \"\$(docker compose ps -q ingress 2>/dev/null)\" ]; then echo '[deploy] first ingress start: stopping old syslog listener'; docker compose stop syslog; fi \
-  && docker compose up -d && sleep 5 && ./scripts/fix-syslog-conntrack.sh && docker compose ps"
-echo "[deploy] done. Check: docker compose logs --tail=50 migrate api  (on the server)"
+# service-by-service deployment on the server: builds only changed images, health-gates every switch, rolls back on failure
+# and leaves every other container (databases, collectors, the syslog ingress, the proxy) running
+echo "[deploy] deploying on the server"
+"${SSH[@]}" "cd '$DEST' && ./scripts/release.sh deploy ${TARGETS[*]:-auto}"
+"${SSH[@]}" "cd '$DEST' && ./scripts/release.sh status"
+echo "[deploy] done. History: ssh $REMOTE 'cd $DEST && ./scripts/release.sh history'   Rollback: ./scripts/rollback.sh <service>"

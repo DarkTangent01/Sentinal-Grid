@@ -10,7 +10,9 @@ name: fortisiem
 
 x-backend: &backend
   build: ./backend
-  image: fortisiem-backend:1.0.0
+  # every deployable service has its own tag variable (scripts/release.sh writes them to .env), so one service can move to a
+  # new image while the others keep theirs; BACKEND_TAG is the fallback for services never deployed independently
+  image: fortisiem-backend:${BACKEND_TAG:-1.0.0}
   env_file: .env           # non-secret settings only (scripts/migrate-secrets.sh moves secrets out of older .env files)
   environment: &backend-env
     # no password in the URL: the services read it from DATABASE_PASSWORD_FILE
@@ -109,6 +111,7 @@ services:
 
   migrate:
     <<: *backend
+    image: fortisiem-backend:${MIGRATE_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.migrate"]
     environment:
       <<: *backend-env
@@ -121,6 +124,13 @@ services:
 
   api:
     <<: *backend
+    image: fortisiem-backend:${API_TAG:-${BACKEND_TAG:-1.0.0}}
+    # one uvicorn process per container, two containers (API_REPLICAS): a single process listens only once the app has
+    # started and stops listening at once on SIGTERM, so nginx never sends a request to a container that is starting or
+    # draining (a multi-worker master holds the socket and queues connections in both cases). Rolling deployments
+    # (scripts/release.sh) replace one replica at a time.
+    command: ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-server-header",
+              "--timeout-graceful-shutdown", "25"]
     environment:
       <<: *backend-env
       SECRET_KEY_FILE: /run/secrets/secret_key
@@ -137,17 +147,21 @@ services:
       - ./deploy/certs/fortigate-ca:/certs:ro
       - ./deploy/geoip:/geoip:ro
       - tacacs_config:/tacacs/config:ro
+      # deployment versions and history written by scripts/release.sh (administrators: Administration → Deployments)
+      - ./deploy/state:/var/lib/siem/deploy-state:ro,z
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      # readiness, not just liveness: a rolling deploy only sends traffic to an api that reaches both databases
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=4)); sys.exit(0 if r.get('status')=='ok' else 1)"]
       interval: 15s
       timeout: 5s
       retries: 5
-    deploy: { resources: { limits: { cpus: "2", memory: 1g, pids: 512 } } }
+    deploy: { replicas: "${API_REPLICAS:-2}", resources: { limits: { cpus: "2", memory: 1g, pids: 512 } } }
 
   worker:
     <<: *backend
+    image: fortisiem-backend:${WORKER_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.worker"]
     environment:
       <<: *backend-env
@@ -179,6 +193,7 @@ services:
   # One process: open terminals live in its memory; its own memory / CPU / PID limits keep sessions away from the API.
   access:
     <<: *backend
+    image: fortisiem-backend:${ACCESS_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.access"]
     environment:
       <<: *backend-env
@@ -202,7 +217,7 @@ services:
   ansible:
     <<: *backend
     build: { context: ./backend, dockerfile: Dockerfile.ansible }
-    image: fortisiem-ansible:1.0.0
+    image: fortisiem-ansible:${ANSIBLE_TAG:-1.0.0}
     command: ["python", "-m", "app.playbooks.runner"]
     environment:
       <<: *backend-env
@@ -224,6 +239,7 @@ services:
   # More devices: POLLER_REPLICAS=N in .env; each switch is claimed with a database lease, never twice.
   poller:
     <<: *backend
+    image: fortisiem-backend:${POLLER_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.worker"]
     environment:
       <<: *backend-env
@@ -246,7 +262,7 @@ services:
   # service below restarts, so deploys lose no logs, and UDP senders keep a valid connection-tracking entry.
   ingress:
     build: ./deploy/ingress
-    image: fortisiem-ingress:1.0.0
+    image: fortisiem-ingress:${INGRESS_TAG:-1.0.0}
     networks: [ingest, syslog_edge]         # syslog_edge only carries the published port
     ports:
       # loopback unless an interface address is set: publish on the management/log interface only, never 0.0.0.0
@@ -270,6 +286,7 @@ services:
 
   syslog:
     <<: *backend
+    image: fortisiem-backend:${SYSLOG_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.syslog_server"]
     networks:                               # receives from ingress only; holds no device credentials
       backend: {}
@@ -291,6 +308,7 @@ services:
 
   traps:
     <<: *backend
+    image: fortisiem-backend:${TRAPS_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.snmp_traps"]
     environment:
       <<: *backend-env
@@ -315,6 +333,7 @@ services:
   # addresses, registered firewalls) are decoded; everything else is counted and dropped.
   flows:
     <<: *backend
+    image: fortisiem-backend:${FLOWS_TAG:-${BACKEND_TAG:-1.0.0}}
     command: ["python", "-m", "app.flows"]
     secrets: [db_app_password, clickhouse_app_password]
     networks: [backend, egress]             # egress: the published UDP ports need a non-internal network
@@ -332,14 +351,16 @@ services:
 
   web:
     build: ./frontend
-    image: fortisiem-web:1.0.0
+    # the edge proxy: recreated only when nginx itself changes (scripts/release.sh edge); UI releases go to the "ui"
+    # volume (service ui-release) and need no restart
+    image: fortisiem-web:${WEB_TAG:-1.0.0}
     # nginx runs unprivileged on 8443 / 8080 in the container (the host still publishes 443 / 80), as the owner of
     # deploy/certs/siem.key (WEB_UID, set by deploy.sh) so the key can stay mode 0600; no capabilities at all
     user: "${WEB_UID:-101}:101"
     ports:
       - "${WEB_BIND_IP:-127.0.0.1}:443:8443"
       - "${WEB_BIND_IP:-127.0.0.1}:80:8080"
-    volumes: ["./deploy/certs:/etc/nginx/certs:ro,z"]
+    volumes: ["./deploy/certs:/etc/nginx/certs:ro,z", "ui:/srv/ui:ro"]
     networks: [frontend]                    # reaches the api only; no route to the databases
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -356,11 +377,29 @@ services:
     logging: *logging
     deploy: { resources: { limits: { cpus: "1", memory: 256m, pids: 128 } } }
 
+  # one-shot UI publisher (scripts/release.sh ui): runs the new web image against the "ui" volume, copies the release,
+  # verifies its assets and switches "current" atomically. Never started by "docker compose up" (profile "release").
+  ui-release:
+    image: fortisiem-web:${UI_TAG:-${WEB_TAG:-1.0.0}}
+    profiles: ["release"]
+    entrypoint: ["publish-ui"]
+    user: "10101:101"
+    volumes: ["ui:/target"]
+    networks: [frontend]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
+    init: true
+    restart: "no"
+    logging: *logging
+    deploy: { resources: { limits: { cpus: "0.5", memory: 128m, pids: 64 } } }
+
   # TACACS+ server (tac_plus-ng + deploy agent). Opt-in: COMPOSE_PROFILES=tacacs. Restrict TCP/49 to the network device
   # management subnets in the host firewall; see docs/TACACS.md.
   tacacs:
     build: ./deploy/tacacs
-    image: fortisiem-tacacs:1.0.0
+    image: fortisiem-tacacs:${TACACS_TAG:-1.0.0}
     profiles: ["tacacs"]
     restart: unless-stopped
     networks: [aaa]                         # shares a network with api / worker only, not with the databases
@@ -411,3 +450,4 @@ volumes:
   tacacs_config:
   tacacs_logs:
   deadletter:
+  ui:          # web UI releases (frontend/publish-ui.sh); seeded from the web image on first use
