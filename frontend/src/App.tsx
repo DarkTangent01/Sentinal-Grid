@@ -51,6 +51,8 @@ const Iac = /*#__PURE__*/ page(() => import("./pages/iac/IacPage"), "Iac");
 const LogSources = /*#__PURE__*/ page(() => import("./pages/LogSources"), "LogSources");
 const Switches = /*#__PURE__*/ page(() => import("./pages/switches/SwitchesPage"), "Switches");
 const SwitchDetail = /*#__PURE__*/ page(() => import("./pages/switches/SwitchDetail"), "SwitchDetail");
+const InterfaceDetail = /*#__PURE__*/ page(() => import("./pages/devices/InterfaceDetail"), "InterfaceDetail");
+const InterfacesPage = /*#__PURE__*/ page(() => import("./pages/devices/InterfacesPage"), "InterfacesPage");
 const Tacacs = /*#__PURE__*/ page(() => import("./pages/tacacs/TacacsPage"), "Tacacs");
 const NmsDashboard = /*#__PURE__*/ page(() => import("./pages/nms/NmsDashboard"), "NmsDashboard");
 const NmsAnalytics = /*#__PURE__*/ page(() => import("./pages/nms/Analytics"), "NmsAnalytics");
@@ -212,6 +214,8 @@ function Pages({ loadMe }: { loadMe: () => void }) {
             {WITH_NMS && <Route path="/iac" element={<Iac />} />}
             {WITH_NMS && <Route path="/switches" element={<Switches />} />}
             {WITH_NMS && <Route path="/switches/:id" element={<SwitchDetail />} />}
+            {WITH_NMS && <Route path="/switches/:id/interfaces/:ifindex" element={<InterfaceDetail />} />}
+            {WITH_NMS && <Route path="/nms/interfaces" element={<InterfacesPage />} />}
             {WITH_NMS && <Route path="/tacacs" element={<Tacacs />} />}
             {WITH_GRID && <Route path="/log-sources" element={<LogSources />} />}
             <Route path="/settings" element={<Settings onMeChange={loadMe} />} />

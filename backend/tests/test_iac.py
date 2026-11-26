@@ -155,6 +155,9 @@ class As:
     def delete(self, url, **kw):
         return self.c.delete(url, headers=self.h, **kw)
 
+    def patch(self, url, **kw):
+        return self.c.patch(url, headers=self.h, **kw)
+
 
 async def _setup(api, db, env="production"):  # noqa: F811
     db.add_all([User(username=u, password_hash=hash_password(PW), role="analyst", products=["grid", "nms"], iac_roles=r)

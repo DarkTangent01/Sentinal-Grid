@@ -153,7 +153,8 @@ class UdpAgent:
             await lport
         if self.community:
             config.add_v1_system(e, "test-area", self.community)
-            config.add_vacm_user(e, 2, "test-area", "noAuthNoPriv", (1, 3, 6), ())
+            config.add_vacm_user(e, 1, "test-area", "noAuthNoPriv", (1, 3, 6), ())   # SNMPv1
+            config.add_vacm_user(e, 2, "test-area", "noAuthNoPriv", (1, 3, 6), ())   # SNMPv2c
         if self.v3_user:
             auth = {"md5": config.USM_AUTH_HMAC96_MD5, "sha": config.USM_AUTH_HMAC96_SHA,
                     "sha256": config.USM_AUTH_HMAC192_SHA256}[self.auth]

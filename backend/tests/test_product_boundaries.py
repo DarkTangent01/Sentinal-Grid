@@ -33,7 +33,7 @@ NMS = {
     "switches", "tacacs", "traffic", "vpnmon", "wan", "wan_alerts", "wan_metrics", "wireless",
     "alerts.nms",
     "api.access", "api.configs", "api.firewalls", "api.flows", "api.hardening", "api.iac", "api.isp", "api.netcompliance",
-    "api.netops", "api.nms", "api.playbooks", "api.policies", "api.snmp", "api.switches", "api.tacacs", "api.traffic", "api.wan",
+    "api.netops", "api.nms", "api.playbooks", "api.policies", "api.snmp", "api.switches", "api.devices", "api.tacacs", "api.traffic", "api.wan",
     "api.wireless", "api.wireless_analytics", "api.wireless_integrations", "api.wireless_rf",
 }
 SHARED = {

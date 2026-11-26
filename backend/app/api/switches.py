@@ -153,7 +153,7 @@ def _ifrow(r: SwitchInterface, sw: Switch | None = None) -> dict:
          "rx_bps": r.rx_bps, "tx_bps": r.tx_bps, "rx_util": r.rx_util, "tx_util": r.tx_util, "in_errors": r.in_errors_delta, "out_errors": r.out_errors_delta,
          "crc": r.crc_delta, "discards": r.discards_delta, "flags": flag_names(r.sample_flags or 0), "note": r.sample_note,
          "hc_counters": bool((r.counters or {}).get("hc")), "last_change_at": iso(r.last_change_at), "last_sample_at": iso(r.last_sample_at),
-         "present": r.present}
+         "present": r.present, "monitored": r.monitored, "thresholds": r.thresholds or {}}
     if sw is not None:
         d.update(switch=sw.name, site=sw.site)
     return d
@@ -427,7 +427,7 @@ async def polls(sid: int, limit: int = Query(100, ge=1, le=500), user: User = De
 # ------------------------------------------------------------------ admin: credentials
 class CredentialIn(BaseModel):
     name: str = Field(pattern=NAME)
-    version: str = Field("v3", pattern=r"^(v3|v2c)$")
+    version: str = Field("v3", pattern=r"^(v3|v2c|v1)$")
     username: str = Field("", max_length=32)
     auth_protocol: str = Field("sha", max_length=16)
     priv_protocol: str = Field("aes128", max_length=16)
@@ -456,7 +456,7 @@ def _check_cred(body: CredentialIn, existing: dict | None) -> dict:
         v = getattr(body, k)
         if v:
             secret[k] = v
-    if body.version == "v2c":
+    if body.version in ("v1", "v2c"):
         secret = {"community": secret.get("community", "")}
     else:
         secret.pop("community", None)

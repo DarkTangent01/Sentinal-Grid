@@ -1132,7 +1132,13 @@ def collectors(vendor: str) -> dict:
     return {"system": collect_system, "interfaces": collect_interfaces, "cpu_memory": cpu_memory, "environment": environment,
             "stack": a.stack, "poe": collect_poe, "lacp": collect_lacp, "stp": collect_stp, "vlans": collect_vlans,
             "mac_table": collect_mac_table, "routing": collect_routing, "inventory": collect_inventory, "neighbors": collect_neighbors,
-            "storage": collect_storage, "vendor_health": _adapters().collect_vendor_health, "custom": _adapters().collect_custom}
+            "storage": collect_storage, "vendor_health": _adapters().collect_vendor_health, "custom": _adapters().collect_custom,
+            "ups": _power().collect_ups, "printer": _power().collect_printer}
+
+
+def _power():
+    from . import power
+    return power
 
 
 def _adapters():

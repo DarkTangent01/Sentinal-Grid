@@ -37,6 +37,9 @@ GROUPS: dict[str, dict] = {
     "storage": {"interval": 300, "label": "Disks, flash and file systems"},
     "vendor_health": {"interval": 300, "label": "Vendor health: HA, VPN, SD-WAN, sessions, chassis alarms"},
     "custom": {"interval": 300, "label": "Custom OIDs (administrator-defined)"},
+    # standard-MIB health of non-network devices (app/switches/power.py): only for that device type unless a template enables it
+    "ups": {"interval": 120, "label": "UPS: battery, runtime, load, input / output (UPS-MIB)", "types": ("ups",)},
+    "printer": {"interval": 600, "label": "Printer: status, supplies, page count (Printer-MIB)", "types": ("printer",)},
     # wireless controller groups (role "wlc" only; app/wireless)
     "wireless_ap": {"interval": 60, "label": "Wireless: access points", "wlc": True},
     "wireless_radio": {"interval": 60, "label": "Wireless: radios and channel utilisation", "wlc": True},
@@ -120,6 +123,14 @@ METRICS: list[Metric] = [
       "gauge", "°C", ("generic",)),
     M("switch_sensor_value", "environment", "environment", "ENTITY-SENSOR-MIB entPhySensorTable (voltage, current, power, fan rpm, humidity)",
       "1.3.6.1.2.1.99.1.1.1", "gauge", "", note="scaled by entPhySensorScale / Precision; also asked of Cisco / Ruckus when their MIB has no temperatures"),
+    M("device_ups_battery_charge_percent", "ups", "health", "UPS-MIB upsEstimatedChargeRemaining", "1.3.6.1.2.1.33.1.2.4.0", "gauge", "%", ("generic",)),
+    M("device_ups_runtime_minutes", "ups", "health", "UPS-MIB upsEstimatedMinutesRemaining", "1.3.6.1.2.1.33.1.2.3.0", "gauge", "min", ("generic",)),
+    M("device_ups_load_percent", "ups", "health", "UPS-MIB upsOutputPercentLoad", "1.3.6.1.2.1.33.1.4.4.1.5", "gauge", "%", ("generic",)),
+    M("device_ups_on_battery", "ups", "health", "UPS-MIB upsOutputSource", "1.3.6.1.2.1.33.1.4.1.0", "state", "", ("generic",)),
+    M("device_printer_supply_percent", "printer", "health", "Printer-MIB prtMarkerSuppliesTable (level / max capacity)", "1.3.6.1.2.1.43.11.1.1",
+      "gauge", "%", ("generic",)),
+    M("device_printer_status", "printer", "health", "HOST-RESOURCES-MIB hrPrinterStatus / hrPrinterDetectedErrorState", "1.3.6.1.2.1.25.3.5.1",
+      "state", "", ("generic",)),
     M("switch_storage_used_percent", "storage", "health", "HOST-RESOURCES-MIB hrStorageTable (fixed / flash / network disks)", "1.3.6.1.2.1.25.2.3.1",
       "gauge", "%", note="RAM and virtual memory are reported under memory, not storage"),
     # Fortinet (FORTINET-FORTIGATE-MIB / FORTINET-FORTISWITCH-MIB)

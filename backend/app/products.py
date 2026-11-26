@@ -30,7 +30,7 @@ PATH_PRODUCT: dict[str, str | None] = {
     "/api/compliance": "grid", "/api/ai": "grid",
     "/api/network-security": "grid", "/api/risk": "grid", "/api/soc": "grid", "/api/response": "grid",
     # Sentinel NMS — ISP / WAN, device health, routing, switches, AAA, policy and configuration management
-    "/api/isp": "nms", "/api/wan": "nms", "/api/switches": "nms", "/api/tacacs": "nms", "/api/iac": "nms", "/api/bgp": "nms",
+    "/api/isp": "nms", "/api/wan": "nms", "/api/switches": "nms", "/api/devices": "nms", "/api/tacacs": "nms", "/api/iac": "nms", "/api/bgp": "nms",
     "/api/fwhealth": "nms", "/api/vpn-tunnels": "nms", "/api/wireless": "nms", "/api/nms": "nms", "/api/snmp": "nms", "/api/hardening": "nms", "/api/drift": "nms", "/api/v1/policies": "nms",
     # shared services
     "/api/auth": None, "/api/users": None, "/api/admin": None, "/api/notifications": None, "/api/log-sources": None,

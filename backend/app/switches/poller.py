@@ -35,7 +35,7 @@ from .snmp import Credentials, PysnmpClient, SnmpError
 
 log = logging.getLogger("switches")
 ORDER = ["system", "inventory", "interfaces", "cpu_memory", "environment", "stack", "poe", "lacp", "neighbors", "vlans", "stp", "mac_table", "routing", "storage",
-         "vendor_health", "custom", "wireless_ap", "wireless_radio", "wireless_radio_rf", "wireless_wlan", "wireless_client", "wireless_ap_cdp",
+         "vendor_health", "custom", "ups", "printer", "wireless_ap", "wireless_radio", "wireless_radio_rf", "wireless_wlan", "wireless_client", "wireless_ap_cdp",
          "wireless_radio_meta", "wireless_rf_neighbors", "wireless_rogue"]
 FAST = {"system", "interfaces", "cpu_memory"}   # follow the switch's poll interval
 # large, independent wireless-controller tables: walked concurrently at the end of a poll (run_groups)
@@ -74,9 +74,9 @@ def credentials_of(cred: SwitchCredential) -> Credentials:
 
 
 def check_version_allowed(version: str) -> None:
-    if version == "v2c" and not get_settings().switch_allow_snmpv2c:
-        raise SnmpError("config", "SNMPv2c is disabled (community strings travel in clear text). Use SNMPv3 authPriv, or set "
-                                  "SWITCH_ALLOW_SNMPV2C=true if v2c is explicitly approved for these switches.")
+    if version in ("v1", "v2c") and not get_settings().switch_allow_snmpv2c:
+        raise SnmpError("config", f"SNMP{version} is disabled (community strings travel in clear text). Use SNMPv3 authPriv, or set "
+                                  "SWITCH_ALLOW_SNMPV2C=true if v1 / v2c is explicitly approved for these devices.")
 
 
 def validate_address(addr: str, networks: list[SwitchNetwork]) -> str:
@@ -113,6 +113,9 @@ def intervals_of(sw: Switch) -> dict[str, int]:
     for g, d in GROUPS.items():
         if d.get("wlc") and not is_wlc(sw):
             continue
+        tmpl = (sw.template_config or {}).get("group_intervals") or {}
+        if d.get("types") and sw.device_type not in d["types"] and not (sw.group_intervals or {}).get(g) and not tmpl.get(g):
+            continue                 # UPS / printer groups: only for that kind of device, or when explicitly enabled
         v = (sw.group_intervals or {}).get(g)
         if v is None:            # the device's own setting, then its monitoring template, then the group default
             v = ((sw.template_config or {}).get("group_intervals") or {}).get(g)
@@ -340,6 +343,17 @@ async def poll_switch(s: AsyncSession, ch, sw: Switch, cred: SwitchCredential | 
         health["storage"] = data["storage"]
         for v in data["storage"]:
             metrics.append(_m(now, sw, "switch_storage_used_percent", v["name"][:96], v["pct"]))
+    if "ups" in ran:
+        health["ups"] = data.get("ups")
+        u = data.get("ups") or {}
+        for k, key in (("charge_pct", "device_ups_battery_charge_percent"), ("runtime_minutes", "device_ups_runtime_minutes"), ("load_pct", "device_ups_load_percent")):
+            if u.get(k) is not None:
+                metrics.append(_m(now, sw, key, "", u[k]))
+    if "printer" in ran:
+        health["printer"] = data.get("printer")
+        for x in (data.get("printer") or {}).get("supplies") or []:
+            if x.get("pct") is not None:
+                metrics.append(_m(now, sw, "device_printer_supply_percent", x["name"][:96], x["pct"]))
     if "stack" in ran:
         _stack(health, data.get("stack"), ev)
     if "poe" in ran:
@@ -587,7 +601,9 @@ async def _interfaces(s, ch, sw, rows: dict, ifaces: dict, now, ticks, interval,
         disc = [x for x in (rates["in_discards"], rates["out_discards"]) if x is not None]
         r.discards_delta = sum(disc) if disc else None
         r.sample_flags, r.sample_note = rates["flags"], (rates.get("reason") or "")[:255]
-        r.counters = {**cur, "t": now.isoformat(), "uptime": ticks, "last_change": d.get("last_change_ticks")}
+        # highest speed this port has run at (up): the capacity-mismatch rule compares the current speed with it
+        top = max(int(pc.get("max_speed_bps") or 0), int(speed or 0) if d["oper"] == "up" and kind == "physical" else 0) or None
+        r.counters = {**cur, "t": now.isoformat(), "uptime": ticks, "last_change": d.get("last_change_ticks"), "max_speed_bps": top}
         r.last_sample_at, r.last_seen, r.present = now, now, True
         if_samples.append({"ts": now.replace(microsecond=0), "switch_id": sw.id, "ifindex": ifx, "interval_s": float(elapsed),
                            **{k: rates[k] for k in ("rx_bps", "tx_bps", "rx_util", "tx_util", "rx_pps", "tx_pps", "in_errors", "out_errors",

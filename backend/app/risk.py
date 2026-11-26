@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db.models import Alert, Asset
 from .incidents import entity_of
-from .products import alert_product, product_rule_keys
+from .products import product_rule_keys
 
 SEV_POINTS = {"informational": 1, "low": 4, "medium": 10, "high": 22, "critical": 40}
 CONF = {"low": 0.6, "medium": 0.8, "high": 1.0}

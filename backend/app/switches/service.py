@@ -77,7 +77,11 @@ def switch_row(sw: Switch, now: datetime, cred_names: dict[int, dict] | None = N
             "poe_pct": _f(100 * sw.poe_used_w / sw.poe_budget_w, 1) if sw.poe_budget_w and sw.poe_used_w is not None else None,
             "poe_supported": poe != {} and sw.poe_budget_w is not None, "coverage_pct": sw.coverage_pct, "coverage": cov,
             "alerts_open": a.get("count", 0), "alert_severity": a.get("severity"), "timeout_ms": sw.timeout_ms, "retries": sw.retries,
-            "group_intervals": sw.group_intervals or {}, "thresholds": sw.thresholds or {}, "created_at": _iso(sw.created_at), "created_by": sw.created_by}
+            "group_intervals": sw.group_intervals or {}, "thresholds": sw.thresholds or {}, "created_at": _iso(sw.created_at), "created_by": sw.created_by,
+            "device_type": sw.device_type or "", "device_type_override": sw.device_type_override or "",
+            "manufacturer": ((sw.health or {}).get("identity") or {}).get("manufacturer") or "", "fqdn": sw.fqdn or "", "tags": sw.tags or [],
+            "icmp_enabled": sw.icmp_enabled, "template_id": sw.template_id, "template": (sw.template_config or {}).get("name"),
+            "health_ups": (sw.health or {}).get("ups"), "health_printer": (sw.health or {}).get("printer")}
 
 
 SEV = ["informational", "low", "medium", "high", "critical"]

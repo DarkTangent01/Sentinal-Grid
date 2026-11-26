@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 
-from .api import access, admin, identities, netops, notifications, playbooks, reports, traffic, wireless_integrations, alerts, analytics, auth, configs, context, firewalls, flows, hardening, hunt, iac, identity, isp, ops, policies, soc, switches, tacacs, wan, wireless, wireless_analytics, wireless_rf, nms, snmp, yaml_rules, netcompliance, ingest, siem
+from .api import access, admin, identities, netops, notifications, playbooks, reports, traffic, wireless_integrations, alerts, analytics, auth, configs, context, firewalls, flows, hardening, hunt, iac, devices, identity, isp, ops, policies, soc, switches, tacacs, wan, wireless, wireless_analytics, wireless_rf, nms, snmp, yaml_rules, netcompliance, ingest, siem
 from .config import get_settings
 from .db.ch import get_ch
 from .db.pg import get_engine
@@ -35,7 +35,7 @@ PRODUCT_ROUTERS = {
              siem.router),
     "nms": (firewalls.router, hardening.router, policies.router, isp.router, iac.router, switches.router, tacacs.router, wan.router,
             wireless.router, wireless_integrations.router, wireless_analytics.router, wireless_rf.router, configs.router, flows.router,
-            nms.router, snmp.router, netcompliance.router, netops.router, traffic.router),
+            nms.router, snmp.router, netcompliance.router, netops.router, traffic.router, devices.router),
 }
 TITLES = {None: "Sentinel Grid", "grid": "Sentinel Grid", "nms": "Sentinel NMS"}
 

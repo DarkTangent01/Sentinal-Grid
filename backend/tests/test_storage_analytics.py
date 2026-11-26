@@ -242,7 +242,7 @@ async def test_rollup_backfill_migration():
         ch.insert("events", older, old_cols)
         ch.command("CREATE TABLE schema_migrations (version UInt32, name String, applied_at DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY version")
         ch.command("INSERT INTO schema_migrations (version, name) VALUES (1,'a'),(2,'b'),(3,'c')")
-        assert run(ch) == [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        assert run(ch) == [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
         assert ch.query("SELECT sum(events) AS n FROM events_1m")[0]["n"] == 11  # backfilled exactly once
         # v16: traffic before the seam hour copied once into the policy usage rollup (the seam hour is read from raw)
         raw = ch.query("SELECT count() AS n FROM events WHERE category = 'traffic' AND policy_id IS NOT NULL "

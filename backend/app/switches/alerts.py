@@ -92,8 +92,14 @@ DEFAULT_RULES = [
     {"key": "switch_port_up_unexpected", "name": "Unexpected port up", "severity": "low", "mitre": M("TA0001", "T1200"),
      "description": "A port documented as unused (description matching the pattern) came up.", "params": {"window_minutes": 30, "unused_regex": "(?i)unused|spare|disabled|reserved"}},
     {"key": "switch_if_utilization", "name": "Switch interface utilisation high", "severity": "medium", "mitre": {},
-     "description": "Inbound or outbound utilisation over the threshold for consecutive valid samples (samples with gaps, counter resets or "
-                    "uncertain speed are ignored).", "params": {"util_pct": 90, "min_samples": 3, "window_minutes": 15}},
+     "description": "Inbound or outbound utilisation over a threshold for consecutive valid samples (samples with gaps, counter resets or "
+                    "uncertain speed are ignored). Three levels: warning (low), high (medium), critical (high severity); thresholds resolve "
+                    "interface → device → monitoring template → these parameters. One alert per interface and direction: its severity follows "
+                    "the level, and it resolves when utilisation falls back below the warning level.",
+     "params": {"util_warn_pct": 70, "util_high_pct": 85, "util_crit_pct": 95, "min_samples": 3, "window_minutes": 15}},
+    {"key": "switch_if_capacity_mismatch", "name": "Interface speed below its usual capacity", "severity": "low", "mitre": {},
+     "description": "A link that is up negotiated a lower speed than the highest it has run at (e.g. 100 Mbit/s on a 1 Gbit/s port): "
+                    "a cabling, transceiver or auto-negotiation problem that caps throughput.", "params": {"min_ratio": 2}},
     {"key": "switch_if_errors", "name": "Switch interface errors (CRC / input / output)", "severity": "medium", "mitre": {},
      "description": "CRC / FCS, input or output errors on an interface over the threshold within the window.",
      "params": {"min_errors": 100, "window_minutes": 15}},
@@ -127,6 +133,7 @@ DEFAULT_RULES = [
 AUTO_RESOLVE = {"switch_vendor_condition", "switch_unreachable", "switch_snmp_auth", "switch_stale_metrics", "switch_cpu_high", "switch_memory_high", "switch_storage_high",
                 "switch_temperature_high",
                 "switch_psu_failure", "switch_fan_failure", "switch_poe_budget", "switch_port_down", "switch_if_utilization", "switch_lacp_member",
+                "switch_if_capacity_mismatch",
                 "switch_stack_member", "switch_routing_neighbor", "switch_topology_link_lost"}
 
 
@@ -452,7 +459,19 @@ async def _if_names(ids: set[int]) -> dict:
     return {(r.switch_id, r.ifindex): (r.name + (f" ({r.alias})" if r.alias else "")) for r in rows}
 
 
+LEVELS = (("critical", "util_crit_pct", "high"), ("high", "util_high_pct", "medium"), ("warning", "util_warn_pct", "low"))
+
+
+async def _if_rows(ids: set[int]) -> dict:
+    async with session_factory()() as s:
+        rows = (await s.execute(select(SwitchInterface.switch_id, SwitchInterface.ifindex, SwitchInterface.name, SwitchInterface.alias,
+                                       SwitchInterface.if_type, SwitchInterface.monitored, SwitchInterface.thresholds)
+                                .where(SwitchInterface.switch_id.in_(ids or {0})))).all()
+    return {(r.switch_id, r.ifindex): r for r in rows}
+
+
 async def rule_switch_if_utilization(ch, now, p):
+    from .templates import interface_excluded, interface_threshold
     sws, bs = await _context()
     sw_by = {s.id: s for s in sws if _fresh(s, now)}
     t0 = now - timedelta(minutes=int(p.get("window_minutes", 15)))
@@ -463,22 +482,59 @@ async def rule_switch_if_utilization(ch, now, p):
     series: dict = {}
     for r in rows:
         series.setdefault((int(r["switch_id"]), int(r["ifindex"])), []).append(r)
-    names = await _if_names(set(sw_by))
+    info = await _if_rows(set(sw_by))
     out = []
     n = int(p.get("min_samples", 3))
     for (sid, ifx), rs in series.items():
         sw = sw_by.get(sid)
-        if sw is None or len(rs) < n:
+        if sw is None or len(rs) < n:            # one sample (or a missing one) never raises an alert
             continue
-        thr = float(_thr(sw, p, "util_pct"))
+        i = info.get((sid, ifx))
+        if i is not None and (i.monitored is False or interface_excluded(sw, i.if_type, i.name)):
+            continue
+        name = (i.name + (f" ({i.alias})" if i.alias else "")) if i is not None else str(ifx)
+        legacy = (sw.thresholds or {}).get("util_pct")        # older per-device setting: treated as the "high" level
         last = rs[-n:]
         for d in ("rx", "tx"):
-            if all((x[f"{d}_util"] or 0) >= thr for x in last):
-                v = float(last[-1][f"{d}_util"])
-                out.append(_det(sw, bs, f"{sid}:{ifx}:{d}", "switch_if_utilization", f"{sw.name} {names.get((sid, ifx), ifx)}: "
-                                f"{'inbound' if d == 'rx' else 'outbound'} utilisation {v:.0f}% (≥ {thr:.0f}% for {n} samples, "
-                                f"{float(last[-1][f'{d}_bps']) / 1e6:.0f} Mbit/s)", first=t0, last=now, count=n, component=names.get((sid, ifx), str(ifx)),
-                                metric=f"switch_interface_{d}_utilization_percent", value=round(v, 1), threshold=thr, extra={"ifindex": ifx}))
+            for level, key, sev in LEVELS:
+                thr = interface_threshold(i.thresholds if i is not None else None, sw, p, key)
+                if key == "util_high_pct" and legacy is not None and not (i is not None and (i.thresholds or {}).get(key) is not None):
+                    thr = legacy
+                if thr is None:
+                    continue
+                thr = float(thr)
+                if all((x[f"{d}_util"] or 0) >= thr for x in last):
+                    v = float(last[-1][f"{d}_util"])
+                    out.append(_det(sw, bs, f"{sid}:{ifx}:{d}", "switch_if_utilization", f"{sw.name} {name}: "
+                                    f"{'inbound' if d == 'rx' else 'outbound'} utilisation {v:.0f}% — {level} (≥ {thr:.0f}% for {n} samples, "
+                                    f"{float(last[-1][f'{d}_bps'] or 0) / 1e6:.0f} Mbit/s)", first=t0, last=now, count=n, component=name,
+                                    metric=f"switch_interface_{d}_utilization_percent", value=round(v, 1), threshold=thr, severity=sev,
+                                    extra={"ifindex": ifx, "level": level, "direction": "inbound" if d == "rx" else "outbound"}))
+                    break                        # the highest level reached only
+    return out
+
+
+async def rule_switch_if_capacity_mismatch(ch, now, p):
+    """Operational speed below the highest speed this interface has run at (ifHighSpeed history in switch_if_samples
+    is not stored, so the highest speed is kept on the interface row's counters baseline: max_speed_bps)."""
+    sws, bs = await _context()
+    sw_by = {s.id: s for s in sws if _fresh(s, now)}
+    ratio = float(p.get("min_ratio", 2))
+    out = []
+    async with session_factory()() as s:
+        rows = (await s.execute(select(SwitchInterface).where(SwitchInterface.switch_id.in_(set(sw_by) or {0}), SwitchInterface.oper == "up",
+                                                              SwitchInterface.present.is_(True), SwitchInterface.kind == "physical"))).scalars().all()
+    for r in rows:
+        sw = sw_by.get(r.switch_id)
+        top = (r.counters or {}).get("max_speed_bps")
+        if sw is None or not r.speed_bps or not top or r.monitored is False:
+            continue
+        if top / r.speed_bps >= ratio:
+            name = r.name + (f" ({r.alias})" if r.alias else "")
+            out.append(_det(sw, bs, f"{sw.id}:{r.ifindex}", "switch_if_capacity_mismatch",
+                            f"{sw.name} {name}: running at {r.speed_bps / 1e6:.0f} Mbit/s, below the {top / 1e6:.0f} Mbit/s it has run at before",
+                            first=now, last=now, component=name, metric="switch_interface_speed_bps", value=r.speed_bps, threshold=top,
+                            extra={"ifindex": r.ifindex}))
     return out
 
 

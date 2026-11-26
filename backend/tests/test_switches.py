@@ -226,6 +226,15 @@ async def test_real_agent_v2c_v3_auth_priv_and_errors():
         ctx = C.Ctx(client=v2, vendor="generic", outcome=Outcome(), snmp_version="v2c")
         data, rep, _ = await P.run_groups(ctx, ["system", "interfaces", "cpu_memory", "environment", "stack"])
         assert ctx.vendor == "cisco" and data["cpu"]["pct"] == 12 and data["interfaces"][65]["type"] == 161 and data["interfaces"][65]["hc"]
+        # SNMPv1: GETNEXT walks (no GETBULK), noSuchName at the end of the view ends the walk
+        v1 = PysnmpClient("127.0.0.1", Credentials("v1", community="public-test"), port=agent.port, timeout=1, retries=0)
+        assert (await v1.get(["1.3.6.1.2.1.1.5.0"]))["1.3.6.1.2.1.1.5.0"] == b"WH1-ACC-SW01"
+        cols1 = await v1.walk_multi(["1.3.6.1.2.1.31.1.1.1.1", "1.3.6.1.2.1.31.1.1.1.6"])
+        assert cols1["1.3.6.1.2.1.31.1.1.1.1"] == cols["1.3.6.1.2.1.31.1.1.1.1"] and len(await v1.walk("1.3.6.1.2.1.2.2.1.2")) == 8
+        assert (await v1.walk_multi(["1.3.6.1.2.1.31.1.1.1.6"]))["1.3.6.1.2.1.31.1.1.1.6"] == []   # v1 cannot carry Counter64 (HC counters)
+        ctx1 = C.Ctx(client=v1, vendor="generic", outcome=Outcome(), snmp_version="v1")
+        d1, _, _ = await P.run_groups(ctx1, ["system", "interfaces"])
+        assert d1["interfaces"][65]["hc"] is False and d1["interfaces"][65]["c"].get("in_octets") is not None   # 32-bit fallback
         good = Credentials("v3", username="siem-ro", auth_protocol="sha", auth_key="auth-pass-123", priv_protocol="aes128", priv_key="priv-pass-456")
         assert good.security_level == "authPriv"
         v3 = PysnmpClient("127.0.0.1", good, port=agent.port, timeout=1, retries=0)

@@ -10,7 +10,8 @@ import { ADMIN, NAV, PRODUCT, Product, activeItem } from "../lib/products";
 
 const RANGES: [RangeKey, string][] = [["5m", "Last 5 min"], ["15m", "Last 15 min"], ["1h", "Last hour"], ["24h", "Last 24 h"], ["7d", "Last 7 days"], ["custom", "Custom…"]];
 /** Pages with their own scope / time controls: the global filter row is not shown (they ignore it). */
-const OWN_FILTERS = ["/nms/traffic"];
+const OWN_FILTERS = ["/nms/traffic", "/nms/interfaces"];
+const OWN_FILTER_RE = /^\/switches\/\d+\/interfaces\/\d+$/;   // interface pages have their own range picker
 
 const REFRESH = <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
   <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>;
@@ -46,7 +47,7 @@ export function Layout({ children, onLogout, product }: { children: ReactNode; o
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const lastIngest = (sys.data?.sources_24h || []).map((x: any) => String(x.last_ingest)).sort().pop() || null;
   const crumbs = useCrumbs(product);
-  const scopeBar = !OWN_FILTERS.some((p) => loc.pathname === p || loc.pathname.startsWith(p + "/"));
+  const scopeBar = !OWN_FILTERS.some((p) => loc.pathname === p || loc.pathname.startsWith(p + "/")) && !OWN_FILTER_RE.test(loc.pathname);
   useEffect(() => { document.title = crumbs ? `${crumbs.label} · ${PRODUCT[product].name}` : PRODUCT[product].name; }, [crumbs?.label, product]);
 
   return (

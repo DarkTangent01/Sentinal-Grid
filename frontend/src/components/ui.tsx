@@ -288,7 +288,7 @@ export function SortTh({ k, label, sort, setSort, className = "" }: { k: string;
   setSort: (s: { key: string; desc: boolean }) => void; className?: string }) {
   const on = sort.key === k;
   return <th className={className} aria-sort={on ? (sort.desc ? "descending" : "ascending") : "none"}>
-    <button type="button" className="inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-slate-200" onClick={() => setSort({ key: k, desc: on ? !sort.desc : true })}>
+    <button type="button" className="inline-flex items-center gap-0.5 hover:text-slate-200" onClick={() => setSort({ key: k, desc: on ? !sort.desc : true })}>
       {label}<span className="text-2xs w-2" aria-hidden>{on ? (sort.desc ? "▼" : "▲") : ""}</span></button></th>;
 }
 

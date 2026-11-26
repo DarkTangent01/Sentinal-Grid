@@ -1,19 +1,20 @@
 import { lazy, Suspense, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { useMe } from "../../lib/context";
 import { fmtBytes, fmtNum } from "../../lib/format";
 import { Card, Drawer, Empty, Kpi, Loading, Pager, rowProps, Sev, TableWrap, Tabs, Time, Trunc, useDebounced } from "../../components/ui";
 import { Bps, Flags, Fresh, KV, MetricStatus, Oper, RangeSelect, Section, SeriesChart, StateDot, Util, fmtBps, fmtPctOrDash, fmtUptime, fmtWatts, statusTone } from "./common";
-import { EventTable } from "./SwitchesPage";
+import { EventTable, TYPE_LABEL } from "./SwitchesPage";
 import { SwitchForm } from "./Admin";
 
 const DeviceAccessTab = lazy(() => import("../nms/Access").then((m) => ({ default: m.DeviceAccessTab })));
 
 const ALL_TABS: [string, string, string | null][] = [["overview", "Overview", null], ["interfaces", "Interfaces", "interfaces"], ["vlans", "VLANs", "vlans"],
   ["macs", "MAC table", "mac_table"], ["stp", "STP", "stp"], ["lacp", "LACP / port-channels", "lacp"], ["neighbors", "Neighbors", "neighbors"], ["poe", "PoE", "poe"], ["hardware", "Hardware", "hw"],
-  ["routing", "Routing", "routing"], ["events", "Events & alerts", null], ["health", "Monitoring health", null], ["access", "Access", null]];
+  ["routing", "Routing", "routing"], ["power", "UPS", "ups"], ["printer", "Printer", "printer"],
+  ["events", "Events & alerts", null], ["health", "SNMP & polling", null], ["access", "Access", null]];
 
 export function SwitchDetail() {
   const { id } = useParams();
@@ -29,13 +30,14 @@ export function SwitchDetail() {
   if (!d) return <Loading q={q} />;
   const sec = d.sections || {};
   const hw = sec.environment || sec.stack || sec.inventory || sec.cpu_memory;
-  const tabs = ALL_TABS.filter(([, , g]) => g === null || (g === "hw" ? hw : sec[g]));
+  const tabs = ALL_TABS.filter(([, , g]) => g === null || (g === "hw" ? hw : g === "ups" ? !!d.health_ups : g === "printer" ? !!d.health_printer : sec[g]));
   const go = (t: string, extra: Record<string, string> = {}) => setSp({ tab: t, ...extra });
   return <div className="space-y-4 min-w-0">
     <div className="flex flex-wrap items-center gap-3">
-      <Link to="/switches?tab=inventory" className="link text-sm">← Switches</Link>
+      <Link to="/switches?tab=inventory" className="link text-sm">← Devices</Link>
       <h1 className="text-lg font-bold">{d.name}</h1><StateDot s={d.state} monitoring={d.monitoring} />
-      <span className="text-sm text-muted">{d.vendor} {d.model || d.family} · <span className="font-mono">{d.address}</span>{d.site && ` · ${d.site}`}</span>
+      <span className="text-sm text-muted">{TYPE_LABEL[d.device_type] || "SNMP device"} · {d.manufacturer || d.vendor} {d.model || d.family} · <span className="font-mono">{d.address}</span>
+        {d.site && ` · ${d.site}`}{d.template && <span title="Monitoring template"> · {d.template}</span>}</span>
       <span className="text-xs text-muted">last poll <Time v={d.last_success_at} /> <Fresh f={d.freshness} /></span>
       {me.role === "admin" && <div className="ml-auto flex flex-wrap gap-2">
         <button className="btn" disabled={act.isPending} onClick={() => act.mutate("/poll")}>{act.isPending ? "Working…" : "Poll now"}</button>
@@ -60,6 +62,8 @@ export function SwitchDetail() {
     {tab === "poe" && <Poe d={d} sid={sid} />}
     {tab === "hardware" && <Hardware d={d} sid={sid} />}
     {tab === "routing" && <Routing d={d} sid={sid} />}
+    {tab === "power" && <UpsTab u={d.health_ups} />}
+    {tab === "printer" && <PrinterTab p={d.health_printer} />}
     {tab === "events" && <EventsTab d={d} sid={sid} />}
     {tab === "health" && <Health sid={sid} />}
     {tab === "access" && <Suspense fallback={<Loading q={{ isLoading: true, error: null }} />}><DeviceAccessTab sid={sid} /></Suspense>}
@@ -131,7 +135,6 @@ function Overview({ d, go }: { d: any; go: (t: string, e?: Record<string, string
 }
 
 function Interfaces({ sid }: { sid: number }) {
-  const [sp, setSp] = useSearchParams();
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("");
   const [oper, setOper] = useState("");
@@ -139,7 +142,8 @@ function Interfaces({ sid }: { sid: number }) {
   const dq = useDebounced(q, 300);  // one request when typing stops, not one per keystroke over up to 2000 rows
   const r = useQuery<any>({ queryKey: ["switch-if", sid, dq, kind, oper, errs], placeholderData: (p: any) => p, refetchInterval: 30_000,
     queryFn: ({ signal }) => api<any>(`/switches/${sid}/interfaces`, { signal, params: { q: dq || undefined, kind: kind || undefined, oper: oper || undefined, errors_only: errs || undefined, limit: 2000 } }) });
-  const open = (ifx: number) => { const n = new URLSearchParams(sp); n.set("if", String(ifx)); setSp(n); };
+  const nav = useNavigate();
+  const open = (ifx: number) => nav(`/switches/${sid}/interfaces/${ifx}`);
   return <Card title={`Interfaces${r.data ? ` (${r.data.total})` : ""}`} bodyClass="p-0" right={<>
     <input aria-label="Filter" className="input py-1 w-40" placeholder="Name / description" value={q} onChange={(e) => setQ(e.target.value)} />
     <select aria-label="Kind" className="input py-1" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">All kinds</option>{["physical", "lag", "svi", "virtual"].map((k) => <option key={k}>{k}</option>)}</select>
@@ -160,7 +164,7 @@ function Interfaces({ sid }: { sid: number }) {
           <td className="text-xs">{x.poe ? `${x.poe.status}${x.poe.power_w != null ? ` ${fmtWatts(x.poe.power_w)}` : ""}` : "—"}</td><td><Time v={x.last_change_at} /></td><td><Flags f={x.flags} /></td>
         </tr>)}</tbody></table></TableWrap>)}
     <p className="text-2xs text-muted p-2">Rates are deltas between the last two valid polls; errors / discards are increments in that interval. "—" means not reported or no valid sample (first poll,
-      counter reset, restart). Click an interface for history.</p>
+      counter reset, restart). Click an interface for its bandwidth history, statistics and alerts.</p>
   </Card>;
 }
 
@@ -264,11 +268,11 @@ function Stp({ d, sid }: { d: any; sid: number }) {
 }
 
 function Neighbors({ sid, site }: { sid: number; site: string }) {
-  const [sp, setSp] = useSearchParams();
   const q = useQuery({ queryKey: ["switch-nbr", sid], queryFn: () => api<any>(`/switches/${sid}/neighbors`), refetchInterval: 60_000 });
   const ev = useQuery({ queryKey: ["switch-ev-nbr", sid], queryFn: () => api<any>("/switches/events", { params: { switch_id: sid, range: "7d",
     kind: ["neighbor_added", "neighbor_removed", "neighbor_changed"], limit: 200 } }) });
-  const open = (ifx: number) => { const n = new URLSearchParams(sp); n.set("if", String(ifx)); setSp(n); };
+  const nav = useNavigate();
+  const open = (ifx: number) => nav(`/switches/${sid}/interfaces/${ifx}`);
   return <div className="space-y-4">
     <Card title={`LLDP / CDP neighbors${q.data ? ` (${q.data.items.filter((x: any) => x.present).length})` : ""}`} bodyClass="p-0"
       right={<Link className="btn" to={`/switches?tab=topology${site ? `&site=${encodeURIComponent(site)}` : ""}`}>Show in topology</Link>}>
@@ -486,4 +490,29 @@ function VendorHealth({ v }: { v: any }) {
       <tbody>{v.components.map((c: any, i: number) => <tr key={i}><td className="text-xs">{c.name}</td>
         <td className={tone(["running", "ready", "standby"].includes(c.state) ? true : c.state === "down" ? false : null)}>{c.state}</td></tr>)}</tbody></table></TableWrap>}
   </Card>;
+}
+
+function UpsTab({ u }: { u: any }) {
+  if (!u) return <Empty text="This device does not report UPS-MIB values." />;
+  const v = (x: any, suf = "") => x == null ? <span className="text-subtle">Not supported</span> : `${x}${suf}`;
+  return <div className="grid gap-3 lg:grid-cols-2 items-start">
+    <Card title="Battery and output"><KV rows={[["Battery status", v(u.battery_status)], ["Charge", v(u.charge_pct, "%")], ["Runtime remaining", v(u.runtime_minutes, " min")],
+      ["On battery", u.on_battery == null ? <span className="text-subtle">Not supported</span> : u.on_battery ? <span className="text-amber-300">yes ({u.seconds_on_battery ?? 0} s)</span> : "no"],
+      ["Output source", v(u.output_source)], ["Load", v(u.load_pct, "%")], ["Battery temperature", v(u.battery_celsius, " °C")], ["Active alarms", v(u.alarms)]]} /></Card>
+    <Card title="Identity and voltages"><KV rows={[["Manufacturer", u.manufacturer || "—"], ["Model", u.model || "—"],
+      ["Input voltage", u.input_voltage?.length ? u.input_voltage.map((x: any) => x == null ? "—" : `${x} V`).join(" · ") : "Not supported"],
+      ["Output voltage", u.output_voltage?.length ? u.output_voltage.map((x: any) => x == null ? "—" : `${x} V`).join(" · ") : "Not supported"]]} /></Card>
+  </div>;
+}
+
+function PrinterTab({ p }: { p: any }) {
+  if (!p) return <Empty text="This device does not report Printer-MIB values." />;
+  return <div className="grid gap-3 lg:grid-cols-2 items-start">
+    <Card title="Status"><KV rows={[["Status", p.status || <span className="text-subtle">Not supported</span>],
+      ["Conditions", p.errors?.length ? <span className="text-amber-300">{p.errors.join(", ")}</span> : "none reported"],
+      ["Page count", p.page_count != null ? fmtNum(p.page_count) : <span className="text-subtle">Not supported</span>]]} /></Card>
+    <Card title="Supplies" bodyClass="p-0">{!p.supplies?.length ? <div className="p-4"><Empty text="No supply levels reported." /></div> :
+      <TableWrap><table className="tbl"><thead><tr><th>Supply</th><th className="num">Level</th></tr></thead><tbody>{p.supplies.map((x: any) =>
+        <tr key={x.id}><td>{x.name}</td><td className="num">{x.pct != null ? <span className={x.pct < 10 ? "text-amber-300" : ""}>{x.pct}%</span> : <span className="text-subtle">{x.state || "unknown"}</span>}</td></tr>)}</tbody></table></TableWrap>}</Card>
+  </div>;
 }

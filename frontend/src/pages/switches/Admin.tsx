@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { Card, Empty, Modal, TableWrap, Time } from "../../components/ui";
 import { MetricStatus, useSwitchMeta } from "./common";
+import { AddDevice } from "../devices/AddDevice";
 
 const BLANK = { name: "", address: "", port: 161, credential_id: 0, site: "", building: "", floor: "", rack: "", role: "", notes: "", monitoring: "active",
   poll_interval_seconds: 60, timeout_ms: 3000, retries: 1, group_intervals: {} as Record<string, number>, thresholds: {} as Record<string, number> };
@@ -18,7 +19,7 @@ function invalidate(qc: ReturnType<typeof useQueryClient>) {
 
 export function AddSwitch() {
   const [open, setOpen] = useState(false);
-  return <>{<button className="btn btn-primary" onClick={() => setOpen(true)}>+ Add switch</button>}{open && <SwitchForm sw={null} onClose={() => setOpen(false)} />}</>;
+  return <>{<button className="btn btn-primary" onClick={() => setOpen(true)}>Add device</button>}{open && <AddDevice onClose={() => setOpen(false)} />}</>;
 }
 
 /** Create / edit a switch. "Test" probes the device (connectivity, credentials, vendor / model, supported metrics) without storing anything. */
@@ -150,7 +151,7 @@ function CredentialForm({ c, authProtocols, privProtocols, onClose }: { c: any; 
   return <Modal title={c.id ? `Edit ${c.name}` : "New SNMP credential profile"} onClose={onClose}>
     <div className="grid gap-2 sm:grid-cols-2">
       <label className="block min-w-0"><span className="label">Name</span><input className="input w-full" value={f.name} onChange={set("name")} /></label>
-      <label className="block min-w-0"><span className="label">SNMP version</span><select className="input w-full" value={f.version} onChange={set("version")}><option value="v3">SNMPv3 (recommended)</option><option value="v2c">SNMPv2c</option></select></label>
+      <label className="block min-w-0"><span className="label">SNMP version</span><select className="input w-full" value={f.version} onChange={set("version")}><option value="v3">SNMPv3 (recommended)</option><option value="v2c">SNMPv2c</option><option value="v1">SNMPv1 (legacy, 32-bit counters only)</option></select></label>
       {f.version === "v3" ? <>
         <label className="block min-w-0"><span className="label">User name</span><input className="input w-full" autoComplete="off" value={f.username} onChange={set("username")} /></label>
         <div />

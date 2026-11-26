@@ -33,7 +33,7 @@ class SnmpError(Exception):
 
 @dataclass(frozen=True)
 class Credentials:
-    version: str = "v3"            # v2c | v3
+    version: str = "v3"            # v1 | v2c | v3
     community: str = ""
     username: str = ""
     auth_protocol: str = "sha"
@@ -53,11 +53,11 @@ class Credentials:
         return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()
 
     def validate(self) -> None:
-        if self.version not in ("v2c", "v3"):
-            raise SnmpError("config", "SNMP version must be v2c or v3")
-        if self.version == "v2c":
+        if self.version not in ("v1", "v2c", "v3"):
+            raise SnmpError("config", "SNMP version must be v1, v2c or v3")
+        if self.version in ("v1", "v2c"):
             if not self.community or len(self.community) > 64:
-                raise SnmpError("config", "a community string (1-64 characters) is required for SNMPv2c")
+                raise SnmpError("config", f"a community string (1-64 characters) is required for SNMP{self.version}")
             return
         if not self.username or len(self.username) > 32:
             raise SnmpError("config", "an SNMPv3 user name (1-32 characters) is required")
@@ -146,9 +146,9 @@ class PysnmpClient:
     def _auth(self, context: str | None):
         from pysnmp.hlapi.v3arch import asyncio as h
         c = self.creds
-        if c.version == "v2c":
+        if c.version in ("v1", "v2c"):
             comm = c.community + (f"@{context}" if context else "")  # Cisco community string indexing (per-VLAN BRIDGE-MIB)
-            return h.CommunityData(comm, mpModel=1), h.ContextData()
+            return h.CommunityData(comm, mpModel=0 if c.version == "v1" else 1), h.ContextData()
         auth = {"none": h.usmNoAuthProtocol, "md5": h.usmHMACMD5AuthProtocol, "sha": h.usmHMACSHAAuthProtocol,
                 "sha224": h.usmHMAC128SHA224AuthProtocol, "sha256": h.usmHMAC192SHA256AuthProtocol,
                 "sha384": h.usmHMAC256SHA384AuthProtocol, "sha512": h.usmHMAC384SHA512AuthProtocol}[c.auth_protocol]
@@ -207,9 +207,20 @@ class PysnmpClient:
         self._raise(ind, status, index)
         return {".".join(str(x) for x in n): _convert(v) for n, v in vbs}
 
+    async def _bulk(self, auth, target, ctx, reps: int, oids: list[str]):
+        """GETBULK, or GETNEXT on SNMPv1 (which has no GETBULK): one varbind per requested column, and noSuchName at the
+        end of the MIB view is the end of the walk, not an error."""
+        from pysnmp.hlapi.v3arch import asyncio as h
+        objs = [h.ObjectType(h.ObjectIdentity(o)) for o in oids]
+        if self.creds.version == "v1":
+            ind, status, index, vbs = await h.next_cmd(self._engine(), auth, target, ctx, *objs, lookupMib=False)
+            if not ind and status and int(status) == 2:
+                return None, 0, 0, []
+            return ind, status, index, vbs
+        return await h.bulk_cmd(self._engine(), auth, target, ctx, 0, reps, *objs, lookupMib=False)
+
     async def walk(self, base: str, context: str | None = None, max_rows: int | None = None) -> list[tuple[str, object]]:
         """GETBULK walk of one subtree. Stops at the end of the subtree, at max_rows, or on a non-increasing OID."""
-        from pysnmp.hlapi.v3arch import asyncio as h
         limit = max_rows or self.max_rows
         prefix = base.rstrip(".") + "."
         rows: list[tuple[str, object]] = []
@@ -220,8 +231,7 @@ class PysnmpClient:
             last = tuple(int(x) for x in base.split("."))
             while len(rows) < limit:
                 self.requests += 1
-                ind, status, index, vbs = await h.bulk_cmd(self._engine(), auth, target, ctx, 0, self.max_repetitions,
-                                                           h.ObjectType(h.ObjectIdentity(cur)), lookupMib=False)
+                ind, status, index, vbs = await self._bulk(auth, target, ctx, self.max_repetitions, [cur])
                 self._raise(ind, status, index)
                 if not vbs:
                     break
@@ -247,8 +257,11 @@ class PysnmpClient:
 
     async def walk_multi(self, bases: list[str], context: str | None = None, max_rows: int | None = None) -> dict[str, list[tuple[str, object]]]:
         """Walk several table columns side by side: each GETBULK carries one varbind per unfinished column, so a
-        table of N rows × C columns costs about N / repetitions requests instead of C × N / repetitions."""
-        from pysnmp.hlapi.v3arch import asyncio as h
+        table of N rows × C columns costs about N / repetitions requests instead of C × N / repetitions.
+        SNMPv1 walks the columns one by one: a v1 agent fails the whole PDU when one column (e.g. a Counter64 column,
+        which v1 cannot carry) has nothing to return."""
+        if self.creds.version == "v1":
+            return {b: await self.walk(b, context=context, max_rows=max_rows) for b in bases}
         limit = max_rows or self.max_rows
         out: dict[str, list] = {b: [] for b in bases}
         cur = {b: b for b in bases}
@@ -260,8 +273,7 @@ class PysnmpClient:
             while active:
                 reps = max(1, min(self.max_repetitions, 60 // len(active)))
                 self.requests += 1
-                ind, status, index, vbs = await h.bulk_cmd(self._engine(), auth, target, ctx, 0, reps,
-                                                           *[h.ObjectType(h.ObjectIdentity(cur[b])) for b in active], lookupMib=False)
+                ind, status, index, vbs = await self._bulk(auth, target, ctx, reps, [cur[b] for b in active])
                 self._raise(ind, status, index)
                 if not vbs:
                     break

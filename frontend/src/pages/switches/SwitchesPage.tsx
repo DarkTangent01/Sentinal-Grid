@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, downloadUrl } from "../../lib/api";
@@ -7,11 +7,16 @@ import { fmtNum } from "../../lib/format";
 import { Card, Empty, Kpi, Loading, Pager, rowProps, Sev, TableWrap, Tabs, Time, Trunc, useDebounced } from "../../components/ui";
 import { Bps, Flags, Fresh, Oper, RangeSelect, StateDot, Util, fmtPctOrDash, fmtUptime, fmtWatts, statusTone } from "./common";
 import { AddSwitch, SwitchSettings } from "./Admin";
+const TemplatesPage = lazy(() => import("../devices/Templates").then((m) => ({ default: m.TemplatesPage })));
 import { Topology } from "./Topology";
 import { L3Topology } from "./L3Topology";
 
-const TABS: [string, string][] = [["overview", "Overview"], ["inventory", "Inventory"], ["topology", "Topology"], ["interfaces", "Interfaces"], ["events", "Events"],
-  ["settings", "Settings"]];
+export const TYPE_LABEL: Record<string, string> = { switch: "Switch", l3switch: "Layer 3 switch", router: "Router", firewall: "Firewall", wlc: "Wireless controller",
+  ap: "Access point", server: "Server", linux: "Linux server", windows: "Windows server", printer: "Printer", ups: "UPS", load_balancer: "Load balancer",
+  storage: "Storage", hypervisor: "Hypervisor", appliance: "Appliance", iot: "IoT device", other: "Generic SNMP device" };
+
+const TABS: [string, string][] = [["overview", "Overview"], ["inventory", "Devices"], ["topology", "Topology"], ["interfaces", "Interfaces"], ["events", "Events"],
+  ["templates", "Templates"], ["settings", "Settings"]];
 
 /** Filters live in the URL so every tile opens a shareable, filtered detail view. */
 function useFilters() {
@@ -37,13 +42,14 @@ export function Switches() {
   return (
     <div className="space-y-4 min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs text-muted flex-1 min-w-[16rem]">Cisco and Ruckus ICX switches over read-only SNMP (SNMPv3 preferred). Every metric is discovered per device:
-          anything a switch does not report is shown as <b>unsupported</b> or <b>—</b>, never as zero. Nothing in this module writes to a switch.</p>
+        <p className="text-xs text-muted flex-1 min-w-[16rem]">Any SNMP device — switches, routers, firewalls, controllers, access points, servers, UPS, printers — over
+          read-only SNMP (v3 preferred; v2c / v1 when approved). Every metric is discovered per device: anything a device does not report is shown as
+          <b> not supported</b> or <b>—</b>, never as zero. Nothing here writes to a device.</p>
         {me.role === "admin" && <AddSwitch />}
       </div>
-      <Tabs value={f.tab} onChange={(t) => f.set({ tab: t, view: null })} tabs={TABS.filter(([k]) => k !== "settings" || me.role === "admin").map(([key, label]) => ({ key, label }))} />
-      {f.tab !== "settings" && <div className="flex flex-wrap items-center gap-2">
-        <input aria-label="Search switches" className="input py-1 w-56" placeholder="Name, IP, model, serial…" value={qText} onChange={(e) => setQText(e.target.value)} />
+      <Tabs value={f.tab} onChange={(t) => f.set({ tab: t, view: null })} tabs={TABS.filter(([k]) => (k !== "settings" && k !== "templates") || me.role === "admin").map(([key, label]) => ({ key, label }))} />
+      {f.tab !== "settings" && f.tab !== "templates" && <div className="flex flex-wrap items-center gap-2">
+        <input aria-label="Search devices" className="input py-1 w-56" placeholder="Name, IP, model, serial…" value={qText} onChange={(e) => setQText(e.target.value)} />
         <select aria-label="Site" className="input py-1" value={f.site} onChange={(e) => f.set({ site: e.target.value || null })}>
           <option value="">All sites</option>{opts.sites.map((s: string) => <option key={s}>{s}</option>)}</select>
         <select aria-label="Vendor" className="input py-1" value={f.vendor} onChange={(e) => f.set({ vendor: e.target.value || null })}>
@@ -59,6 +65,7 @@ export function Switches() {
       {f.tab === "interfaces" && <AllInterfaces f={f} />}
       {f.tab === "events" && <Events f={f} />}
       {f.tab === "settings" && me.role === "admin" && <SwitchSettings />}
+      {f.tab === "templates" && me.role === "admin" && <Suspense fallback={null}><TemplatesPage /></Suspense>}
     </div>
   );
 }
@@ -74,11 +81,11 @@ function Overview({ f }: { f: F }) {
   const t = d?.totals || {};
   const go = (patch: Record<string, string | null>) => f.set(patch);
   if (!d) return <Loading q={q} />;
-  if (!t.switches) return <Card><Empty text={<>No switches are monitored yet. An administrator adds an authorised management network and an SNMPv3 credential profile under
-    <b> Settings</b>, then onboards switches (one by one, CSV import, or discovery inside the authorised network).</>} /></Card>;
+  if (!t.switches) return <Card><Empty text={<>No devices are monitored yet. An administrator adds an authorised management network and an SNMP profile under
+    <b> Settings</b>, then adds devices (one by one, CSV import, or discovery inside the authorised network).</>} /></Card>;
   return <div className="space-y-4">
     <div className="kpi-grid">
-      <Kpi label="Switches" value={fmtNum(t.switches)} sub={`${t.monitored} monitored${t.paused ? `, ${t.paused} paused` : ""}`} onClick={() => go({ tab: "inventory", state: null })} />
+      <Kpi label="Devices" value={fmtNum(t.switches)} sub={`${t.monitored} monitored${t.paused ? `, ${t.paused} paused` : ""}`} onClick={() => go({ tab: "inventory", state: null })} />
       <Kpi label="Online" value={fmtNum(t.online)} tone="ok" onClick={() => go({ tab: "inventory", state: "up" })} />
       <Kpi label="Offline" value={fmtNum(t.offline + t.auth_failed)} sub={t.auth_failed ? `${t.auth_failed} credential failures` : undefined}
         tone={t.offline + t.auth_failed ? "bad" : "ok"} onClick={() => go({ tab: "inventory", state: "down" })} />
@@ -163,21 +170,22 @@ function Inventory({ f }: { f: F }) {
   const sort = f.sort || "name";
   const q = useQuery({ queryKey: ["switch-inv", f.site, f.vendor, f.model, f.q, f.state, sort, page], refetchInterval: 30_000, placeholderData: (p) => p,
     queryFn: () => api<any>("/switches", { params: { ...common(f), state: f.state === "down" ? ["down", "auth_failed"] : f.state || undefined, sort, limit: 100, offset: page * 100 } }) });
-  return <Card title={`Switches${q.data ? ` (${q.data.total})` : ""}`} bodyClass="p-0" right={<>
+  return <Card title={`Devices${q.data ? ` (${q.data.total})` : ""}`} bodyClass="p-0" right={<>
     <select aria-label="Sort" className="input py-1" value={sort} onChange={(e) => f.set({ sort: e.target.value })}>
       {[["name", "Name"], ["state", "State"], ["site", "Site"], ["cpu", "CPU"], ["mem", "Memory"], ["errors", "Interfaces with errors"], ["coverage", "Coverage (lowest)"],
         ["last_poll", "Last poll (oldest)"], ["alerts", "Open alerts"]].map(([k, l]) => <option key={k} value={k}>Sort: {l}</option>)}</select>
     <a className="btn" href={downloadUrl("/switches/export.csv")}>Export CSV</a></>}>
     <Loading q={q} />
-    {q.data && (!q.data.items.length ? <Empty text="No switches match the filters." /> :
-      <TableWrap><table className="tbl"><thead><tr><th>State</th><th>Name</th><th>Management IP</th><th>Vendor / model</th><th>Firmware</th><th>Serial</th><th>Site</th>
+    {q.data && (!q.data.items.length ? <Empty text="No devices match the filters." /> :
+      <TableWrap><table className="tbl"><thead><tr><th>State</th><th>Name</th><th>Management IP</th><th>Type</th><th>Vendor / model</th><th>Firmware</th><th>Serial</th><th>Site</th>
         <th>Location</th><th>SNMP</th><th className="num">Uptime</th><th>Last poll</th><th className="num">Ports up</th><th className="num">Errors</th><th className="num">CPU</th>
         <th className="num">Memory</th><th className="num">PoE</th><th className="num">Alerts</th><th className="num">Coverage</th></tr></thead>
         <tbody>{q.data.items.map((r: any) => <tr key={r.id} {...rowProps(() => nav(`/switches/${r.id}`))}>
           <td><StateDot s={r.state} monitoring={r.monitoring} /></td>
-          <td className="font-medium">{r.name}{r.hostname && r.hostname !== r.name && <div className="text-2xs text-muted">{r.hostname}</div>}</td>
+          <td className="font-medium whitespace-nowrap">{r.name}{r.hostname && r.hostname !== r.name && <div className="text-2xs text-muted">{r.hostname}</div>}</td>
           <td className="font-mono text-xs">{r.address}</td>
-          <td className="whitespace-nowrap">{r.vendor === "unknown" ? <span className="text-muted">not identified yet</span> : <>{r.vendor} <span className="text-muted">{r.model || r.family}</span></>}</td>
+          <td className="whitespace-nowrap text-muted">{TYPE_LABEL[r.device_type] || (r.vendor === "unknown" ? "—" : "Generic SNMP device")}</td>
+          <td className="whitespace-nowrap">{r.vendor === "unknown" ? <span className="text-muted">not identified yet</span> : <>{r.manufacturer || r.vendor} <span className="text-muted">{r.model || r.family}</span></>}</td>
           <td className="text-xs">{r.firmware || "—"}</td><td className="text-xs font-mono">{r.serial || "—"}{r.serials.length > 1 && <span className="text-muted"> +{r.serials.length - 1}</span>}</td>
           <td>{r.site || "—"}</td><td className="text-xs">{[r.building, r.floor, r.rack].filter(Boolean).join(" / ") || "—"}{r.role && <div className="text-2xs text-muted">{r.role}</div>}</td>
           <td className="text-xs">{r.snmp_version || "—"}</td><td className="num">{fmtUptime(r.uptime_s)}</td>
