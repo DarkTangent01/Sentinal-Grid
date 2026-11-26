@@ -8,7 +8,7 @@ COPY . .
 ARG PRODUCT=""
 RUN if [ -n "$PRODUCT" ]; then npm run "build:$PRODUCT" && rm -rf dist && mv "dist-$PRODUCT" dist; else npm run build; fi
 
-FROM nginx:1.30.6-alpine@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
+FROM nginx:1.31.0-alpine@sha256:2f07d83bf561b506400dc183b1b2003803e39efbd22451f848adaba14d28c7c7
 # files are root-owned and read-only to the server (uid 101): a compromised worker cannot rewrite the UI or its config
 # apk upgrade: security fixes published after the pinned base image
 RUN apk upgrade --no-cache && rm /etc/nginx/conf.d/default.conf
