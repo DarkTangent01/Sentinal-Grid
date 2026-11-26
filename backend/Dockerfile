@@ -1,5 +1,5 @@
 # pinned by digest (multi-arch index); Dependabot proposes updates (.github/dependabot.yml)
-FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337 AS base
+FROM python:3.15.1-slim-bookworm@sha256:575f8bc12ec26542e0678bc6b60e385218248019d433157ec327264a78c3a853 AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 # fontconfig (PDF reports) needs a writable cache; the root filesystem is read-only, /tmp is a tmpfs
 ENV XDG_CACHE_HOME=/tmp/.cache
