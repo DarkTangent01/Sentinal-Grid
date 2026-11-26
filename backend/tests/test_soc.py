@@ -253,3 +253,33 @@ async def test_brief_and_incident_lifecycle_api(api, db, clean_ch):  # noqa: F81
     assert any(t.startswith("Stage new → triage") for t in texts) and any(t.startswith("Escalated to tier2") for t in texts)
     assert tl["items"][0]["kind"] in ("detection", "created") and any(x["kind"] == "detection" for x in tl["items"])
     assert len((await api.get("/api/incidents?stage=closed")).json()["items"]) == 1
+
+
+async def test_soc_summaries_are_precomputed_served_and_kept_warm(db, clean_ch):
+    """The worker stores the default SOC summaries; the API serves the stored copy instantly; a period a viewer opened
+    is kept fresh too; a period the dashboard does not offer is computed but never stored."""
+    from sqlalchemy import select
+    from app.db.models import SummarySnapshot
+    from app.worker import LOOP_PRODUCT, loop_plan
+    db.add(_alert(ip="10.7.0.1", sev="high", conf="high", n=0))
+    await db.commit()
+    done = await socmetrics.refresh_summaries(clean_ch, db)
+    assert set(done) == {"executive:7", "operations:30"}
+    first = await socmetrics.summary(db, clean_ch, "operations", 30)
+    assert first["precomputed"] is True and first["alerts"]["total"] == 1 and first["computed_at"]
+    # a new alert is not visible until the next refresh: the stored copy is what is served
+    db.add(_alert(ip="10.7.0.2", sev="high", conf="high", n=0))
+    await db.commit()
+    assert (await socmetrics.summary(db, clean_ch, "operations", 30))["alerts"]["total"] == 1
+    await socmetrics.refresh_summaries(clean_ch, db)
+    assert (await socmetrics.summary(db, clean_ch, "operations", 30))["alerts"]["total"] == 2
+    # a period opened on demand is computed once, then the worker keeps it warm
+    live = await socmetrics.summary(db, clean_ch, "operations", 90)
+    assert live["precomputed"] is False and live["alerts"]["total"] == 2
+    assert "operations:90" in await socmetrics.refresh_summaries(clean_ch, db)
+    odd = await socmetrics.summary(db, clean_ch, "operations", 12)
+    assert odd["precomputed"] is False
+    keys = set((await db.execute(select(SummarySnapshot.key))).scalars())
+    assert keys == {"executive:7", "operations:30", "operations:90"}
+    assert LOOP_PRODUCT["soc_summaries"] == "grid" and "soc_summaries" in loop_plan({"core"}, 0, "grid")
+    assert "soc_summaries" not in loop_plan({"core"}, 0, "nms")
